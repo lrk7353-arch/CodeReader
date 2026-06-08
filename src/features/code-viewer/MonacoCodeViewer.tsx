@@ -100,15 +100,6 @@ function createModel(file: SampleFile) {
   return monaco.editor.createModel(file.code, file.language, uri);
 }
 
-function syncEditorLayout(editor: monaco.editor.IStandaloneCodeEditor, container: HTMLDivElement) {
-  const rect = container.getBoundingClientRect();
-  if (rect.width > 0 && rect.height > 0) {
-    editor.layout({ width: rect.width, height: rect.height });
-  } else {
-    editor.layout();
-  }
-}
-
 export function MonacoCodeViewer({
   file,
   selectedExplanation,
@@ -119,6 +110,14 @@ export function MonacoCodeViewer({
   const editorRef = useRef<monaco.editor.IStandaloneCodeEditor | null>(null);
   const decorationsRef = useRef<monaco.editor.IEditorDecorationsCollection | null>(null);
   const ignoreSelectionRef = useRef(false);
+  const selectionSyncIdRef = useRef(0);
+  const fileRef = useRef(file);
+  const onSelectExplanationRef = useRef(onSelectExplanation);
+  const onSelectionChangeRef = useRef(onSelectionChange);
+
+  fileRef.current = file;
+  onSelectExplanationRef.current = onSelectExplanation;
+  onSelectionChangeRef.current = onSelectionChange;
 
   const selectedRange = useMemo(() => targetRange(selectedExplanation), [selectedExplanation]);
 
@@ -127,17 +126,19 @@ export function MonacoCodeViewer({
       return;
     }
 
+    const initialFile = fileRef.current;
+
     const editor = monaco.editor.create(containerRef.current, {
       automaticLayout: true,
       contextmenu: false,
       fontFamily: '"Cascadia Code", "SFMono-Regular", Consolas, monospace',
       fontSize: 13,
       glyphMargin: true,
-      language: file.language,
+      language: initialFile.language,
       lineHeight: 23,
       lineNumbers: "on",
       minimap: { enabled: false },
-      model: createModel(file),
+      model: createModel(initialFile),
       readOnly: true,
       renderLineHighlight: "all",
       roundedSelection: false,
@@ -148,21 +149,16 @@ export function MonacoCodeViewer({
 
     editorRef.current = editor;
     decorationsRef.current = editor.createDecorationsCollection();
-    syncEditorLayout(editor, containerRef.current);
-    window.setTimeout(() => {
-      if (containerRef.current) {
-        syncEditorLayout(editor, containerRef.current);
-      }
-    }, 0);
 
     const selectionDisposable = editor.onDidChangeCursorSelection((event) => {
       if (ignoreSelectionRef.current) {
         return;
       }
+      const currentFile = fileRef.current;
       const selection = normalizeSelection(event.selection);
-      onSelectionChange(selection);
-      const explanation = explanationForRange(file, selection);
-      onSelectExplanation(explanation?.id ?? file.explanations[0]?.id ?? "");
+      onSelectionChangeRef.current(selection);
+      const explanation = explanationForRange(currentFile, selection);
+      onSelectExplanationRef.current(explanation?.id ?? currentFile.explanations[0]?.id ?? "");
     });
 
     return () => {
@@ -172,7 +168,7 @@ export function MonacoCodeViewer({
       editorRef.current = null;
       decorationsRef.current = null;
     };
-  }, [file, onSelectExplanation, onSelectionChange]);
+  }, []);
 
   useEffect(() => {
     const editor = editorRef.current;
@@ -181,14 +177,6 @@ export function MonacoCodeViewer({
     }
     const model = createModel(file);
     editor.setModel(model);
-    if (containerRef.current) {
-      syncEditorLayout(editor, containerRef.current);
-      window.setTimeout(() => {
-        if (containerRef.current) {
-          syncEditorLayout(editor, containerRef.current);
-        }
-      }, 0);
-    }
   }, [file]);
 
   useEffect(() => {
@@ -210,6 +198,9 @@ export function MonacoCodeViewer({
             linesDecorationsClassName: isSelected
               ? "codereader-gutter-selected"
               : "codereader-gutter-explained",
+            glyphMarginClassName: isSelected
+              ? "codereader-glyph-selected"
+              : "codereader-glyph-explained",
             overviewRuler: {
               color: isSelected ? "#1f7a65" : "#94b7aa",
               position: monaco.editor.OverviewRulerLane.Left
@@ -229,6 +220,8 @@ export function MonacoCodeViewer({
     }
 
     ignoreSelectionRef.current = true;
+    const selectionSyncId = selectionSyncIdRef.current + 1;
+    selectionSyncIdRef.current = selectionSyncId;
     if (selectedRange) {
       editor.setSelection(
         new monaco.Selection(
@@ -243,9 +236,13 @@ export function MonacoCodeViewer({
       editor.setPosition({ lineNumber: 1, column: 1 });
       editor.revealLineNearTop(1);
     }
-    window.setTimeout(() => {
-      ignoreSelectionRef.current = false;
+    const timeoutId = window.setTimeout(() => {
+      if (selectionSyncIdRef.current === selectionSyncId) {
+        ignoreSelectionRef.current = false;
+      }
     }, 0);
+
+    return () => window.clearTimeout(timeoutId);
   }, [selectedRange]);
 
   const selectionLabel = selectedRange

@@ -181,6 +181,7 @@ button {
 }
 
 .monaco-shell {
+  min-width: 0;
   min-height: 0;
   background: #fbfaf6;
 }
@@ -206,54 +207,29 @@ button {
   border-left: 3px solid #1f7a65;
 }
 
-.code-lines {
-  display: grid;
-  margin: 0;
-  padding: 8px 0 18px;
-  font-family: "Cascadia Code", "SFMono-Regular", Consolas, monospace;
-  font-size: 13px;
-  line-height: 1.55;
+.monaco-editor .codereader-glyph-explained,
+.monaco-editor .codereader-glyph-selected {
+  display: flex !important;
+  align-items: center;
+  justify-content: center;
 }
 
-.code-line {
-  display: grid;
-  grid-template-columns: 52px minmax(0, 1fr);
-  width: 100%;
-  min-height: 23px;
-  border: 0;
-  border-left: 3px solid transparent;
-  background: transparent;
-  color: #252b2f;
-  cursor: pointer;
-  padding: 0;
-  text-align: left;
+.monaco-editor .codereader-glyph-explained::before,
+.monaco-editor .codereader-glyph-selected::before {
+  content: "";
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
 }
 
-.code-line:hover {
-  background: #eef3ef;
+.monaco-editor .codereader-glyph-explained::before {
+  background: #8aa99d;
+  box-shadow: 0 0 0 2px rgba(148, 183, 170, 0.26);
 }
 
-.code-line.explained {
-  border-left-color: #94b7aa;
-}
-
-.code-line.selected {
-  border-left-color: #1f7a65;
-  background: #dce8e0;
-}
-
-.line-number {
-  padding-right: 10px;
-  color: #8b918f;
-  text-align: right;
-  user-select: none;
-}
-
-.code-line code {
-  overflow: hidden;
-  padding-right: 16px;
-  white-space: pre;
-  text-overflow: clip;
+.monaco-editor .codereader-glyph-selected::before {
+  background: #1f7a65;
+  box-shadow: 0 0 0 2px rgba(31, 122, 101, 0.25);
 }
 
 .explanation-panel {
