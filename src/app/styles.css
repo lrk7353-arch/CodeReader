@@ -78,6 +78,46 @@ button {
   gap: 14px;
 }
 
+.topbar-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+  margin-right: 14px;
+}
+
+.topbar-actions button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 31px;
+  border: 1px solid #c9c5bb;
+  border-radius: 6px;
+  background: #fffef9;
+  color: #30383c;
+  cursor: pointer;
+  font-size: 12px;
+  padding: 0 10px;
+}
+
+.topbar-actions button:hover:not(:disabled) {
+  border-color: #2f7b67;
+  background: #dce8e0;
+  color: #143c34;
+}
+
+.topbar-actions button:disabled {
+  cursor: wait;
+  opacity: 0.58;
+}
+
+.topbar-status span:first-child {
+  max-width: 340px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .workspace {
   display: grid;
   grid-template-columns: minmax(220px, 260px) minmax(420px, 1fr) minmax(320px, 380px);

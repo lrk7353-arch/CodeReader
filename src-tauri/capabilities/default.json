@@ -3,5 +3,5 @@
   "identifier": "default",
   "description": "Default desktop permissions for CodeReader.",
   "windows": ["main"],
-  "permissions": ["core:default"]
+  "permissions": ["core:default", "dialog:default"]
 }

@@ -1,4 +1,6 @@
 export type ExplanationTargetType =
+  | "import"
+  | "export"
   | "line"
   | "range"
   | "block"
@@ -34,11 +36,45 @@ export interface Explanation {
   updatedAt: string;
 }
 
-export interface SampleFile {
+export interface CodeNode {
+  id: string;
+  filePath: string;
+  nodeType: ExplanationTargetType;
+  name: string;
+  startLine: number;
+  endLine: number;
+  symbolId?: string;
+  codeHash: string;
+  anchorText: string;
+}
+
+export interface CodeFile {
   id: string;
   name: string;
   path: string;
+  relativePath?: string;
   language: "typescript" | "javascript";
   code: string;
+  fileHash?: string;
+  snapshotId?: string;
+  codeNodes?: CodeNode[];
   explanations: Explanation[];
+  parseError?: boolean;
+  source?: "sample" | "local";
+  isLoaded?: boolean;
+}
+
+export type SampleFile = CodeFile;
+
+export interface ProjectFileEntry {
+  id: string;
+  name: string;
+  path: string;
+  relativePath: string;
+  language: "typescript" | "javascript";
+}
+
+export interface ProjectScanResult {
+  rootPath: string;
+  files: ProjectFileEntry[];
 }

@@ -1,0 +1,62 @@
+import { invoke } from "@tauri-apps/api/core";
+import { open } from "@tauri-apps/plugin-dialog";
+import type { CodeFile, ProjectScanResult } from "../types/explanation";
+
+const codeFileFilters = [
+  {
+    name: "Code files",
+    extensions: ["js", "jsx", "ts", "tsx"]
+  }
+];
+
+export function isDesktopRuntime() {
+  return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
+}
+
+export async function pickAndLoadCodeFile(): Promise<CodeFile | null> {
+  ensureDesktopRuntime();
+  const selectedPath = await open({
+    directory: false,
+    multiple: false,
+    filters: codeFileFilters
+  });
+  if (typeof selectedPath !== "string") {
+    return null;
+  }
+  return loadCodeFile(selectedPath);
+}
+
+export async function pickAndScanProject(): Promise<ProjectScanResult | null> {
+  ensureDesktopRuntime();
+  const selectedPath = await open({
+    directory: true,
+    multiple: false
+  });
+  if (typeof selectedPath !== "string") {
+    return null;
+  }
+  return scanProject(selectedPath);
+}
+
+export async function loadCodeFile(path: string): Promise<CodeFile> {
+  ensureDesktopRuntime();
+  const file = await invoke<CodeFile>("load_code_file", { path });
+  return {
+    ...file,
+    explanations: file.explanations ?? [],
+    codeNodes: file.codeNodes ?? [],
+    isLoaded: true,
+    source: "local"
+  };
+}
+
+async function scanProject(path: string): Promise<ProjectScanResult> {
+  ensureDesktopRuntime();
+  return invoke<ProjectScanResult>("scan_project", { path });
+}
+
+function ensureDesktopRuntime() {
+  if (!isDesktopRuntime()) {
+    throw new Error("本地文件打开需要在 Tauri 桌面端运行。");
+  }
+}
