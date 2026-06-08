@@ -1,0 +1,15 @@
+[
+  {
+    "id": "exp-line-normalize-email",
+    "filePath": "examples/small/login-controller.ts",
+    "targetType": "line",
+    "startLine": 12,
+    "endLine": 12,
+    "anchorText": "const email = request.email.trim().toLowerCase();",
+    "codeMeaning": "这一行把用户输入的邮箱去掉首尾空格，并统一转换成小写。",
+    "localMeaning": "后续查询用户时会使用这个标准化后的邮箱，减少大小写或空格造成的匹配失败。",
+    "globalMeaning": "它让登录入口更稳定，是认证流程中输入清洗的一部分。",
+    "status": "valid",
+    "readingState": "unread"
+  }
+]
