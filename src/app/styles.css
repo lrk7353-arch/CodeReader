@@ -94,6 +94,9 @@ button {
 }
 
 .code-viewer {
+  display: grid;
+  grid-template-rows: 42px minmax(0, 1fr);
+  overflow: hidden;
   background: #fbfaf6;
 }
 
@@ -167,6 +170,40 @@ button {
   top: 0;
   background: #fbfaf6;
   z-index: 1;
+}
+
+.editor-meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  color: #596267;
+  font-size: 12px;
+}
+
+.monaco-shell {
+  min-height: 0;
+  background: #fbfaf6;
+}
+
+.monaco-shell .monaco-editor,
+.monaco-shell .monaco-editor * {
+  box-sizing: content-box;
+}
+
+.monaco-editor .codereader-line-explained {
+  background: rgba(148, 183, 170, 0.14);
+}
+
+.monaco-editor .codereader-line-selected {
+  background: rgba(47, 123, 103, 0.2);
+}
+
+.monaco-editor .codereader-gutter-explained {
+  border-left: 3px solid #94b7aa;
+}
+
+.monaco-editor .codereader-gutter-selected {
+  border-left: 3px solid #1f7a65;
 }
 
 .code-lines {

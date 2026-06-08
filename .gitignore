@@ -37,6 +37,7 @@ desktop.ini
 
 # local cache and temp files
 .cache/
+.vite/
 .temp/
 tmp/
 temp/

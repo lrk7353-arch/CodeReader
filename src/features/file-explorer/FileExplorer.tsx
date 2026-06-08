@@ -29,10 +29,7 @@ export function FileExplorer({
             <button
               className={file.id === selectedFileId ? "file-row active" : "file-row"}
               type="button"
-              onClick={() => {
-                onSelectFile(file.id);
-                onSelectExplanation(file.explanations[0]?.id ?? "");
-              }}
+              onClick={() => onSelectFile(file.id)}
             >
               <FileCode2 size={16} aria-hidden="true" />
               <span>{file.name}</span>

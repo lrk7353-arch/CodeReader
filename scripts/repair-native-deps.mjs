@@ -30,6 +30,28 @@ function shellQuote(value) {
   return `'${value.replaceAll("'", "'\\''")}'`;
 }
 
+function npmRunner() {
+  if (process.env.npm_execpath && existsSync(process.env.npm_execpath)) {
+    return {
+      command: process.execPath,
+      args: [process.env.npm_execpath]
+    };
+  }
+
+  const npmCli = resolve(dirname(process.execPath), "node_modules/npm/bin/npm-cli.js");
+  if (existsSync(npmCli)) {
+    return {
+      command: process.execPath,
+      args: [npmCli]
+    };
+  }
+
+  return {
+    command: process.platform === "win32" ? "npm.cmd" : "npm",
+    args: []
+  };
+}
+
 function run(command, args, options = {}) {
   const result = spawnSync(command, args, {
     cwd: root,
@@ -38,6 +60,7 @@ function run(command, args, options = {}) {
     ...options
   });
   if (result.status !== 0) {
+    console.error(`\n${command} ${args.join(" ")} failed.`);
     process.exit(result.status ?? 1);
   }
 }
@@ -56,11 +79,12 @@ const nativePackages = [
 const missing = nativePackages.filter(({ packageName }) => !existsSync(packageJsonPath(packageName)));
 
 if (missing.length > 0) {
-  const npm = process.platform === "win32" ? "npm.cmd" : "npm";
+  const npm = npmRunner();
   const specs = missing.map(({ packageName, versionFrom }) => {
     return `${packageName}@${packageVersion(versionFrom)}`;
   });
-  run(npm, ["install", "--force", "--no-save", ...specs]);
+  console.log(`Installing native packages: ${specs.join(", ")}`);
+  run(npm.command, [...npm.args, "install", "--prefix", root, "--force", "--no-save", ...specs]);
 }
 
 const wslRoot = process.platform === "win32" ? toWslPath(root) : null;

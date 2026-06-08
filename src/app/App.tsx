@@ -1,13 +1,17 @@
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { sampleFiles } from "../data/sampleProject";
 import type { Explanation, ReadingState } from "../types/explanation";
 import { FileExplorer } from "../features/file-explorer/FileExplorer";
-import { CodeViewerPlaceholder } from "../features/code-viewer/CodeViewerPlaceholder";
+import { MonacoCodeViewer, type CodeSelection } from "../features/code-viewer/MonacoCodeViewer";
 import { ExplanationPanel } from "../features/explanation-panel/ExplanationPanel";
 
 export function App() {
   const [selectedFileId, setSelectedFileId] = useState(sampleFiles[0]?.id ?? "");
   const [selectedExplanationId, setSelectedExplanationId] = useState("exp-file-login-controller");
+  const [selectedCodeSelection, setSelectedCodeSelection] = useState<CodeSelection>({
+    startLine: 1,
+    endLine: 1
+  });
   const [readingStates, setReadingStates] = useState<Record<string, ReadingState>>({});
 
   const selectedFile = useMemo(
@@ -25,6 +29,33 @@ export function App() {
       readingState: readingStates[explanation.id] ?? explanation.readingState
     };
   }, [readingStates, selectedExplanationId, selectedFile]);
+
+  const selectExplanation = useCallback(
+    (explanationId: string) => {
+      const explanation = selectedFile.explanations.find((item) => item.id === explanationId);
+      setSelectedExplanationId(explanationId);
+      if (explanation?.startLine) {
+        setSelectedCodeSelection({
+          startLine: explanation.startLine,
+          endLine: explanation.endLine ?? explanation.startLine
+        });
+      } else {
+        setSelectedCodeSelection({ startLine: 1, endLine: 1 });
+      }
+    },
+    [selectedFile]
+  );
+
+  const selectFile = useCallback((fileId: string) => {
+    const file = sampleFiles.find((item) => item.id === fileId) ?? sampleFiles[0];
+    setSelectedFileId(file.id);
+    setSelectedExplanationId(file.explanations[0]?.id ?? "");
+    setSelectedCodeSelection({ startLine: 1, endLine: 1 });
+  }, []);
+
+  const updateSelection = useCallback((selection: CodeSelection) => {
+    setSelectedCodeSelection(selection);
+  }, []);
 
   function updateReadingState(state: ReadingState) {
     if (!selectedExplanation) {
@@ -50,7 +81,7 @@ export function App() {
         </div>
         <div className="topbar-status">
           <span>Local</span>
-          <span>Sprint 0</span>
+          <span>Sprint 1</span>
         </div>
       </header>
 
@@ -59,19 +90,25 @@ export function App() {
           files={sampleFiles}
           selectedFileId={selectedFile.id}
           selectedExplanationId={selectedExplanation?.id}
-          onSelectFile={setSelectedFileId}
-          onSelectExplanation={setSelectedExplanationId}
+          onSelectFile={selectFile}
+          onSelectExplanation={selectExplanation}
         />
-        <CodeViewerPlaceholder
+        <MonacoCodeViewer
           file={selectedFile}
           selectedExplanation={selectedExplanation}
-          onSelectExplanation={setSelectedExplanationId}
+          onSelectExplanation={selectExplanation}
+          onSelectionChange={updateSelection}
         />
         <ExplanationPanel explanation={selectedExplanation} onReadingStateChange={updateReadingState} />
       </section>
 
       <footer className="statusbar">
         <span>{selectedFile.path}</span>
+        <span>
+          {selectedCodeSelection.startLine === selectedCodeSelection.endLine
+            ? `line:${selectedCodeSelection.startLine}`
+            : `lines:${selectedCodeSelection.startLine}-${selectedCodeSelection.endLine}`}
+        </span>
         <span>{selectedExplanation?.status ?? "valid"}</span>
         <span>{selectedExplanation?.readingState ?? "unread"}</span>
       </footer>
