@@ -11,7 +11,11 @@ import type {
 import { FileExplorer } from "../features/file-explorer/FileExplorer";
 import { MonacoCodeViewer, type CodeSelection } from "../features/code-viewer/MonacoCodeViewer";
 import { ExplanationPanel } from "../features/explanation-panel/ExplanationPanel";
-import { buildSelectableExplanations } from "../features/explanations/selectableExplanations";
+import {
+  buildRangeExplanation,
+  buildSelectableExplanations,
+  findExplanationForSelection
+} from "../features/explanations/selectableExplanations";
 import {
   isDesktopRuntime,
   hydrateCodeFilePersistence,
@@ -49,13 +53,27 @@ export function App() {
 
   const selectableExplanations = useMemo(() => buildSelectableExplanations(selectedFile), [selectedFile]);
 
+  const transientRangeExplanation = useMemo(() => {
+    if (selectedCodeSelection.startLine === selectedCodeSelection.endLine) {
+      return undefined;
+    }
+    if (findExplanationForSelection(selectableExplanations, selectedCodeSelection)) {
+      return undefined;
+    }
+    return buildRangeExplanation(selectedFile, selectedCodeSelection);
+  }, [selectableExplanations, selectedCodeSelection, selectedFile]);
+
   const hydratedExplanations = useMemo(
-    () =>
-      selectableExplanations.map((explanation) => ({
+    () => {
+      const explanations = transientRangeExplanation
+        ? [...selectableExplanations, transientRangeExplanation]
+        : selectableExplanations;
+      return explanations.map((explanation) => ({
         ...explanation,
         readingState: readingStates[explanation.id] ?? explanation.readingState
-      })),
-    [readingStates, selectableExplanations]
+      }));
+    },
+    [readingStates, selectableExplanations, transientRangeExplanation]
   );
 
   const selectedExplanation = useMemo<Explanation | undefined>(() => {
@@ -124,11 +142,14 @@ export function App() {
     (explanationId: string) => {
       const explanation = hydratedExplanations.find((item) => item.id === explanationId);
       setSelectedExplanationId((current) => (current === explanationId ? current : explanationId));
+      const rangeSelection = parseRangeSelection(explanationId);
       const nextSelection = explanation?.startLine
         ? {
           startLine: explanation.startLine,
           endLine: explanation.endLine ?? explanation.startLine
         }
+        : rangeSelection
+          ? rangeSelection
         : { startLine: 1, endLine: 1 };
       setSelectedCodeSelection((current) => (sameSelection(current, nextSelection) ? current : nextSelection));
     },
@@ -414,6 +435,17 @@ async function loadFirstAvailableProjectFile(project: ProjectScanResult): Promis
 
 function sameSelection(left: CodeSelection, right: CodeSelection) {
   return left.startLine === right.startLine && left.endLine === right.endLine;
+}
+
+function parseRangeSelection(explanationId: string): CodeSelection | undefined {
+  const match = explanationId.match(/^range:.+:(\d+)-(\d+)$/);
+  if (!match) {
+    return undefined;
+  }
+  return {
+    startLine: Number(match[1]),
+    endLine: Number(match[2])
+  };
 }
 
 function baseName(path: string) {
