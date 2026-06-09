@@ -1,10 +1,11 @@
 #![cfg_attr(test, allow(dead_code))]
 
 use serde::Serialize;
-use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
 use tree_sitter::{Language, Node, Parser};
 use walkdir::{DirEntry, WalkDir};
+
+use crate::utils::sha256_hex;
 
 const PROJECT_SCAN_MAX_DEPTH: usize = 8;
 const IGNORED_DIRS: &[&str] = &[
@@ -466,11 +467,6 @@ fn truncate(value: &str, max_chars: usize) -> String {
     let mut truncated: String = value.chars().take(max_chars).collect();
     truncated.push_str("...");
     truncated
-}
-
-fn sha256_hex(value: &str) -> String {
-    let digest = Sha256::digest(value.as_bytes());
-    digest.iter().map(|byte| format!("{byte:02x}")).collect()
 }
 
 #[cfg(test)]

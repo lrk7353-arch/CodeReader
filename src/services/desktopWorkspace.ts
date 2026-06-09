@@ -83,8 +83,14 @@ export async function hydrateCodeFilePersistence(
   );
   return {
     ...file,
+    databasePath: persisted.databasePath,
     explanations: Array.isArray(persisted.explanations) ? persisted.explanations : seedExplanations
   };
+}
+
+export async function initializePersistence() {
+  ensureDesktopRuntime();
+  return invoke<{ databasePath: string; initialized: boolean }>("initialize_persistence");
 }
 
 export async function persistReadingState(

@@ -6,6 +6,7 @@ interface FileExplorerProps {
   selectedFileId: string;
   selectedExplanationId?: string;
   loadingFileId?: string | null;
+  workspaceName: string;
   onSelectFile: (fileId: string) => void;
   onSelectExplanation: (explanationId: string) => void;
 }
@@ -15,6 +16,7 @@ export function FileExplorer({
   selectedFileId,
   selectedExplanationId,
   loadingFileId,
+  workspaceName,
   onSelectFile,
   onSelectExplanation
 }: FileExplorerProps) {
@@ -22,7 +24,7 @@ export function FileExplorer({
     <aside className="file-explorer" aria-label="Files">
       <div className="panel-title">
         <FolderOpen size={16} aria-hidden="true" />
-        <span>examples</span>
+        <span title={workspaceName}>{workspaceName}</span>
       </div>
 
       <div className="file-list">

@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { FilePlus2, FolderOpen } from "lucide-react";
 import { sampleFiles } from "../data/sampleProject";
 import type {
@@ -15,12 +15,15 @@ import { buildSelectableExplanations } from "../features/explanations/selectable
 import {
   isDesktopRuntime,
   hydrateCodeFilePersistence,
+  initializePersistence,
   loadCodeFile,
   pickAndLoadCodeFile,
   pickAndScanProject,
   persistExplanationFeedback,
   persistReadingState
 } from "../services/desktopWorkspace";
+
+type PersistenceStatus = "preview" | "initializing" | "ready" | "error";
 
 export function App() {
   const [files, setFiles] = useState<CodeFile[]>(sampleFiles);
@@ -32,6 +35,10 @@ export function App() {
   });
   const [readingStates, setReadingStates] = useState<Record<string, ReadingState>>({});
   const [workspaceStatus, setWorkspaceStatus] = useState("示例工作区");
+  const [databasePath, setDatabasePath] = useState("");
+  const [persistenceStatus, setPersistenceStatus] = useState<PersistenceStatus>(
+    isDesktopRuntime() ? "initializing" : "preview"
+  );
   const [isWorkspaceBusy, setIsWorkspaceBusy] = useState(false);
   const [loadingFileId, setLoadingFileId] = useState<string | null>(null);
 
@@ -70,6 +77,49 @@ export function App() {
     [files, selectedFile.id, selectedFileForViewer]
   );
 
+  const workspaceName = useMemo(() => {
+    const localRoot = files.find((file) => file.projectRoot)?.projectRoot;
+    if (localRoot) {
+      return baseName(localRoot);
+    }
+    const localFile = files.find((file) => file.source === "local");
+    if (localFile) {
+      return baseName(parentPath(localFile.path)) || localFile.name;
+    }
+    return "examples";
+  }, [files]);
+
+  useEffect(() => {
+    if (!isDesktopRuntime()) {
+      setWorkspaceStatus((current) =>
+        current === "示例工作区" ? "浏览器预览：解释层仅保存在内存中" : current
+      );
+      return;
+    }
+
+    let cancelled = false;
+    void initializePersistence()
+      .then((status) => {
+        if (cancelled) {
+          return;
+        }
+        setDatabasePath(status.databasePath);
+        setPersistenceStatus(status.initialized ? "ready" : "error");
+        setWorkspaceStatus((current) => (current === "示例工作区" ? "本地库已就绪" : current));
+      })
+      .catch((error) => {
+        if (cancelled) {
+          return;
+        }
+        setPersistenceStatus("error");
+        setWorkspaceStatus(errorMessage(error));
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   const selectExplanation = useCallback(
     (explanationId: string) => {
       const explanation = hydratedExplanations.find((item) => item.id === explanationId);
@@ -97,10 +147,16 @@ export function App() {
     if (!isDesktopRuntime()) {
       return {
         ...file,
+        databasePath: "",
         explanations: seedExplanations
       };
     }
-    return hydrateCodeFilePersistence(file, seedExplanations);
+    const hydratedFile = await hydrateCodeFilePersistence(file, seedExplanations);
+    if (hydratedFile.databasePath) {
+      setDatabasePath(hydratedFile.databasePath);
+      setPersistenceStatus("ready");
+    }
+    return hydratedFile;
   }, []);
 
   const upsertFile = useCallback((file: CodeFile) => {
@@ -294,6 +350,7 @@ export function App() {
           selectedFileId={selectedFile.id}
           selectedExplanationId={selectedExplanation?.id}
           loadingFileId={loadingFileId}
+          workspaceName={workspaceName}
           onSelectFile={selectFile}
           onSelectExplanation={selectExplanation}
         />
@@ -319,6 +376,12 @@ export function App() {
         </span>
         <span>{selectedExplanation?.status ?? "valid"}</span>
         <span>{selectedExplanation?.readingState ?? "unread"}</span>
+        <span
+          className={`persistence-status ${persistenceStatus}`}
+          title={databasePath || persistenceTooltip(persistenceStatus)}
+        >
+          {persistenceLabel(persistenceStatus)}
+        </span>
       </footer>
     </main>
   );
@@ -351,4 +414,36 @@ async function loadFirstAvailableProjectFile(project: ProjectScanResult): Promis
 
 function sameSelection(left: CodeSelection, right: CodeSelection) {
   return left.startLine === right.startLine && left.endLine === right.endLine;
+}
+
+function baseName(path: string) {
+  const normalized = path.replace(/\\/g, "/").replace(/\/+$/, "");
+  return normalized.split("/").filter(Boolean).pop() ?? path;
+}
+
+function parentPath(path: string) {
+  const normalized = path.replace(/\\/g, "/");
+  const parts = normalized.split("/").filter(Boolean);
+  parts.pop();
+  return parts.join("/");
+}
+
+function persistenceLabel(status: PersistenceStatus) {
+  const labels: Record<PersistenceStatus, string> = {
+    preview: "浏览器预览",
+    initializing: "本地库初始化中",
+    ready: "本地库就绪",
+    error: "本地库异常"
+  };
+  return labels[status];
+}
+
+function persistenceTooltip(status: PersistenceStatus) {
+  const tooltips: Record<PersistenceStatus, string> = {
+    preview: "浏览器预览不创建 SQLite 数据库",
+    initializing: "正在创建或打开 CodeReader SQLite 数据库",
+    ready: "CodeReader SQLite 数据库已就绪",
+    error: "CodeReader SQLite 数据库初始化或写入失败"
+  };
+  return tooltips[status];
 }

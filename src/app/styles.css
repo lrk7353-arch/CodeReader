@@ -455,6 +455,26 @@ button {
   border-bottom: 0;
 }
 
+.persistence-status {
+  font-weight: 650;
+}
+
+.persistence-status.preview {
+  color: #7a642c;
+}
+
+.persistence-status.initializing {
+  color: #6a7280;
+}
+
+.persistence-status.ready {
+  color: #1f6d59;
+}
+
+.persistence-status.error {
+  color: #a23d3d;
+}
+
 @media (max-width: 860px) {
   .app-shell {
     grid-template-rows: 96px minmax(0, 1fr) 32px;

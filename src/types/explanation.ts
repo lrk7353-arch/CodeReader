@@ -71,6 +71,7 @@ export interface CodeFile {
   snapshotId?: string;
   codeNodes?: CodeNode[];
   explanations: Explanation[];
+  databasePath?: string;
   parseError?: boolean;
   source?: "sample" | "local";
   isLoaded?: boolean;

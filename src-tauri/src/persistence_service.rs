@@ -2,11 +2,12 @@
 
 use rusqlite::{params, Connection};
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 #[cfg(not(test))]
 use tauri::{AppHandle, Manager};
+
+use crate::utils::sha256_hex;
 
 const DATABASE_FILE_NAME: &str = "codereader.sqlite";
 const SCHEMA_VERSION: &str = "mvp-0.1";
@@ -77,6 +78,13 @@ pub struct HydratedCodeFilePayload {
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct PersistenceStatusPayload {
+    database_path: String,
+    initialized: bool,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ExplanationPayload {
     id: String,
     file_path: String,
@@ -142,6 +150,17 @@ pub fn hydrate_code_file_persistence(
 ) -> Result<HydratedCodeFilePayload, String> {
     let database_path = database_path(&app)?;
     hydrate_code_file_at_path(&database_path, request)
+}
+
+#[cfg(not(test))]
+#[tauri::command]
+pub fn initialize_persistence(app: AppHandle) -> Result<PersistenceStatusPayload, String> {
+    let database_path = database_path(&app)?;
+    open_database(&database_path)?;
+    Ok(PersistenceStatusPayload {
+        database_path: display_path(&database_path),
+        initialized: true,
+    })
 }
 
 #[cfg(not(test))]
@@ -783,11 +802,6 @@ fn now_timestamp() -> String {
         .map(|duration| duration.as_secs())
         .unwrap_or_default();
     format!("unix:{seconds}")
-}
-
-fn sha256_hex(value: &str) -> String {
-    let digest = Sha256::digest(value.as_bytes());
-    digest.iter().map(|byte| format!("{byte:02x}")).collect()
 }
 
 fn database_error(error: rusqlite::Error) -> String {
