@@ -34,6 +34,8 @@ pub struct CodeFilePayload {
     id: String,
     name: String,
     path: String,
+    project_id: String,
+    project_root: String,
     relative_path: Option<String>,
     language: String,
     code: String,
@@ -92,6 +94,31 @@ pub fn load_code_file(path: String) -> Result<CodeFilePayload, String> {
 }
 
 #[cfg_attr(not(test), tauri::command)]
+pub fn load_project_code_file(path: String, project_root: String) -> Result<CodeFilePayload, String> {
+    let project_root = std::fs::canonicalize(PathBuf::from(project_root))
+        .map_err(|error| format!("Failed to resolve project root: {error}"))?;
+    if !project_root.is_dir() {
+        return Err("The selected project root is not a readable folder.".to_string());
+    }
+
+    let path = std::fs::canonicalize(PathBuf::from(path))
+        .map_err(|error| format!("Failed to resolve file path: {error}"))?;
+    if !path.is_file() {
+        return Err("The selected path is not a readable file.".to_string());
+    }
+    if !path.starts_with(&project_root) {
+        return Err("The selected file is outside the active project root.".to_string());
+    }
+
+    let language = language_for_path(&path)
+        .ok_or_else(|| "CodeReader MVP currently supports JS, JSX, TS, and TSX files.".to_string())?;
+    let code = std::fs::read_to_string(&path)
+        .map_err(|error| format!("Failed to read file: {error}"))?;
+
+    Ok(code_file_payload(path, Some(&project_root), language, code))
+}
+
+#[cfg_attr(not(test), tauri::command)]
 pub fn scan_project(path: String) -> Result<ProjectScanPayload, String> {
     let root = std::fs::canonicalize(PathBuf::from(path))
         .map_err(|error| format!("Failed to resolve project path: {error}"))?;
@@ -139,11 +166,18 @@ fn code_file_payload(
 ) -> CodeFilePayload {
     let file_hash = sha256_hex(&code);
     let parse_result = parse_code_nodes(&path, language, &code, &file_hash);
+    let project_root_path = project_root
+        .map(Path::to_path_buf)
+        .or_else(|| path.parent().map(Path::to_path_buf))
+        .unwrap_or_else(|| path.clone());
+    let project_root_display = display_path(&project_root_path);
 
     CodeFilePayload {
         id: file_id(&path),
         name: file_name(&path),
         path: display_path(&path),
+        project_id: project_id(&project_root_path),
+        project_root: project_root_display,
         relative_path: project_root.map(|root| relative_path(&path, root)),
         language: language.monaco_language().to_string(),
         code,
@@ -394,6 +428,11 @@ fn is_ignored_entry(entry: &DirEntry) -> bool {
 fn file_id(path: &Path) -> String {
     let hash = sha256_hex(&display_path(path));
     format!("file:{}", &hash[..20])
+}
+
+fn project_id(root: &Path) -> String {
+    let hash = sha256_hex(&display_path(root));
+    format!("project:{}", &hash[..20])
 }
 
 fn file_name(path: &Path) -> String {

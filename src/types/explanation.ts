@@ -14,6 +14,16 @@ export type ExplanationStatus = "valid" | "stale" | "invalid" | "new_unexplained
 
 export type ReadingState = "unread" | "read" | "understood" | "questioned" | "suspicious" | "needs_reexplain";
 
+export type ExplanationFeedbackType =
+  | "helpful"
+  | "suspicious"
+  | "too_vague"
+  | "too_technical"
+  | "needs_plain_language"
+  | "needs_more_detail"
+  | "regenerate_requested"
+  | "user_note";
+
 export interface Explanation {
   id: string;
   filePath: string;
@@ -52,6 +62,8 @@ export interface CodeFile {
   id: string;
   name: string;
   path: string;
+  projectId?: string;
+  projectRoot?: string;
   relativePath?: string;
   language: "typescript" | "javascript";
   code: string;
@@ -70,6 +82,8 @@ export interface ProjectFileEntry {
   id: string;
   name: string;
   path: string;
+  projectId?: string;
+  projectRoot?: string;
   relativePath: string;
   language: "typescript" | "javascript";
 }

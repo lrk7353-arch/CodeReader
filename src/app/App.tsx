@@ -1,16 +1,25 @@
 import { useCallback, useMemo, useState } from "react";
 import { FilePlus2, FolderOpen } from "lucide-react";
 import { sampleFiles } from "../data/sampleProject";
-import type { CodeFile, Explanation, ProjectScanResult, ReadingState } from "../types/explanation";
+import type {
+  CodeFile,
+  Explanation,
+  ExplanationFeedbackType,
+  ProjectScanResult,
+  ReadingState
+} from "../types/explanation";
 import { FileExplorer } from "../features/file-explorer/FileExplorer";
 import { MonacoCodeViewer, type CodeSelection } from "../features/code-viewer/MonacoCodeViewer";
 import { ExplanationPanel } from "../features/explanation-panel/ExplanationPanel";
 import { buildSelectableExplanations } from "../features/explanations/selectableExplanations";
 import {
   isDesktopRuntime,
+  hydrateCodeFilePersistence,
   loadCodeFile,
   pickAndLoadCodeFile,
-  pickAndScanProject
+  pickAndScanProject,
+  persistExplanationFeedback,
+  persistReadingState
 } from "../services/desktopWorkspace";
 
 export function App() {
@@ -83,6 +92,17 @@ export function App() {
     setSelectedCodeSelection({ startLine: 1, endLine: 1 });
   }, []);
 
+  const hydrateLoadedFile = useCallback(async (file: CodeFile) => {
+    const seedExplanations = buildSelectableExplanations(file);
+    if (!isDesktopRuntime()) {
+      return {
+        ...file,
+        explanations: seedExplanations
+      };
+    }
+    return hydrateCodeFilePersistence(file, seedExplanations);
+  }, []);
+
   const upsertFile = useCallback((file: CodeFile) => {
     setFiles((current) => {
       const existingIndex = current.findIndex((item) => item.id === file.id || item.path === file.path);
@@ -94,16 +114,17 @@ export function App() {
   }, []);
 
   const loadAndSelectFile = useCallback(
-    async (path: string, relativePath?: string, placeholderId?: string) => {
+    async (path: string, relativePath?: string, placeholderId?: string, projectRoot?: string) => {
       setIsWorkspaceBusy(true);
       setLoadingFileId(placeholderId ?? null);
       setWorkspaceStatus(`正在加载 ${relativePath ?? path}`);
       try {
-        const loadedFile = await loadCodeFile(path);
-        const file = {
+        const loadedFile = await loadCodeFile(path, projectRoot);
+        const file = await hydrateLoadedFile({
           ...loadedFile,
+          projectRoot: projectRoot ?? loadedFile.projectRoot,
           relativePath: relativePath ?? loadedFile.relativePath
-        };
+        });
         upsertFile(file);
         setActiveLoadedFile(file);
         setWorkspaceStatus(`已加载 ${file.relativePath ?? file.path}`);
@@ -114,14 +135,14 @@ export function App() {
         setLoadingFileId(null);
       }
     },
-    [setActiveLoadedFile, upsertFile]
+    [hydrateLoadedFile, setActiveLoadedFile, upsertFile]
   );
 
   const selectFile = useCallback(
     (fileId: string) => {
       const file = files.find((item) => item.id === fileId) ?? files[0] ?? sampleFiles[0];
       if (file.source === "local" && !file.isLoaded) {
-        void loadAndSelectFile(file.path, file.relativePath, file.id);
+        void loadAndSelectFile(file.path, file.relativePath, file.id, file.projectRoot);
         return;
       }
       setActiveLoadedFile(file);
@@ -133,7 +154,7 @@ export function App() {
     setSelectedCodeSelection(selection);
   }, []);
 
-  function updateReadingState(state: ReadingState) {
+  async function updateReadingState(state: ReadingState) {
     if (!selectedExplanation) {
       return;
     }
@@ -141,6 +162,42 @@ export function App() {
       ...current,
       [selectedExplanation.id]: state
     }));
+
+    if (!isDesktopRuntime() || !selectedFile.projectId) {
+      setWorkspaceStatus("阅读状态已更新，浏览器预览不写入本地库。");
+      return;
+    }
+
+    try {
+      await persistReadingState(selectedFile.projectId, selectedExplanation.id, state);
+      setWorkspaceStatus(`阅读状态已保存：${selectedExplanation.targetName ?? selectedExplanation.targetType}`);
+    } catch (error) {
+      setWorkspaceStatus(errorMessage(error));
+    }
+  }
+
+  async function saveFeedback(feedbackType: ExplanationFeedbackType) {
+    if (!selectedExplanation) {
+      return;
+    }
+    if (!isDesktopRuntime() || !selectedFile.projectId) {
+      setWorkspaceStatus("解释反馈已记录在当前预览，桌面端会写入本地库。");
+      return;
+    }
+
+    try {
+      await persistExplanationFeedback(selectedFile.projectId, selectedExplanation.id, feedbackType);
+      setWorkspaceStatus(`解释反馈已保存：${feedbackType}`);
+      if (feedbackType === "regenerate_requested") {
+        await persistReadingState(selectedFile.projectId, selectedExplanation.id, "needs_reexplain");
+        setReadingStates((current) => ({
+          ...current,
+          [selectedExplanation.id]: "needs_reexplain"
+        }));
+      }
+    } catch (error) {
+      setWorkspaceStatus(errorMessage(error));
+    }
   }
 
   async function openFile() {
@@ -155,9 +212,10 @@ export function App() {
         setWorkspaceStatus("已取消打开文件");
         return;
       }
-      setFiles([file]);
-      setActiveLoadedFile(file);
-      setWorkspaceStatus(`已加载 ${file.path}`);
+      const hydratedFile = await hydrateLoadedFile(file);
+      setFiles([hydratedFile]);
+      setActiveLoadedFile(hydratedFile);
+      setWorkspaceStatus(`已加载 ${hydratedFile.path}`);
     } catch (error) {
       setWorkspaceStatus(errorMessage(error));
     } finally {
@@ -184,13 +242,14 @@ export function App() {
 
       const placeholders: CodeFile[] = project.files.map((file) => ({
         ...file,
+        projectRoot: project.rootPath,
         code: "",
         explanations: [],
         codeNodes: [],
         source: "local",
         isLoaded: false
       }));
-      const activeFirstFile = await loadFirstAvailableProjectFile(project);
+      const activeFirstFile = await hydrateLoadedFile(await loadFirstAvailableProjectFile(project));
       setFiles(placeholders.map((file) => (file.id === activeFirstFile.id ? activeFirstFile : file)));
       setActiveLoadedFile(activeFirstFile);
       setWorkspaceStatus(`${project.files.length} 个代码文件：${project.rootPath}`);
@@ -244,7 +303,11 @@ export function App() {
           onSelectExplanation={selectExplanation}
           onSelectionChange={updateSelection}
         />
-        <ExplanationPanel explanation={selectedExplanation} onReadingStateChange={updateReadingState} />
+        <ExplanationPanel
+          explanation={selectedExplanation}
+          onFeedback={saveFeedback}
+          onReadingStateChange={updateReadingState}
+        />
       </section>
 
       <footer className="statusbar">
@@ -272,9 +335,10 @@ async function loadFirstAvailableProjectFile(project: ProjectScanResult): Promis
   const failures: string[] = [];
   for (const file of project.files) {
     try {
-      const loadedFile = await loadCodeFile(file.path);
+      const loadedFile = await loadCodeFile(file.path, project.rootPath);
       return {
         ...loadedFile,
+        projectRoot: project.rootPath,
         relativePath: file.relativePath
       };
     } catch (error) {

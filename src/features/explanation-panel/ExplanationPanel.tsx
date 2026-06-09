@@ -1,13 +1,14 @@
 import { AlertTriangle, Check, CircleHelp, RefreshCw } from "lucide-react";
-import type { Explanation, ReadingState } from "../../types/explanation";
+import type { Explanation, ExplanationFeedbackType, ReadingState } from "../../types/explanation";
 import { ReadingStateControls } from "../reading-state/ReadingStateControls";
 
 interface ExplanationPanelProps {
   explanation?: Explanation;
+  onFeedback: (feedbackType: ExplanationFeedbackType) => void;
   onReadingStateChange: (state: ReadingState) => void;
 }
 
-export function ExplanationPanel({ explanation, onReadingStateChange }: ExplanationPanelProps) {
+export function ExplanationPanel({ explanation, onFeedback, onReadingStateChange }: ExplanationPanelProps) {
   if (!explanation) {
     return (
       <aside className="explanation-panel">
@@ -59,15 +60,15 @@ export function ExplanationPanel({ explanation, onReadingStateChange }: Explanat
       <ReadingStateControls currentState={explanation.readingState} onChange={onReadingStateChange} />
 
       <div className="action-row" aria-label="Explanation actions">
-        <button type="button" disabled title="MVP 后续接入解释质量反馈">
+        <button type="button" onClick={() => onFeedback("helpful")} title="这条解释有帮助">
           <Check size={16} aria-hidden="true" />
           <span>有帮助</span>
         </button>
-        <button type="button" disabled title="MVP 后续接入解释质量反馈">
+        <button type="button" onClick={() => onFeedback("suspicious")} title="这条解释不对劲">
           <CircleHelp size={16} aria-hidden="true" />
-          <span>有疑问</span>
+          <span>不对劲</span>
         </button>
-        <button type="button" disabled title="MVP 后续接入重新解释队列">
+        <button type="button" onClick={() => onFeedback("regenerate_requested")} title="请求重新解释">
           <RefreshCw size={16} aria-hidden="true" />
           <span>重新解释</span>
         </button>
