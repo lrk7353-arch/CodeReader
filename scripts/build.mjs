@@ -30,7 +30,7 @@ function run(label, command, args) {
   }
 }
 
-const wslRoot = process.platform === "win32" ? toWslPath(root) : null;
+const wslRoot = process.env.CODEREADER_WSL_ROOT ?? (process.platform === "win32" ? toWslPath(root) : null);
 if (wslRoot) {
   run("Native dependency repair", process.execPath, [
     resolve(root, "scripts/repair-native-deps.mjs")
