@@ -204,6 +204,22 @@ button {
   color: #143c34;
 }
 
+.row-meta {
+  margin-left: auto;
+  color: #6d746e;
+  font-size: 11px;
+}
+
+.spin-icon {
+  animation: codereader-spin 0.9s linear infinite;
+}
+
+@keyframes codereader-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 .editor-toolbar {
   justify-content: space-between;
   position: sticky;
@@ -401,6 +417,17 @@ button {
   border-color: #2f7b67;
   background: #dce8e0;
   color: #143c34;
+}
+
+.action-row button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.action-row button:disabled:hover {
+  border-color: #cfcac0;
+  background: #fffef9;
+  color: #414b50;
 }
 
 .statusbar {

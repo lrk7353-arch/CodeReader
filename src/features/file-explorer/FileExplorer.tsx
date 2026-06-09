@@ -1,10 +1,11 @@
-import { Braces, FileCode2, FolderOpen } from "lucide-react";
+import { Braces, FileCode2, FolderOpen, LoaderCircle } from "lucide-react";
 import type { SampleFile } from "../../types/explanation";
 
 interface FileExplorerProps {
   files: SampleFile[];
   selectedFileId: string;
   selectedExplanationId?: string;
+  loadingFileId?: string | null;
   onSelectFile: (fileId: string) => void;
   onSelectExplanation: (explanationId: string) => void;
 }
@@ -13,6 +14,7 @@ export function FileExplorer({
   files,
   selectedFileId,
   selectedExplanationId,
+  loadingFileId,
   onSelectFile,
   onSelectExplanation
 }: FileExplorerProps) {
@@ -30,9 +32,15 @@ export function FileExplorer({
               className={file.id === selectedFileId ? "file-row active" : "file-row"}
               type="button"
               onClick={() => onSelectFile(file.id)}
+              aria-busy={loadingFileId === file.id}
             >
-              <FileCode2 size={16} aria-hidden="true" />
+              {loadingFileId === file.id ? (
+                <LoaderCircle className="spin-icon" size={16} aria-hidden="true" />
+              ) : (
+                <FileCode2 size={16} aria-hidden="true" />
+              )}
               <span>{file.name}</span>
+              {loadingFileId === file.id ? <span className="row-meta">加载中</span> : null}
             </button>
 
             {file.id === selectedFileId ? (

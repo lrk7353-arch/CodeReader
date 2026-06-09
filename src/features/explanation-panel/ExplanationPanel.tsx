@@ -59,15 +59,15 @@ export function ExplanationPanel({ explanation, onReadingStateChange }: Explanat
       <ReadingStateControls currentState={explanation.readingState} onChange={onReadingStateChange} />
 
       <div className="action-row" aria-label="Explanation actions">
-        <button type="button" title="标记有帮助">
+        <button type="button" disabled title="MVP 后续接入解释质量反馈">
           <Check size={16} aria-hidden="true" />
           <span>有帮助</span>
         </button>
-        <button type="button" title="标记有疑问">
+        <button type="button" disabled title="MVP 后续接入解释质量反馈">
           <CircleHelp size={16} aria-hidden="true" />
           <span>有疑问</span>
         </button>
-        <button type="button" title="需重新解释">
+        <button type="button" disabled title="MVP 后续接入重新解释队列">
           <RefreshCw size={16} aria-hidden="true" />
           <span>重新解释</span>
         </button>

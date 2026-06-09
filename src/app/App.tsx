@@ -1,7 +1,7 @@
 import { useCallback, useMemo, useState } from "react";
 import { FilePlus2, FolderOpen } from "lucide-react";
 import { sampleFiles } from "../data/sampleProject";
-import type { CodeFile, Explanation, ReadingState } from "../types/explanation";
+import type { CodeFile, Explanation, ProjectScanResult, ReadingState } from "../types/explanation";
 import { FileExplorer } from "../features/file-explorer/FileExplorer";
 import { MonacoCodeViewer, type CodeSelection } from "../features/code-viewer/MonacoCodeViewer";
 import { ExplanationPanel } from "../features/explanation-panel/ExplanationPanel";
@@ -24,6 +24,7 @@ export function App() {
   const [readingStates, setReadingStates] = useState<Record<string, ReadingState>>({});
   const [workspaceStatus, setWorkspaceStatus] = useState("示例工作区");
   const [isWorkspaceBusy, setIsWorkspaceBusy] = useState(false);
+  const [loadingFileId, setLoadingFileId] = useState<string | null>(null);
 
   const selectedFile = useMemo(
     () => files.find((file) => file.id === selectedFileId) ?? files[0] ?? sampleFiles[0],
@@ -63,15 +64,14 @@ export function App() {
   const selectExplanation = useCallback(
     (explanationId: string) => {
       const explanation = hydratedExplanations.find((item) => item.id === explanationId);
-      setSelectedExplanationId(explanationId);
-      if (explanation?.startLine) {
-        setSelectedCodeSelection({
+      setSelectedExplanationId((current) => (current === explanationId ? current : explanationId));
+      const nextSelection = explanation?.startLine
+        ? {
           startLine: explanation.startLine,
           endLine: explanation.endLine ?? explanation.startLine
-        });
-      } else {
-        setSelectedCodeSelection({ startLine: 1, endLine: 1 });
-      }
+        }
+        : { startLine: 1, endLine: 1 };
+      setSelectedCodeSelection((current) => (sameSelection(current, nextSelection) ? current : nextSelection));
     },
     [hydratedExplanations]
   );
@@ -94,8 +94,10 @@ export function App() {
   }, []);
 
   const loadAndSelectFile = useCallback(
-    async (path: string, relativePath?: string) => {
+    async (path: string, relativePath?: string, placeholderId?: string) => {
       setIsWorkspaceBusy(true);
+      setLoadingFileId(placeholderId ?? null);
+      setWorkspaceStatus(`正在加载 ${relativePath ?? path}`);
       try {
         const loadedFile = await loadCodeFile(path);
         const file = {
@@ -109,6 +111,7 @@ export function App() {
         setWorkspaceStatus(errorMessage(error));
       } finally {
         setIsWorkspaceBusy(false);
+        setLoadingFileId(null);
       }
     },
     [setActiveLoadedFile, upsertFile]
@@ -118,7 +121,7 @@ export function App() {
     (fileId: string) => {
       const file = files.find((item) => item.id === fileId) ?? files[0] ?? sampleFiles[0];
       if (file.source === "local" && !file.isLoaded) {
-        void loadAndSelectFile(file.path, file.relativePath);
+        void loadAndSelectFile(file.path, file.relativePath, file.id);
         return;
       }
       setActiveLoadedFile(file);
@@ -187,11 +190,7 @@ export function App() {
         source: "local",
         isLoaded: false
       }));
-      const firstFile = await loadCodeFile(project.files[0].path);
-      const activeFirstFile = {
-        ...firstFile,
-        relativePath: project.files[0].relativePath
-      };
+      const activeFirstFile = await loadFirstAvailableProjectFile(project);
       setFiles(placeholders.map((file) => (file.id === activeFirstFile.id ? activeFirstFile : file)));
       setActiveLoadedFile(activeFirstFile);
       setWorkspaceStatus(`${project.files.length} 个代码文件：${project.rootPath}`);
@@ -235,6 +234,7 @@ export function App() {
           files={filesForExplorer}
           selectedFileId={selectedFile.id}
           selectedExplanationId={selectedExplanation?.id}
+          loadingFileId={loadingFileId}
           onSelectFile={selectFile}
           onSelectExplanation={selectExplanation}
         />
@@ -266,4 +266,25 @@ function errorMessage(error: unknown) {
     return error.message;
   }
   return String(error);
+}
+
+async function loadFirstAvailableProjectFile(project: ProjectScanResult): Promise<CodeFile> {
+  const failures: string[] = [];
+  for (const file of project.files) {
+    try {
+      const loadedFile = await loadCodeFile(file.path);
+      return {
+        ...loadedFile,
+        relativePath: file.relativePath
+      };
+    } catch (error) {
+      failures.push(`${file.relativePath}: ${errorMessage(error)}`);
+    }
+  }
+
+  throw new Error(`已扫描到 ${project.files.length} 个代码文件，但没有文件可读取。${failures[0] ?? ""}`);
+}
+
+function sameSelection(left: CodeSelection, right: CodeSelection) {
+  return left.startLine === right.startLine && left.endLine === right.endLine;
 }

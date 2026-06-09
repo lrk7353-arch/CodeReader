@@ -6,13 +6,26 @@ use std::path::{Path, PathBuf};
 use tree_sitter::{Language, Node, Parser};
 use walkdir::{DirEntry, WalkDir};
 
+const PROJECT_SCAN_MAX_DEPTH: usize = 8;
 const IGNORED_DIRS: &[&str] = &[
+    ".cache",
     ".git",
+    ".mypy_cache",
+    ".next",
+    ".nuxt",
+    ".pytest_cache",
+    ".ruff_cache",
+    ".svelte-kit",
     ".vite",
+    ".venv",
+    "__pycache__",
     "build",
+    "coverage",
     "dist",
+    "env",
     "node_modules",
     "target",
+    "venv",
 ];
 
 #[derive(Serialize)]
@@ -88,6 +101,7 @@ pub fn scan_project(path: String) -> Result<ProjectScanPayload, String> {
 
     let mut files = Vec::new();
     for entry in WalkDir::new(&root)
+        .max_depth(PROJECT_SCAN_MAX_DEPTH)
         .into_iter()
         .filter_entry(|entry| !is_ignored_entry(entry))
         .filter_map(Result::ok)
@@ -366,8 +380,15 @@ fn language_for_path(path: &Path) -> Option<CodeLanguage> {
 }
 
 fn is_ignored_entry(entry: &DirEntry) -> bool {
+    if !entry.file_type().is_dir() {
+        return false;
+    }
     let name = entry.file_name().to_string_lossy();
-    IGNORED_DIRS.iter().any(|ignored| name.eq_ignore_ascii_case(ignored))
+    let lower_name = name.to_ascii_lowercase();
+    IGNORED_DIRS.iter().any(|ignored| lower_name == *ignored)
+        || lower_name.starts_with("node_modules_")
+        || lower_name.starts_with("node_modules-")
+        || lower_name.starts_with("node_modules.")
 }
 
 fn file_id(path: &Path) -> String {
@@ -455,6 +476,57 @@ mod tests {
         assert!(scan
             .files
             .iter()
+            .any(|file| file.relative_path == "small/user-store.ts"), "scanned paths: {scanned_paths:?}");
+        assert!(scan
+            .files
+            .iter()
             .all(|file| file.language == "typescript" || file.language == "javascript"));
+    }
+
+    #[test]
+    fn scan_project_skips_ignored_and_overly_deep_dirs() {
+        let root = std::env::temp_dir().join(format!(
+            "codereader-scan-test-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("system time should be after epoch")
+                .as_nanos()
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+
+        std::fs::create_dir_all(root.join("src")).expect("create source dir");
+        std::fs::write(root.join("src/visible.ts"), "export const visible = true;\n")
+            .expect("write visible file");
+
+        std::fs::create_dir_all(root.join("node_modules_backup/pkg")).expect("create ignored dir");
+        std::fs::write(
+            root.join("node_modules_backup/pkg/hidden.ts"),
+            "export const hidden = true;\n",
+        )
+        .expect("write ignored file");
+
+        let deep_dir = root.join("l1/l2/l3/l4/l5/l6/l7/l8/l9");
+        std::fs::create_dir_all(&deep_dir).expect("create deep dir");
+        std::fs::write(deep_dir.join("too-deep.ts"), "export const tooDeep = true;\n")
+            .expect("write deep file");
+
+        let scan = scan_project(display_path(&root)).expect("temp project should scan");
+        let scanned_paths: Vec<&str> = scan
+            .files
+            .iter()
+            .map(|file| file.relative_path.as_str())
+            .collect();
+
+        assert!(scanned_paths.contains(&"src/visible.ts"));
+        assert!(
+            !scanned_paths.iter().any(|path| path.contains("node_modules")),
+            "scanned paths: {scanned_paths:?}"
+        );
+        assert!(
+            !scanned_paths.iter().any(|path| path.contains("too-deep.ts")),
+            "scanned paths: {scanned_paths:?}"
+        );
+
+        let _ = std::fs::remove_dir_all(&root);
     }
 }

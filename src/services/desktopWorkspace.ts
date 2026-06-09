@@ -41,10 +41,15 @@ export async function pickAndScanProject(): Promise<ProjectScanResult | null> {
 export async function loadCodeFile(path: string): Promise<CodeFile> {
   ensureDesktopRuntime();
   const file = await invoke<CodeFile>("load_code_file", { path });
+  const explanations = Array.isArray(file.explanations) ? file.explanations : [];
+  const codeNodes = Array.isArray(file.codeNodes) ? file.codeNodes : [];
+  if (import.meta.env.DEV && codeNodes.length === 0) {
+    console.warn(`[CodeReader] codeNodes empty for ${path} - parse may have failed or payload changed.`);
+  }
   return {
     ...file,
-    explanations: file.explanations ?? [],
-    codeNodes: file.codeNodes ?? [],
+    explanations,
+    codeNodes,
     isLoaded: true,
     source: "local"
   };
@@ -52,7 +57,11 @@ export async function loadCodeFile(path: string): Promise<CodeFile> {
 
 async function scanProject(path: string): Promise<ProjectScanResult> {
   ensureDesktopRuntime();
-  return invoke<ProjectScanResult>("scan_project", { path });
+  const project = await invoke<ProjectScanResult>("scan_project", { path });
+  return {
+    ...project,
+    files: Array.isArray(project.files) ? project.files : []
+  };
 }
 
 function ensureDesktopRuntime() {
