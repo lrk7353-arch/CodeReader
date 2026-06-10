@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { FilePlus2, FolderOpen, Settings2 } from "lucide-react";
 import { sampleFiles } from "../data/sampleProject";
 import type {
@@ -69,6 +69,7 @@ export function App() {
   const [generationConfirmOpen, setGenerationConfirmOpen] = useState(false);
   const [generationStatus, setGenerationStatus] = useState<GenerationStatus>("idle");
   const [generationError, setGenerationError] = useState("");
+  const refreshInFlightRef = useRef(false);
 
   const selectedFile = useMemo(
     () => files.find((file) => file.id === selectedFileId) ?? files[0] ?? sampleFiles[0],
@@ -280,6 +281,84 @@ export function App() {
       return current.map((item, index) => (index === existingIndex ? file : item));
     });
   }, []);
+
+  const refreshLoadedFile = useCallback(
+    async (file: CodeFile, announce: boolean) => {
+      if (
+        !isDesktopRuntime() ||
+        file.source !== "local" ||
+        !file.isLoaded ||
+        refreshInFlightRef.current
+      ) {
+        return;
+      }
+      refreshInFlightRef.current = true;
+      if (announce) {
+        setIsWorkspaceBusy(true);
+        setWorkspaceStatus(`正在检查 ${file.relativePath ?? file.path}`);
+      }
+      try {
+        const reloaded = await loadCodeFile(file.path, file.projectRoot);
+        if (reloaded.fileHash === file.fileHash) {
+          if (announce) {
+            setWorkspaceStatus(`文件未变化：${file.relativePath ?? file.path}`);
+          }
+          return;
+        }
+        const hydrated = await hydrateLoadedFile({
+          ...reloaded,
+          projectRoot: file.projectRoot ?? reloaded.projectRoot,
+          relativePath: file.relativePath ?? reloaded.relativePath
+        });
+        upsertFile(hydrated);
+        setSelectedFileId(hydrated.id);
+        const explanations = buildSelectableExplanations(hydrated);
+        const retained =
+          explanations.find((item) => item.id === selectedExplanationId) ??
+          explanations.find((item) =>
+            hydrated.changeSummary?.affectedExplanationIds.includes(item.id)
+          ) ??
+          explanations.find((item) => item.status !== "valid") ??
+          explanations[0];
+        setSelectedExplanationId(retained?.id ?? "");
+        if (retained?.targetType === "file") {
+          setSelectedCodeSelection({ startLine: 1, endLine: 1 });
+        } else if (retained?.startLine) {
+          setSelectedCodeSelection({
+            startLine: retained.startLine,
+            endLine: retained.endLine ?? retained.startLine
+          });
+        }
+        setWorkspaceStatus(
+          hydrated.changeSummary?.summary ?? `已重新读取 ${hydrated.relativePath ?? hydrated.path}`
+        );
+      } catch (error) {
+        setWorkspaceStatus(`变更检测失败：${errorMessage(error)}`);
+      } finally {
+        refreshInFlightRef.current = false;
+        if (announce) {
+          setIsWorkspaceBusy(false);
+        }
+      }
+    },
+    [hydrateLoadedFile, selectedExplanationId, upsertFile]
+  );
+
+  useEffect(() => {
+    if (
+      !isDesktopRuntime() ||
+      selectedFile.source !== "local" ||
+      !selectedFile.isLoaded ||
+      isWorkspaceBusy
+    ) {
+      return;
+    }
+    const checkOnFocus = () => {
+      void refreshLoadedFile(selectedFile, false);
+    };
+    window.addEventListener("focus", checkOnFocus);
+    return () => window.removeEventListener("focus", checkOnFocus);
+  }, [isWorkspaceBusy, refreshLoadedFile, selectedFile]);
 
   const loadAndSelectFile = useCallback(
     async (path: string, relativePath?: string, placeholderId?: string, projectRoot?: string) => {
@@ -584,8 +663,15 @@ export function App() {
           selectedExplanation={selectedExplanation}
           onSelectExplanation={selectExplanation}
           onSelectionChange={updateSelection}
+          onRefresh={
+            selectedFile.source === "local" && selectedFile.isLoaded
+              ? () => void refreshLoadedFile(selectedFile, true)
+              : undefined
+          }
+          refreshBusy={isWorkspaceBusy}
         />
         <ExplanationPanel
+          changeSummary={selectedFile.changeSummary}
           contextBundle={contextBundle}
           contextError={contextError}
           contextStatus={contextStatus}
@@ -594,6 +680,18 @@ export function App() {
           generationStatus={generationStatus}
           onFeedback={saveFeedback}
           onGenerate={requestExplanationGeneration}
+          onSelectAffected={() => {
+            const affected =
+              selectedFile.changeSummary?.affectedExplanationIds
+                .map((id) => hydratedExplanations.find((item) => item.id === id))
+                .find(Boolean) ??
+              hydratedExplanations.find((item) =>
+                ["stale", "invalid", "new_unexplained", "deleted"].includes(item.status)
+              );
+            if (affected) {
+              selectExplanation(affected.id);
+            }
+          }}
           onReadingStateChange={updateReadingState}
         />
       </section>
@@ -605,7 +703,7 @@ export function App() {
             ? `line:${selectedCodeSelection.startLine}`
             : `lines:${selectedCodeSelection.startLine}-${selectedCodeSelection.endLine}`}
         </span>
-        <span>{selectedExplanation?.status ?? "valid"}</span>
+        <span>{explanationStatusLabel(selectedExplanation?.status ?? "valid")}</span>
         <span>{selectedExplanation?.readingState ?? "unread"}</span>
         <span
           className={`persistence-status ${persistenceStatus}`}
@@ -729,4 +827,16 @@ function upsertExplanation(explanations: Explanation[], next: Explanation) {
     return [...explanations, next];
   }
   return explanations.map((explanation, index) => (index === existingIndex ? next : explanation));
+}
+
+function explanationStatusLabel(status: Explanation["status"]) {
+  const labels: Record<Explanation["status"], string> = {
+    valid: "有效",
+    stale: "可能过期",
+    invalid: "已过期",
+    new_unexplained: "新增未解释",
+    deleted: "已删除",
+    transient: "临时选择"
+  };
+  return labels[status];
 }

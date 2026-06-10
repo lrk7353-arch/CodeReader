@@ -77,10 +77,26 @@ export interface CodeFile {
   snapshotId?: string;
   codeNodes?: CodeNode[];
   explanations: Explanation[];
+  changeSummary?: ChangeSummary;
   databasePath?: string;
   parseError?: boolean;
   source?: "sample" | "local";
   isLoaded?: boolean;
+}
+
+export interface ChangeSummary {
+  id: string;
+  beforeHash: string;
+  afterHash: string;
+  addedLines: number;
+  modifiedLines: number;
+  deletedLines: number;
+  addedNodes: number;
+  modifiedNodes: number;
+  deletedNodes: number;
+  affectedExplanationIds: string[];
+  summary: string;
+  createdAt: string;
 }
 
 export type SampleFile = CodeFile;

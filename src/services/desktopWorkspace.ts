@@ -2,6 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 import type {
   CodeFile,
+  ChangeSummary,
   ContextBundle,
   Explanation,
   ExplanationFeedbackType,
@@ -73,7 +74,12 @@ export async function hydrateCodeFilePersistence(
   seedExplanations: Explanation[]
 ): Promise<CodeFile> {
   ensureDesktopRuntime();
-  const persisted = await invoke<{ explanations: Explanation[]; databasePath: string; projectId: string }>(
+  const persisted = await invoke<{
+    explanations: Explanation[];
+    databasePath: string;
+    projectId: string;
+    changeSummary?: ChangeSummary;
+  }>(
     "hydrate_code_file_persistence",
     {
       request: {
@@ -89,7 +95,8 @@ export async function hydrateCodeFilePersistence(
     ...file,
     databasePath: persisted.databasePath,
     projectId: persisted.projectId,
-    explanations: Array.isArray(persisted.explanations) ? persisted.explanations : seedExplanations
+    explanations: Array.isArray(persisted.explanations) ? persisted.explanations : seedExplanations,
+    changeSummary: persisted.changeSummary
   };
 }
 

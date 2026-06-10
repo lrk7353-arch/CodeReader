@@ -10,3 +10,6 @@ $env:Path = "$mingw;$rustSelfContained;$env:Path"
 $env:CARGO_TARGET_DIR = $cargoTarget
 
 cargo check --manifest-path src-tauri/Cargo.toml
+if ($LASTEXITCODE -ne 0) {
+    exit $LASTEXITCODE
+}

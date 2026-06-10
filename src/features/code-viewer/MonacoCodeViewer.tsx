@@ -1,3 +1,4 @@
+import { RefreshCw } from "lucide-react";
 import { useEffect, useMemo, useRef } from "react";
 import "monaco-editor/esm/vs/editor/edcore.main";
 import * as monaco from "monaco-editor/esm/vs/editor/editor.api";
@@ -13,6 +14,8 @@ interface MonacoCodeViewerProps {
   selectedExplanation?: Explanation;
   onSelectExplanation: (explanationId: string) => void;
   onSelectionChange: (selection: CodeSelection) => void;
+  onRefresh?: () => void;
+  refreshBusy?: boolean;
 }
 
 export interface CodeSelection {
@@ -72,7 +75,9 @@ export function MonacoCodeViewer({
   file,
   selectedExplanation,
   onSelectExplanation,
-  onSelectionChange
+  onSelectionChange,
+  onRefresh,
+  refreshBusy = false
 }: MonacoCodeViewerProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const editorRef = useRef<monaco.editor.IStandaloneCodeEditor | null>(null);
@@ -147,8 +152,18 @@ export function MonacoCodeViewer({
     if (!editor) {
       return;
     }
+    ignoreSelectionRef.current = true;
+    const selectionSyncId = selectionSyncIdRef.current + 1;
+    selectionSyncIdRef.current = selectionSyncId;
     const model = createModel(file);
     editor.setModel(model);
+    const timeoutId = window.setTimeout(() => {
+      if (selectionSyncIdRef.current === selectionSyncId) {
+        ignoreSelectionRef.current = false;
+      }
+    }, 0);
+
+    return () => window.clearTimeout(timeoutId);
   }, [file]);
 
   useEffect(() => {
@@ -158,21 +173,28 @@ export function MonacoCodeViewer({
     }
 
     const decorations: monaco.editor.IModelDeltaDecoration[] = file.explanations
-      .filter((explanation) => explanation.targetType !== "file" && explanation.startLine)
+      .filter(
+        (explanation) =>
+          explanation.status !== "deleted" &&
+          explanation.targetType !== "file" &&
+          explanation.startLine
+      )
       .map((explanation) => {
         const range = targetRange(explanation);
         const isSelected = selectedExplanation?.id === explanation.id;
         return {
           range: new monaco.Range(range?.startLine ?? 1, 1, range?.endLine ?? 1, 1),
           options: {
-            className: isSelected ? "codereader-line-selected" : "codereader-line-explained",
+            className: isSelected
+              ? "codereader-line-selected"
+              : `codereader-line-explained codereader-line-${explanation.status}`,
             isWholeLine: true,
             linesDecorationsClassName: isSelected
               ? "codereader-gutter-selected"
-              : "codereader-gutter-explained",
+              : `codereader-gutter-explained codereader-gutter-${explanation.status}`,
             glyphMarginClassName: isSelected
               ? "codereader-glyph-selected"
-              : "codereader-glyph-explained",
+              : `codereader-glyph-explained codereader-glyph-${explanation.status}`,
             overviewRuler: {
               color: isSelected ? "#1f7a65" : "#94b7aa",
               position: monaco.editor.OverviewRulerLane.Left
@@ -230,6 +252,22 @@ export function MonacoCodeViewer({
         <span className="editor-meta">
           <span>{file.language}</span>
           <span>{selectionLabel}</span>
+          {onRefresh ? (
+            <button
+              className="icon-button editor-refresh"
+              type="button"
+              onClick={onRefresh}
+              disabled={refreshBusy}
+              title="重新读取并检测变更"
+              aria-label="重新读取并检测变更"
+            >
+              <RefreshCw
+                className={refreshBusy ? "spin-icon" : undefined}
+                size={15}
+                aria-hidden="true"
+              />
+            </button>
+          ) : null}
         </span>
       </div>
       <div className="monaco-shell" ref={containerRef} />

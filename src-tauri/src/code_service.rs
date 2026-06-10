@@ -524,7 +524,14 @@ fn file_name(path: &Path) -> String {
 }
 
 fn display_path(path: &Path) -> String {
-    path.to_string_lossy().replace('\\', "/")
+    let normalized = path.to_string_lossy().replace('\\', "/");
+    if let Some(unc_path) = normalized.strip_prefix("//?/UNC/") {
+        return format!("//{unc_path}");
+    }
+    normalized
+        .strip_prefix("//?/")
+        .unwrap_or(&normalized)
+        .to_string()
 }
 
 fn relative_path(path: &Path, root: &Path) -> String {
@@ -656,6 +663,16 @@ mod tests {
         assert_eq!(
             input_to_wsl_path("//wsl$/Ubuntu/home/konglingrui/CodeReader").as_deref(),
             Some("/home/konglingrui/CodeReader")
+        );
+    }
+
+    #[test]
+    fn hides_windows_extended_unc_prefix_in_display_paths() {
+        assert_eq!(
+            display_path(Path::new(
+                r"\\?\UNC\wsl.localhost\Ubuntu\home\konglingrui\CodeReader"
+            )),
+            "//wsl.localhost/Ubuntu/home/konglingrui/CodeReader"
         );
     }
 

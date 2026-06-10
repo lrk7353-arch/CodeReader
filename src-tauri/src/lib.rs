@@ -1,3 +1,4 @@
+mod change_detection;
 mod code_service;
 mod context_builder;
 mod explanation_service;

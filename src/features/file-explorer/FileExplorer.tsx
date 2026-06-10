@@ -54,7 +54,11 @@ export function FileExplorer({
                     key={explanation.id}
                     onClick={() => onSelectExplanation(explanation.id)}
                   >
-                    <Braces size={14} aria-hidden="true" />
+                    <Braces
+                      className={`target-status-icon ${explanation.status}`}
+                      size={14}
+                      aria-hidden="true"
+                    />
                     <span>{explanation.targetName ?? `${explanation.targetType}:${explanation.startLine ?? "file"}`}</span>
                   </button>
                 ))}

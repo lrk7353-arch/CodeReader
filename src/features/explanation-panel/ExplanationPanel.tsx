@@ -1,15 +1,18 @@
 import { AlertTriangle, Check, CircleHelp, RefreshCw } from "lucide-react";
 import type {
+  ChangeSummary as ChangeSummaryData,
   ContextBundle,
   Explanation,
   ExplanationFeedbackType,
   ReadingState
 } from "../../types/explanation";
 import { ContextPreview, type ContextPreviewStatus } from "../context-preview/ContextPreview";
+import { ChangeSummary } from "../change-summary/ChangeSummary";
 import { ReadingStateControls } from "../reading-state/ReadingStateControls";
 
 interface ExplanationPanelProps {
   contextBundle?: ContextBundle;
+  changeSummary?: ChangeSummaryData;
   contextError?: string;
   contextStatus: ContextPreviewStatus;
   explanation?: Explanation;
@@ -17,11 +20,13 @@ interface ExplanationPanelProps {
   generationStatus: "idle" | "generating" | "error";
   onFeedback: (feedbackType: ExplanationFeedbackType) => void;
   onGenerate: () => void;
+  onSelectAffected: () => void;
   onReadingStateChange: (state: ReadingState) => void;
 }
 
 export function ExplanationPanel({
   contextBundle,
+  changeSummary,
   contextError,
   contextStatus,
   explanation,
@@ -29,6 +34,7 @@ export function ExplanationPanel({
   generationStatus,
   onFeedback,
   onGenerate,
+  onSelectAffected,
   onReadingStateChange
 }: ExplanationPanelProps) {
   if (!explanation) {
@@ -46,8 +52,14 @@ export function ExplanationPanel({
           <span className="target-type">{explanation.targetType}</span>
           <h2>{explanation.targetName ?? explanation.anchorText ?? explanation.filePath}</h2>
         </div>
-        <span className={`status-pill ${explanation.status}`}>{explanation.status}</span>
+        <span className={`status-pill ${explanation.status}`}>{statusLabel(explanation.status)}</span>
       </div>
+
+      {changeSummary ? (
+        <ChangeSummary summary={changeSummary} onSelectAffected={onSelectAffected} />
+      ) : null}
+
+      <StatusNotice explanation={explanation} />
 
       <div className="meaning-stack">
         <section className="meaning-section">
@@ -114,7 +126,11 @@ export function ExplanationPanel({
         <button
           type="button"
           onClick={onGenerate}
-          disabled={generationStatus === "generating" || contextStatus !== "ready"}
+          disabled={
+            explanation.status === "deleted" ||
+            generationStatus === "generating" ||
+            contextStatus !== "ready"
+          }
           title={explanation.status === "new_unexplained" ? "生成当前解释" : "重新生成当前解释"}
         >
           <RefreshCw
@@ -125,14 +141,29 @@ export function ExplanationPanel({
           <span>
             {generationStatus === "generating"
               ? "生成中"
-              : explanation.status === "new_unexplained" || explanation.status === "transient"
+              : explanation.status === "deleted"
+                ? "代码已删除"
+                : explanation.status === "new_unexplained" || explanation.status === "transient"
                 ? "生成解释"
-                : "重新解释"}
+                : explanation.status === "stale" || explanation.status === "invalid"
+                  ? "更新解释"
+                  : "重新解释"}
           </span>
         </button>
       </div>
     </aside>
   );
+}
+
+function StatusNotice({ explanation }: { explanation: Explanation }) {
+  const notices: Partial<Record<Explanation["status"], string>> = {
+    stale: "相关上下文发生变化，这条解释可能需要复核。",
+    invalid: "目标代码已经变化，旧解释仅供对照，请更新当前解释。",
+    new_unexplained: "这是新增结构，尚未生成解释。",
+    deleted: "原目标代码已经删除，这条解释作为历史记录保留。"
+  };
+  const notice = notices[explanation.status];
+  return notice ? <p className={`explanation-status-notice ${explanation.status}`}>{notice}</p> : null;
 }
 
 function RelatedLines({ label, lines }: { label: string; lines?: number[] }) {
@@ -154,4 +185,16 @@ function trustLabel(label?: Explanation["trustLabel"]) {
     review_recommended: "建议重点检查"
   };
   return label ? labels[label] : "可信提示";
+}
+
+function statusLabel(status: Explanation["status"]) {
+  const labels: Record<Explanation["status"], string> = {
+    valid: "有效",
+    stale: "可能过期",
+    invalid: "已过期",
+    new_unexplained: "新增未解释",
+    deleted: "已删除",
+    transient: "临时选择"
+  };
+  return labels[status];
 }

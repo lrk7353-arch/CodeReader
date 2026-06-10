@@ -2,11 +2,15 @@
 
 use rusqlite::{params, Connection};
 use serde::{Deserialize, Serialize};
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 #[cfg(not(test))]
 use tauri::{AppHandle, Manager};
 
+use crate::change_detection::{
+    detect_changes, ChangeDetectionResult, ExplanationAnchor, SnapshotNode,
+};
 use crate::utils::sha256_hex;
 
 const DATABASE_FILE_NAME: &str = "codereader.sqlite";
@@ -44,6 +48,7 @@ pub struct CodeNodeInput {
     start_line: usize,
     end_line: usize,
     code_hash: String,
+    anchor_text: String,
 }
 
 #[derive(Deserialize)]
@@ -75,6 +80,24 @@ pub struct HydratedCodeFilePayload {
     explanations: Vec<ExplanationPayload>,
     database_path: String,
     project_id: String,
+    change_summary: Option<ChangeSummaryPayload>,
+}
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ChangeSummaryPayload {
+    id: String,
+    before_hash: String,
+    after_hash: String,
+    added_lines: usize,
+    modified_lines: usize,
+    deleted_lines: usize,
+    added_nodes: usize,
+    modified_nodes: usize,
+    deleted_nodes: usize,
+    affected_explanation_ids: Vec<String>,
+    summary: String,
+    created_at: String,
 }
 
 #[derive(Serialize)]
@@ -257,6 +280,61 @@ fn hydrate_code_file_at_path(
         .clone()
         .unwrap_or_else(|| format!("snapshot:{}", &file_hash[..16]));
     let line_count = line_count(&request.file.code);
+    let previous_hash = tx
+        .query_row(
+            "SELECT last_analyzed_hash FROM files WHERE id = ?1",
+            params![request.file.id],
+            |row| row.get::<_, Option<String>>(0),
+        )
+        .ok()
+        .flatten();
+    let previous_snapshot = previous_hash
+        .as_deref()
+        .and_then(|hash| load_previous_snapshot(&tx, &project_id, &request.file.id, hash).ok())
+        .flatten();
+    let change_detection = if previous_hash
+        .as_deref()
+        .is_some_and(|hash| hash != file_hash)
+    {
+        let previous_snapshot_id = previous_snapshot
+            .as_ref()
+            .map(|snapshot| snapshot.id.clone())
+            .or_else(|| {
+                previous_hash
+                    .as_ref()
+                    .map(|hash| format!("snapshot:{}", &hash[..16.min(hash.len())]))
+            });
+        let old_nodes = previous_snapshot
+            .as_ref()
+            .map(|snapshot| snapshot.nodes.clone())
+            .unwrap_or_else(|| {
+                load_current_code_nodes(&tx, &project_id, &request.file.id).unwrap_or_default()
+            });
+        let explanations = previous_snapshot_id
+            .as_deref()
+            .map(|old_snapshot_id| {
+                load_explanation_anchors(&tx, &project_id, &request.file.id, old_snapshot_id)
+            })
+            .transpose()?
+            .unwrap_or_default();
+        let old_code = previous_snapshot
+            .as_ref()
+            .map(|snapshot| snapshot.source_content.as_str())
+            .unwrap_or(request.file.code.as_str());
+        let new_nodes = snapshot_nodes_from_input(&request.file.code_nodes);
+        Some((
+            previous_snapshot_id,
+            detect_changes(
+                old_code,
+                &request.file.code,
+                &old_nodes,
+                &new_nodes,
+                &explanations,
+            ),
+        ))
+    } else {
+        None
+    };
 
     tx.execute(
         "INSERT INTO projects (id, root_path, created_at, updated_at)
@@ -289,15 +367,21 @@ fn hydrate_code_file_at_path(
     .map_err(database_error)?;
 
     tx.execute(
-        "INSERT OR IGNORE INTO code_snapshots
-         (id, project_id, file_id, content_hash, line_count, snapshot_reason, created_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, 'file_loaded', ?6)",
+        "INSERT INTO code_snapshots
+         (id, project_id, file_id, content_hash, line_count, source_content,
+          line_fingerprints, snapshot_reason, created_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 'file_loaded', ?8)
+         ON CONFLICT(id) DO UPDATE SET
+           source_content = COALESCE(code_snapshots.source_content, excluded.source_content),
+           line_fingerprints = COALESCE(code_snapshots.line_fingerprints, excluded.line_fingerprints)",
         params![
             snapshot_id,
             project_id,
             request.file.id,
             file_hash,
             line_count as i64,
+            request.file.code,
+            serialize_line_fingerprints(&request.file.code)?,
             now
         ],
     )
@@ -329,10 +413,60 @@ fn hydrate_code_file_at_path(
             ],
         )
         .map_err(database_error)?;
+
+        tx.execute(
+            "INSERT OR REPLACE INTO code_snapshot_nodes
+             (id, project_id, file_id, snapshot_id, code_node_id, node_type,
+              symbol_name, start_line, end_line, code_hash, anchor_text)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+            params![
+                snapshot_node_id(&snapshot_id, &node.id),
+                project_id,
+                request.file.id,
+                snapshot_id,
+                node.id,
+                node.node_type,
+                node.name,
+                node.start_line as i64,
+                node.end_line as i64,
+                node.code_hash,
+                node.anchor_text
+            ],
+        )
+        .map_err(database_error)?;
     }
+
+    let mut covered_new_node_ids = if let Some((before_snapshot_id, detection)) = &change_detection
+    {
+        apply_change_detection(
+            &tx,
+            &project_id,
+            &request.file.id,
+            &file_hash,
+            &snapshot_id,
+            before_snapshot_id.as_deref(),
+            detection,
+            &now,
+        )?;
+        detection.covered_new_node_ids.clone()
+    } else {
+        HashSet::new()
+    };
+    covered_new_node_ids.extend(load_covered_code_node_ids(
+        &tx,
+        &project_id,
+        &request.file.id,
+        &snapshot_id,
+    )?);
 
     for explanation in &request.seed_explanations {
         let code_node_id = code_node_id_for(explanation, &request.file.code_nodes);
+        if code_node_id
+            .as_ref()
+            .is_some_and(|node_id| covered_new_node_ids.contains(node_id))
+        {
+            continue;
+        }
         let target_id = format!("target:{}", explanation.id);
         let risk_summary = join_notes(explanation.risk_notes.as_deref());
         let learning_note = join_notes(explanation.reader_notes.as_deref());
@@ -446,12 +580,14 @@ fn hydrate_code_file_at_path(
     }
 
     let explanations = load_explanations(&tx, &project_id, &request.file.id, &snapshot_id)?;
+    let change_summary = load_change_summary(&tx, &project_id, &request.file.id, &snapshot_id)?;
     tx.commit().map_err(database_error)?;
 
     Ok(HydratedCodeFilePayload {
         explanations,
         database_path: display_path(database_path),
         project_id,
+        change_summary,
     })
 }
 
@@ -929,6 +1065,335 @@ fn load_explanations(
     Ok(explanations)
 }
 
+struct StoredSnapshot {
+    id: String,
+    source_content: String,
+    nodes: Vec<SnapshotNode>,
+}
+
+fn load_previous_snapshot(
+    conn: &Connection,
+    project_id: &str,
+    file_id: &str,
+    content_hash: &str,
+) -> Result<Option<StoredSnapshot>, String> {
+    let snapshot = conn.query_row(
+        "SELECT id, source_content
+         FROM code_snapshots
+         WHERE project_id = ?1 AND file_id = ?2 AND content_hash = ?3
+           AND source_content IS NOT NULL
+         ORDER BY created_at DESC
+         LIMIT 1",
+        params![project_id, file_id, content_hash],
+        |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+    );
+    let (id, source_content) = match snapshot {
+        Ok(snapshot) => snapshot,
+        Err(rusqlite::Error::QueryReturnedNoRows) => return Ok(None),
+        Err(error) => return Err(database_error(error)),
+    };
+    let nodes = load_snapshot_nodes(conn, project_id, file_id, &id)?;
+    Ok(Some(StoredSnapshot {
+        id,
+        source_content,
+        nodes,
+    }))
+}
+
+fn load_snapshot_nodes(
+    conn: &Connection,
+    project_id: &str,
+    file_id: &str,
+    snapshot_id: &str,
+) -> Result<Vec<SnapshotNode>, String> {
+    let mut statement = conn
+        .prepare(
+            "SELECT code_node_id, node_type, COALESCE(symbol_name, ''), start_line,
+                    end_line, code_hash, COALESCE(anchor_text, '')
+             FROM code_snapshot_nodes
+             WHERE project_id = ?1 AND file_id = ?2 AND snapshot_id = ?3
+             ORDER BY start_line, end_line, node_type",
+        )
+        .map_err(database_error)?;
+    let rows = statement
+        .query_map(
+            params![project_id, file_id, snapshot_id],
+            snapshot_node_from_row,
+        )
+        .map_err(database_error)?;
+    collect_snapshot_nodes(rows)
+}
+
+fn load_current_code_nodes(
+    conn: &Connection,
+    project_id: &str,
+    file_id: &str,
+) -> Result<Vec<SnapshotNode>, String> {
+    let mut statement = conn
+        .prepare(
+            "SELECT id, node_type, COALESCE(symbol_name, ''), start_line,
+                    end_line, COALESCE(code_hash, ''), COALESCE(symbol_name, '')
+             FROM code_nodes
+             WHERE project_id = ?1 AND file_id = ?2
+             ORDER BY start_line, end_line, node_type",
+        )
+        .map_err(database_error)?;
+    let rows = statement
+        .query_map(params![project_id, file_id], snapshot_node_from_row)
+        .map_err(database_error)?;
+    collect_snapshot_nodes(rows)
+}
+
+fn snapshot_node_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<SnapshotNode> {
+    Ok(SnapshotNode {
+        id: row.get(0)?,
+        node_type: row.get(1)?,
+        name: row.get(2)?,
+        start_line: i64_to_usize(row.get(3)?),
+        end_line: i64_to_usize(row.get(4)?),
+        code_hash: row.get(5)?,
+        anchor_text: row.get(6)?,
+    })
+}
+
+fn collect_snapshot_nodes(
+    rows: rusqlite::MappedRows<
+        '_,
+        impl FnMut(&rusqlite::Row<'_>) -> rusqlite::Result<SnapshotNode>,
+    >,
+) -> Result<Vec<SnapshotNode>, String> {
+    let mut nodes = Vec::new();
+    for row in rows {
+        nodes.push(row.map_err(database_error)?);
+    }
+    Ok(nodes)
+}
+
+fn snapshot_nodes_from_input(nodes: &[CodeNodeInput]) -> Vec<SnapshotNode> {
+    nodes
+        .iter()
+        .map(|node| SnapshotNode {
+            id: node.id.clone(),
+            node_type: node.node_type.clone(),
+            name: node.name.clone(),
+            start_line: node.start_line,
+            end_line: node.end_line,
+            code_hash: node.code_hash.clone(),
+            anchor_text: node.anchor_text.clone(),
+        })
+        .collect()
+}
+
+fn load_explanation_anchors(
+    conn: &Connection,
+    project_id: &str,
+    file_id: &str,
+    snapshot_id: &str,
+) -> Result<Vec<ExplanationAnchor>, String> {
+    let mut statement = conn
+        .prepare(
+            "SELECT e.id, t.status, t.target_type, t.start_line, t.end_line, t.code_hash,
+                    t.anchor_text, t.code_node_id, e.depends_on_lines, e.affects_lines
+             FROM explanation_nodes e
+             JOIN explanation_targets t
+               ON t.project_id = e.project_id AND t.explanation_id = e.id
+             WHERE e.project_id = ?1 AND e.file_id = ?2 AND e.snapshot_id = ?3",
+        )
+        .map_err(database_error)?;
+    let rows = statement
+        .query_map(params![project_id, file_id, snapshot_id], |row| {
+            Ok(ExplanationAnchor {
+                id: row.get(0)?,
+                status: row.get(1)?,
+                target_type: row.get(2)?,
+                start_line: optional_i64_to_usize(row.get(3)?),
+                end_line: optional_i64_to_usize(row.get(4)?),
+                code_hash: row.get(5)?,
+                anchor_text: row.get(6)?,
+                code_node_id: row.get(7)?,
+                depends_on_lines: parse_line_numbers(row.get(8)?),
+                affects_lines: parse_line_numbers(row.get(9)?),
+            })
+        })
+        .map_err(database_error)?;
+    let mut explanations = Vec::new();
+    for row in rows {
+        explanations.push(row.map_err(database_error)?);
+    }
+    Ok(explanations)
+}
+
+fn load_covered_code_node_ids(
+    conn: &Connection,
+    project_id: &str,
+    file_id: &str,
+    snapshot_id: &str,
+) -> Result<HashSet<String>, String> {
+    let mut statement = conn
+        .prepare(
+            "SELECT DISTINCT code_node_id
+             FROM explanation_nodes
+             WHERE project_id = ?1 AND file_id = ?2 AND snapshot_id = ?3
+               AND code_node_id IS NOT NULL",
+        )
+        .map_err(database_error)?;
+    let rows = statement
+        .query_map(params![project_id, file_id, snapshot_id], |row| {
+            row.get::<_, String>(0)
+        })
+        .map_err(database_error)?;
+    let mut node_ids = HashSet::new();
+    for row in rows {
+        node_ids.insert(row.map_err(database_error)?);
+    }
+    Ok(node_ids)
+}
+
+fn apply_change_detection(
+    conn: &Connection,
+    project_id: &str,
+    file_id: &str,
+    after_hash: &str,
+    after_snapshot_id: &str,
+    before_snapshot_id: Option<&str>,
+    detection: &ChangeDetectionResult,
+    created_at: &str,
+) -> Result<(), String> {
+    for migration in &detection.migrations {
+        conn.execute(
+            "UPDATE explanation_nodes
+             SET snapshot_id = ?1, code_node_id = ?2, start_line = ?3, end_line = ?4,
+                 status = ?5, updated_at = ?6
+             WHERE project_id = ?7 AND file_id = ?8 AND id = ?9",
+            params![
+                after_snapshot_id,
+                migration.code_node_id,
+                optional_usize_to_i64(migration.start_line),
+                optional_usize_to_i64(migration.end_line),
+                migration.status,
+                created_at,
+                project_id,
+                file_id,
+                migration.explanation_id
+            ],
+        )
+        .map_err(database_error)?;
+        conn.execute(
+            "UPDATE explanation_targets
+             SET file_hash = ?1, snapshot_id = ?2, code_node_id = ?3,
+                 start_line = ?4, end_line = ?5, code_hash = ?6, ast_hash = ?6,
+                 anchor_text = ?7, status = ?8, updated_at = ?9
+             WHERE project_id = ?10 AND explanation_id = ?11",
+            params![
+                after_hash,
+                after_snapshot_id,
+                migration.code_node_id,
+                optional_usize_to_i64(migration.start_line),
+                optional_usize_to_i64(migration.end_line),
+                migration.code_hash,
+                migration.anchor_text,
+                migration.status,
+                created_at,
+                project_id,
+                migration.explanation_id
+            ],
+        )
+        .map_err(database_error)?;
+    }
+
+    let before_hash = before_snapshot_id
+        .and_then(|snapshot_id| {
+            conn.query_row(
+                "SELECT content_hash FROM code_snapshots WHERE id = ?1",
+                params![snapshot_id],
+                |row| row.get::<_, String>(0),
+            )
+            .ok()
+        })
+        .unwrap_or_default();
+    let affected_explanations = serde_json::to_string(&detection.affected_explanation_ids)
+        .map_err(|error| format!("Failed to serialize affected explanations: {error}"))?;
+    let record_id = format!(
+        "change:{}",
+        &sha256_hex(&format!(
+            "{project_id}:{file_id}:{before_hash}:{after_hash}"
+        ))[..24]
+    );
+    conn.execute(
+        "INSERT INTO change_records
+         (id, project_id, file_id, before_snapshot_id, after_snapshot_id,
+          added_lines, modified_lines, deleted_lines, added_nodes, modified_nodes,
+          deleted_nodes, before_hash, after_hash, affected_explanations, summary, created_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)
+         ON CONFLICT(id) DO UPDATE SET
+           affected_explanations = excluded.affected_explanations,
+           summary = excluded.summary,
+           created_at = excluded.created_at",
+        params![
+            record_id,
+            project_id,
+            file_id,
+            before_snapshot_id,
+            after_snapshot_id,
+            detection.counts.added_lines as i64,
+            detection.counts.modified_lines as i64,
+            detection.counts.deleted_lines as i64,
+            detection.counts.added_nodes as i64,
+            detection.counts.modified_nodes as i64,
+            detection.counts.deleted_nodes as i64,
+            before_hash,
+            after_hash,
+            affected_explanations,
+            detection.summary,
+            created_at
+        ],
+    )
+    .map_err(database_error)?;
+    Ok(())
+}
+
+fn load_change_summary(
+    conn: &Connection,
+    project_id: &str,
+    file_id: &str,
+    after_snapshot_id: &str,
+) -> Result<Option<ChangeSummaryPayload>, String> {
+    let row = conn.query_row(
+        "SELECT id, COALESCE(before_hash, ''), COALESCE(after_hash, ''),
+                added_lines, modified_lines, deleted_lines, added_nodes,
+                modified_nodes, deleted_nodes, affected_explanations, summary, created_at
+         FROM change_records
+         WHERE project_id = ?1 AND file_id = ?2 AND after_snapshot_id = ?3
+         ORDER BY created_at DESC
+         LIMIT 1",
+        params![project_id, file_id, after_snapshot_id],
+        |row| {
+            let affected: Option<String> = row.get(9)?;
+            Ok(ChangeSummaryPayload {
+                id: row.get(0)?,
+                before_hash: row.get(1)?,
+                after_hash: row.get(2)?,
+                added_lines: i64_to_usize(row.get(3)?),
+                modified_lines: i64_to_usize(row.get(4)?),
+                deleted_lines: i64_to_usize(row.get(5)?),
+                added_nodes: i64_to_usize(row.get(6)?),
+                modified_nodes: i64_to_usize(row.get(7)?),
+                deleted_nodes: i64_to_usize(row.get(8)?),
+                affected_explanation_ids: affected
+                    .and_then(|value| serde_json::from_str(&value).ok())
+                    .unwrap_or_default(),
+                summary: row.get(10)?,
+                created_at: row.get(11)?,
+            })
+        },
+    );
+    match row {
+        Ok(summary) => Ok(Some(summary)),
+        Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+        Err(error) => Err(database_error(error)),
+    }
+}
+
 fn open_database(path: &Path) -> Result<Connection, String> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)
@@ -968,6 +1433,8 @@ fn initialize_schema(conn: &Connection) -> Result<(), String> {
           file_id TEXT NOT NULL,
           content_hash TEXT NOT NULL,
           line_count INTEGER NOT NULL,
+          source_content TEXT,
+          line_fingerprints TEXT,
           snapshot_reason TEXT NOT NULL,
           created_at TEXT NOT NULL
         );
@@ -983,6 +1450,20 @@ fn initialize_schema(conn: &Connection) -> Result<(), String> {
           ast_hash TEXT,
           code_hash TEXT,
           parent_node_id TEXT
+        );
+
+        CREATE TABLE IF NOT EXISTS code_snapshot_nodes (
+          id TEXT PRIMARY KEY,
+          project_id TEXT NOT NULL,
+          file_id TEXT NOT NULL,
+          snapshot_id TEXT NOT NULL,
+          code_node_id TEXT NOT NULL,
+          node_type TEXT NOT NULL,
+          symbol_name TEXT,
+          start_line INTEGER NOT NULL,
+          end_line INTEGER NOT NULL,
+          code_hash TEXT NOT NULL,
+          anchor_text TEXT
         );
 
         CREATE TABLE IF NOT EXISTS explanation_nodes (
@@ -1073,6 +1554,9 @@ fn initialize_schema(conn: &Connection) -> Result<(), String> {
           added_nodes INTEGER,
           modified_nodes INTEGER,
           deleted_nodes INTEGER,
+          before_hash TEXT,
+          after_hash TEXT,
+          affected_explanations TEXT,
           summary TEXT,
           created_at TEXT NOT NULL
         );
@@ -1091,6 +1575,10 @@ fn initialize_schema(conn: &Connection) -> Result<(), String> {
           ON explanation_targets(project_id, explanation_id);
         CREATE INDEX IF NOT EXISTS idx_reading_states_explanation
           ON user_reading_states(project_id, explanation_id);
+        CREATE INDEX IF NOT EXISTS idx_snapshot_nodes_snapshot
+          ON code_snapshot_nodes(project_id, file_id, snapshot_id);
+        CREATE INDEX IF NOT EXISTS idx_change_records_file
+          ON change_records(project_id, file_id, after_snapshot_id);
         ",
     )
     .map_err(database_error)?;
@@ -1099,6 +1587,11 @@ fn initialize_schema(conn: &Connection) -> Result<(), String> {
     ensure_column(conn, "explanation_nodes", "affects_lines", "TEXT")?;
     ensure_column(conn, "explanation_nodes", "context_id", "TEXT")?;
     ensure_column(conn, "explanation_nodes", "context_sources", "TEXT")?;
+    ensure_column(conn, "code_snapshots", "source_content", "TEXT")?;
+    ensure_column(conn, "code_snapshots", "line_fingerprints", "TEXT")?;
+    ensure_column(conn, "change_records", "before_hash", "TEXT")?;
+    ensure_column(conn, "change_records", "after_hash", "TEXT")?;
+    ensure_column(conn, "change_records", "affected_explanations", "TEXT")?;
     Ok(())
 }
 
@@ -1177,6 +1670,13 @@ fn reading_state_id(project_id: &str, explanation_id: &str) -> String {
     )
 }
 
+fn snapshot_node_id(snapshot_id: &str, code_node_id: &str) -> String {
+    format!(
+        "snapshot-node:{}",
+        &sha256_hex(&format!("{snapshot_id}:{code_node_id}"))[..24]
+    )
+}
+
 fn feedback_id(
     project_id: &str,
     explanation_id: &str,
@@ -1199,6 +1699,10 @@ fn optional_usize_to_i64(value: Option<usize>) -> Option<i64> {
 
 fn optional_i64_to_usize(value: Option<i64>) -> Option<usize> {
     value.and_then(|line| usize::try_from(line).ok())
+}
+
+fn i64_to_usize(value: i64) -> usize {
+    usize::try_from(value.max(0)).unwrap_or_default()
 }
 
 fn join_notes(notes: Option<&[String]>) -> Option<String> {
@@ -1228,6 +1732,12 @@ fn parse_line_numbers(value: Option<String>) -> Vec<usize> {
     value
         .and_then(|json| serde_json::from_str::<Vec<usize>>(&json).ok())
         .unwrap_or_default()
+}
+
+fn serialize_line_fingerprints(code: &str) -> Result<String, String> {
+    let fingerprints: Vec<String> = code.lines().map(sha256_hex).collect();
+    serde_json::to_string(&fingerprints)
+        .map_err(|error| format!("Failed to serialize line fingerprints: {error}"))
 }
 
 fn line_count(code: &str) -> usize {
@@ -1422,6 +1932,246 @@ mod tests {
     }
 
     #[test]
+    fn moved_function_migrates_valid_explanation_to_new_lines() {
+        let database_path = temp_database_path("change-moved");
+        hydrate_code_file_at_path(&database_path, sample_request())
+            .expect("baseline should hydrate");
+        mark_explanation_valid(&database_path, "exp:target:sample:function");
+
+        let moved = changed_request(
+            "hash:moved",
+            "snapshot:moved",
+            "const version = 1;\n\nexport function loginUser() {\n  return true;\n}\n",
+            vec![
+                node(
+                    "target:moved:file",
+                    "file",
+                    "sample.ts",
+                    1,
+                    5,
+                    "hash:moved",
+                    "const version = 1;",
+                ),
+                node(
+                    "target:moved:function",
+                    "function",
+                    "loginUser",
+                    3,
+                    5,
+                    "hash:function",
+                    "export function loginUser() {",
+                ),
+            ],
+        );
+        let hydrated =
+            hydrate_code_file_at_path(&database_path, moved).expect("moved file should hydrate");
+
+        let explanation = hydrated
+            .explanations
+            .iter()
+            .find(|item| item.id == "exp:target:sample:function")
+            .expect("existing explanation should migrate");
+        assert_eq!(explanation.status, "valid");
+        assert_eq!(explanation.start_line, Some(3));
+        assert_eq!(explanation.end_line, Some(5));
+        assert_eq!(
+            hydrated
+                .explanations
+                .iter()
+                .filter(|item| item.target_type == "function")
+                .count(),
+            1
+        );
+        assert!(hydrated.change_summary.is_some());
+
+        let reopened = hydrate_code_file_at_path(
+            &database_path,
+            changed_request(
+                "hash:moved",
+                "snapshot:moved",
+                "const version = 1;\n\nexport function loginUser() {\n  return true;\n}\n",
+                vec![
+                    node(
+                        "target:moved:file",
+                        "file",
+                        "sample.ts",
+                        1,
+                        5,
+                        "hash:moved",
+                        "const version = 1;",
+                    ),
+                    node(
+                        "target:moved:function",
+                        "function",
+                        "loginUser",
+                        3,
+                        5,
+                        "hash:function",
+                        "export function loginUser() {",
+                    ),
+                ],
+            ),
+        )
+        .expect("same snapshot should reopen");
+        assert_eq!(
+            reopened
+                .explanations
+                .iter()
+                .filter(|item| item.target_type == "function")
+                .count(),
+            1
+        );
+
+        let _ = std::fs::remove_file(database_path);
+    }
+
+    #[test]
+    fn modified_function_is_invalidated_without_losing_explanation() {
+        let database_path = temp_database_path("change-modified");
+        hydrate_code_file_at_path(&database_path, sample_request())
+            .expect("baseline should hydrate");
+        mark_explanation_valid(&database_path, "exp:target:sample:function");
+
+        let modified = changed_request(
+            "hash:modified",
+            "snapshot:modified",
+            "export function loginUser() {\n  return false;\n}\n",
+            vec![
+                node(
+                    "target:modified:file",
+                    "file",
+                    "sample.ts",
+                    1,
+                    3,
+                    "hash:modified",
+                    "export function loginUser() {",
+                ),
+                node(
+                    "target:modified:function",
+                    "function",
+                    "loginUser",
+                    1,
+                    3,
+                    "hash:function-modified",
+                    "export function loginUser() {",
+                ),
+            ],
+        );
+        let hydrated = hydrate_code_file_at_path(&database_path, modified)
+            .expect("modified file should hydrate");
+
+        let explanation = hydrated
+            .explanations
+            .iter()
+            .find(|item| item.id == "exp:target:sample:function")
+            .expect("existing explanation should remain available");
+        assert_eq!(explanation.status, "invalid");
+        assert_eq!(explanation.code_meaning, "function meaning");
+        assert!(hydrated
+            .change_summary
+            .as_ref()
+            .is_some_and(|summary| summary.modified_nodes >= 1));
+
+        let _ = std::fs::remove_file(database_path);
+    }
+
+    #[test]
+    fn added_function_gets_new_unexplained_placeholder() {
+        let database_path = temp_database_path("change-added");
+        hydrate_code_file_at_path(&database_path, sample_request())
+            .expect("baseline should hydrate");
+        mark_explanation_valid(&database_path, "exp:target:sample:function");
+
+        let added = changed_request(
+            "hash:added",
+            "snapshot:added",
+            "export function loginUser() {\n  return true;\n}\n\nexport function logoutUser() {\n  return true;\n}\n",
+            vec![
+                node(
+                    "target:added:file",
+                    "file",
+                    "sample.ts",
+                    1,
+                    7,
+                    "hash:added",
+                    "export function loginUser() {",
+                ),
+                node(
+                    "target:added:login",
+                    "function",
+                    "loginUser",
+                    1,
+                    3,
+                    "hash:function",
+                    "export function loginUser() {",
+                ),
+                node(
+                    "target:added:logout",
+                    "function",
+                    "logoutUser",
+                    5,
+                    7,
+                    "hash:logout",
+                    "export function logoutUser() {",
+                ),
+            ],
+        );
+        let hydrated =
+            hydrate_code_file_at_path(&database_path, added).expect("added file should hydrate");
+
+        let new_explanation = hydrated
+            .explanations
+            .iter()
+            .find(|item| item.id == "exp:target:added:logout")
+            .expect("new function should receive a placeholder");
+        assert_eq!(new_explanation.status, "new_unexplained");
+        assert!(hydrated
+            .change_summary
+            .as_ref()
+            .is_some_and(|summary| summary.added_nodes >= 1));
+
+        let _ = std::fs::remove_file(database_path);
+    }
+
+    #[test]
+    fn deleted_function_keeps_historical_explanation_marked_deleted() {
+        let database_path = temp_database_path("change-deleted");
+        hydrate_code_file_at_path(&database_path, sample_request())
+            .expect("baseline should hydrate");
+        mark_explanation_valid(&database_path, "exp:target:sample:function");
+
+        let deleted = changed_request(
+            "hash:deleted",
+            "snapshot:deleted",
+            "export const version = 1;\n",
+            vec![node(
+                "target:deleted:file",
+                "file",
+                "sample.ts",
+                1,
+                1,
+                "hash:deleted",
+                "export const version = 1;",
+            )],
+        );
+        let hydrated = hydrate_code_file_at_path(&database_path, deleted)
+            .expect("deleted file should hydrate");
+
+        let explanation = hydrated
+            .explanations
+            .iter()
+            .find(|item| item.id == "exp:target:sample:function")
+            .expect("deleted explanation should remain as history");
+        assert_eq!(explanation.status, "deleted");
+        assert!(hydrated
+            .change_summary
+            .as_ref()
+            .is_some_and(|summary| summary.deleted_nodes >= 1));
+
+        let _ = std::fs::remove_file(database_path);
+    }
+
+    #[test]
     fn saves_and_deletes_model_config() {
         let database_path = temp_database_path("model-config");
         save_model_config(
@@ -1465,6 +2215,7 @@ mod tests {
                         start_line: 1,
                         end_line: 3,
                         code_hash: "hash:sample".to_string(),
+                        anchor_text: "export function loginUser() {".to_string(),
                     },
                     CodeNodeInput {
                         id: "target:sample:function".to_string(),
@@ -1473,6 +2224,7 @@ mod tests {
                         start_line: 1,
                         end_line: 3,
                         code_hash: "hash:function".to_string(),
+                        anchor_text: "export function loginUser() {".to_string(),
                     },
                 ],
             },
@@ -1519,6 +2271,87 @@ mod tests {
                 },
             ],
         }
+    }
+
+    fn changed_request(
+        file_hash: &str,
+        snapshot_id: &str,
+        code: &str,
+        code_nodes: Vec<CodeNodeInput>,
+    ) -> HydrateCodeFileRequest {
+        let seed_explanations = code_nodes
+            .iter()
+            .map(|node| ExplanationInput {
+                id: format!("exp:{}", node.id),
+                file_path: "examples/sample.ts".to_string(),
+                file_hash: Some(file_hash.to_string()),
+                target_type: node.node_type.clone(),
+                start_line: Some(node.start_line),
+                end_line: Some(node.end_line),
+                symbol_id: (node.node_type == "function")
+                    .then(|| format!("function:examples/sample.ts:{}", node.name)),
+                code_hash: Some(node.code_hash.clone()),
+                anchor_text: Some(node.anchor_text.clone()),
+                code_meaning: format!("{} 占位解释", node.name),
+                local_meaning: None,
+                global_meaning: None,
+                risk_notes: None,
+                reader_notes: None,
+                status: "new_unexplained".to_string(),
+                reading_state: "unread".to_string(),
+                created_at: "2026-06-10T00:00:00.000Z".to_string(),
+                updated_at: "2026-06-10T00:00:00.000Z".to_string(),
+            })
+            .collect();
+        HydrateCodeFileRequest {
+            file: PersistenceCodeFile {
+                id: "file:sample".to_string(),
+                path: "examples/sample.ts".to_string(),
+                project_id: Some("project:sample".to_string()),
+                project_root: Some("examples".to_string()),
+                relative_path: Some("sample.ts".to_string()),
+                language: "typescript".to_string(),
+                code: code.to_string(),
+                file_hash: Some(file_hash.to_string()),
+                snapshot_id: Some(snapshot_id.to_string()),
+                code_nodes,
+            },
+            seed_explanations,
+        }
+    }
+
+    fn node(
+        id: &str,
+        node_type: &str,
+        name: &str,
+        start_line: usize,
+        end_line: usize,
+        code_hash: &str,
+        anchor_text: &str,
+    ) -> CodeNodeInput {
+        CodeNodeInput {
+            id: id.to_string(),
+            node_type: node_type.to_string(),
+            name: name.to_string(),
+            start_line,
+            end_line,
+            code_hash: code_hash.to_string(),
+            anchor_text: anchor_text.to_string(),
+        }
+    }
+
+    fn mark_explanation_valid(database_path: &Path, explanation_id: &str) {
+        let conn = open_database(database_path).expect("database should open");
+        conn.execute(
+            "UPDATE explanation_nodes SET status = 'valid' WHERE id = ?1",
+            params![explanation_id],
+        )
+        .expect("explanation node should update");
+        conn.execute(
+            "UPDATE explanation_targets SET status = 'valid' WHERE explanation_id = ?1",
+            params![explanation_id],
+        )
+        .expect("explanation target should update");
     }
 
     fn temp_database_path(name: &str) -> PathBuf {
