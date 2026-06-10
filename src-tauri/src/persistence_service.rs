@@ -389,8 +389,22 @@ fn hydrate_code_file_at_path(
                code_hash = excluded.code_hash,
                ast_hash = excluded.ast_hash,
                anchor_text = excluded.anchor_text,
-               status = excluded.status,
-               updated_at = excluded.updated_at",
+               status = CASE
+                 WHEN explanation_targets.status = 'valid'
+                   AND explanation_targets.snapshot_id = excluded.snapshot_id
+                   AND explanation_targets.code_hash = excluded.code_hash
+                   AND excluded.status IN ('new_unexplained', 'transient')
+                 THEN explanation_targets.status
+                 ELSE excluded.status
+               END,
+               updated_at = CASE
+                 WHEN explanation_targets.status = 'valid'
+                   AND explanation_targets.snapshot_id = excluded.snapshot_id
+                   AND explanation_targets.code_hash = excluded.code_hash
+                   AND excluded.status IN ('new_unexplained', 'transient')
+                 THEN explanation_targets.updated_at
+                 ELSE excluded.updated_at
+               END",
             params![
                 target_id,
                 project_id,
@@ -1305,7 +1319,7 @@ mod tests {
     }
 
     #[test]
-    fn saves_and_reloads_generated_explanation() {
+    fn generated_explanation_survives_hydration_without_seed_overwrite() {
         let database_path = temp_database_path("generated");
         let input = GeneratedExplanationInput {
             project_id: Some("project:test".to_string()),
@@ -1348,14 +1362,59 @@ mod tests {
         assert_eq!(saved.code_meaning, "读取输入。");
         assert_eq!(saved.trust_label.as_deref(), Some("context_needed"));
 
-        let conn = open_database(&database_path).expect("database opens");
-        let restored = load_explanations(&conn, "project:test", "file:test", "snapshot:test")
-            .expect("generated explanation reloads");
-        assert_eq!(restored.len(), 1);
-        assert_eq!(restored[0].depends_on_lines, vec![1]);
-        assert_eq!(restored[0].affects_lines, vec![3]);
+        let hydrated = hydrate_code_file_at_path(
+            &database_path,
+            HydrateCodeFileRequest {
+                file: PersistenceCodeFile {
+                    id: "file:test".to_string(),
+                    path: "C:/test-project/src/example.ts".to_string(),
+                    project_id: Some("project:test".to_string()),
+                    project_root: Some("C:/test-project".to_string()),
+                    relative_path: Some("src/example.ts".to_string()),
+                    language: "typescript".to_string(),
+                    code: [
+                        "const input = request.value;",
+                        "const value = input;",
+                        "use(value);",
+                        "audit(value);",
+                        "return value;",
+                    ]
+                    .join("\n"),
+                    file_hash: Some("file-hash".to_string()),
+                    snapshot_id: Some("snapshot:test".to_string()),
+                    code_nodes: Vec::new(),
+                },
+                seed_explanations: vec![ExplanationInput {
+                    id: "exp:test".to_string(),
+                    file_path: "C:/test-project/src/example.ts".to_string(),
+                    file_hash: Some("file-hash".to_string()),
+                    target_type: "line".to_string(),
+                    start_line: Some(2),
+                    end_line: Some(2),
+                    symbol_id: None,
+                    code_hash: Some("code-hash".to_string()),
+                    anchor_text: Some("const value = input;".to_string()),
+                    code_meaning: "placeholder should not replace generated content".to_string(),
+                    local_meaning: None,
+                    global_meaning: None,
+                    risk_notes: None,
+                    reader_notes: None,
+                    status: "new_unexplained".to_string(),
+                    reading_state: "unread".to_string(),
+                    created_at: "2026-06-10T00:00:00.000Z".to_string(),
+                    updated_at: "2026-06-10T00:00:00.000Z".to_string(),
+                }],
+            },
+        )
+        .expect("hydration should restore generated explanation");
+        assert_eq!(hydrated.explanations.len(), 1);
+        let restored = &hydrated.explanations[0];
+        assert_eq!(restored.code_meaning, "读取输入。");
+        assert_eq!(restored.status, "valid");
+        assert_eq!(restored.depends_on_lines, vec![1]);
+        assert_eq!(restored.affects_lines, vec![3]);
         assert_eq!(
-            restored[0].review_suggestion.as_deref(),
+            restored.review_suggestion.as_deref(),
             Some("检查后续分支。")
         );
 

@@ -1,5 +1,5 @@
-import { Send, X } from "lucide-react";
-import { useEffect } from "react";
+import { LoaderCircle, Send, X } from "lucide-react";
+import { useEffect, useState } from "react";
 import type { ContextBundle, Explanation, ModelConfig } from "../../types/explanation";
 
 interface GenerationConfirmDialogProps {
@@ -23,6 +23,8 @@ export function GenerationConfirmDialog({
   onCancel,
   onConfirm
 }: GenerationConfirmDialogProps) {
+  const [elapsedSeconds, setElapsedSeconds] = useState(0);
+
   useEffect(() => {
     if (!open) {
       return;
@@ -35,6 +37,20 @@ export function GenerationConfirmDialog({
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [busy, onCancel, open]);
+
+  useEffect(() => {
+    if (!open || !busy) {
+      setElapsedSeconds(0);
+      return;
+    }
+
+    const startedAt = Date.now();
+    const timer = window.setInterval(() => {
+      setElapsedSeconds(Math.floor((Date.now() - startedAt) / 1000));
+    }, 1000);
+
+    return () => window.clearInterval(timer);
+  }, [busy, open]);
 
   if (!open) {
     return null;
@@ -93,6 +109,17 @@ export function GenerationConfirmDialog({
           <p>
             仅发送“上下文预览”中的片段和结构信号。完整项目、API Key、SQLite 数据和用户阅读状态不会发送。
           </p>
+          {busy ? (
+            <div className="generation-progress" role="status" aria-live="polite">
+              <LoaderCircle className="spin-icon" size={18} aria-hidden="true" />
+              <div>
+                <strong>正在等待模型返回</strong>
+                <span>
+                  已用时 {elapsedSeconds} 秒，最长等待 {config.timeoutSeconds} 秒；返回后会自动校验结构，必要时修复一次。
+                </span>
+              </div>
+            </div>
+          ) : null}
           {error ? <p className="dialog-error">{error}</p> : null}
         </div>
 
@@ -107,7 +134,11 @@ export function GenerationConfirmDialog({
             disabled={busy}
             autoFocus
           >
-            <Send size={15} aria-hidden="true" />
+            {busy ? (
+              <LoaderCircle className="spin-icon" size={15} aria-hidden="true" />
+            ) : (
+              <Send size={15} aria-hidden="true" />
+            )}
             <span>{busy ? "生成中" : "确认发送"}</span>
           </button>
         </footer>

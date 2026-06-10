@@ -883,6 +883,38 @@ button {
   line-height: 1.55;
 }
 
+.generation-progress {
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr);
+  align-items: start;
+  gap: 9px;
+  margin-top: 14px;
+  border: 1px solid #bfd2ca;
+  border-radius: 6px;
+  background: #edf4f0;
+  color: #285c4d;
+  padding: 10px;
+}
+
+.generation-progress > svg {
+  margin-top: 1px;
+}
+
+.generation-progress > div {
+  display: grid;
+  gap: 3px;
+}
+
+.generation-progress strong {
+  font-size: 12px;
+}
+
+.generation-progress span {
+  color: #53645e;
+  font-size: 11px;
+  line-height: 1.45;
+}
+
 .generation-summary .dialog-error {
   border-left-color: #b2513c;
   color: #923e31;

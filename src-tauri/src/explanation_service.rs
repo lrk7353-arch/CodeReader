@@ -828,7 +828,7 @@ mod tests {
     }
 
     #[test]
-    fn prompt_contains_only_context_builder_output() {
+    fn prompt_embeds_exact_context_bundle_and_excludes_omitted_source() {
         let code = (1..=30)
             .map(|line| {
                 if line == 1 {
@@ -862,10 +862,19 @@ mod tests {
         })
         .expect("context should build");
         let prompt = build_user_prompt(&context, "plain").expect("prompt should build");
+        let embedded_bundle = prompt
+            .split_once("Context Bundle:\n")
+            .map(|(_, payload)| payload)
+            .expect("prompt should contain the Context Bundle marker");
+        let embedded_value: serde_json::Value =
+            serde_json::from_str(embedded_bundle).expect("embedded bundle should be valid JSON");
+        let expected_value =
+            serde_json::to_value(&context).expect("context should serialize to JSON");
 
+        assert_eq!(embedded_value, expected_value);
         assert!(prompt.contains("const selected = request.value;"));
         assert!(!prompt.contains("secretOutsideBudget"));
-        assert!(!prompt.contains("\"code\":\"const line1"));
+        assert!(!embedded_bundle.contains("const line1 = 1;"));
     }
 
     #[test]
