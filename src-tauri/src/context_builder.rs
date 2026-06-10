@@ -1,13 +1,15 @@
 #![cfg_attr(test, allow(dead_code))]
 
 use serde::{Deserialize, Serialize};
-use std::collections::{BTreeMap, BTreeSet, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashSet, VecDeque};
+use std::sync::{Mutex, OnceLock};
 use tree_sitter::{Language, Node, Parser};
 
 use crate::utils::sha256_hex;
 
 const DEFAULT_MAX_SNIPPETS: usize = 8;
 const NEIGHBORHOOD_RADIUS: usize = 3;
+const STATIC_ANALYSIS_CACHE_CAPACITY: usize = 16;
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -139,7 +141,7 @@ struct CandidateSnippet {
     priority: usize,
 }
 
-#[derive(Default)]
+#[derive(Clone, Default)]
 struct StaticAnalysis {
     imports: Vec<SyntaxSnippet>,
     definitions: Vec<Definition>,
@@ -147,6 +149,40 @@ struct StaticAnalysis {
     returns: Vec<SyntaxSnippet>,
     identifiers: BTreeMap<String, Vec<usize>>,
 }
+
+#[derive(Default)]
+struct StaticAnalysisCache {
+    entries: VecDeque<(String, StaticAnalysis)>,
+}
+
+impl StaticAnalysisCache {
+    fn get(&mut self, key: &str) -> Option<StaticAnalysis> {
+        let position = self
+            .entries
+            .iter()
+            .position(|(entry_key, _)| entry_key == key)?;
+        let (entry_key, analysis) = self.entries.remove(position)?;
+        let result = analysis.clone();
+        self.entries.push_back((entry_key, analysis));
+        Some(result)
+    }
+
+    fn insert(&mut self, key: String, analysis: StaticAnalysis) {
+        if let Some(position) = self
+            .entries
+            .iter()
+            .position(|(entry_key, _)| entry_key == &key)
+        {
+            self.entries.remove(position);
+        }
+        while self.entries.len() >= STATIC_ANALYSIS_CACHE_CAPACITY {
+            self.entries.pop_front();
+        }
+        self.entries.push_back((key, analysis));
+    }
+}
+
+static STATIC_ANALYSIS_CACHE: OnceLock<Mutex<StaticAnalysisCache>> = OnceLock::new();
 
 #[derive(Clone)]
 struct SyntaxSnippet {
@@ -189,7 +225,7 @@ fn build_context_bundle(request: BuildContextRequest) -> Result<ContextBundle, S
         .unwrap_or_else(|| default_target_name(target_type, start_line, end_line));
 
     let mut warnings = Vec::new();
-    let analysis = match parse_static_analysis(
+    let analysis = match cached_static_analysis(
         &request.file.path,
         &request.file.language,
         &request.file.code,
@@ -275,13 +311,21 @@ fn build_context_bundle(request: BuildContextRequest) -> Result<ContextBundle, S
         })
         .collect();
 
+    let source_fingerprint = snippets
+        .iter()
+        .map(|snippet| snippet.source_id.as_str())
+        .collect::<Vec<_>>()
+        .join(",");
     let context_seed = format!(
-        "{}:{}:{}:{}:{}",
+        "{}:{}:{}:{}:{}:{}:{}:{}",
         request.file.path,
         sha256_hex(&request.file.code),
         target_type,
         start_line,
-        end_line
+        end_line,
+        effective_max_chars,
+        max_snippets,
+        source_fingerprint
     );
 
     Ok(ContextBundle {
@@ -575,22 +619,32 @@ fn append_control_flow_candidates(
     start_line: usize,
     end_line: usize,
 ) {
-    for node in file
+    let relevant_blocks: Vec<&ContextNodeInput> = file
         .code_nodes
         .iter()
         .filter(|node| node.node_type == "block")
-    {
-        if ranges_intersect(node.start_line, node.end_line, start_line, end_line)
-            && (node.start_line != start_line || node.end_line != end_line)
-        {
-            candidates.push(candidate_from_node(
-                file,
-                node,
-                "control_flow",
-                "该控制流结构包围或穿过当前多行目标。",
-                3,
-            ));
+        .filter(|node| ranges_intersect(node.start_line, node.end_line, start_line, end_line))
+        .filter(|node| node.start_line != start_line || node.end_line != end_line)
+        .filter(|node| node.start_line < start_line || node.end_line > end_line)
+        .collect();
+    let smallest_enclosing_block = relevant_blocks
+        .iter()
+        .filter(|node| node.start_line <= start_line && node.end_line >= end_line)
+        .min_by_key(|node| node.end_line.saturating_sub(node.start_line))
+        .map(|node| (node.start_line, node.end_line));
+
+    for node in relevant_blocks {
+        let encloses_target = node.start_line <= start_line && node.end_line >= end_line;
+        if encloses_target && smallest_enclosing_block != Some((node.start_line, node.end_line)) {
+            continue;
         }
+        candidates.push(candidate_from_node(
+            file,
+            node,
+            "control_flow",
+            "该控制流结构包围或穿过当前多行目标。",
+            3,
+        ));
     }
     for return_statement in &analysis.returns {
         if ranges_intersect(
@@ -707,6 +761,27 @@ fn parse_static_analysis(path: &str, language: &str, code: &str) -> Result<Stati
         .ok_or_else(|| "Context Builder could not parse this file.".to_string())?;
     let mut analysis = StaticAnalysis::default();
     collect_static_analysis(tree.root_node(), code, &mut analysis);
+    Ok(analysis)
+}
+
+fn cached_static_analysis(
+    path: &str,
+    language: &str,
+    code: &str,
+) -> Result<StaticAnalysis, String> {
+    let cache_key = sha256_hex(&format!("{path}:{language}:{}", sha256_hex(code)));
+    let cache = STATIC_ANALYSIS_CACHE.get_or_init(|| Mutex::new(StaticAnalysisCache::default()));
+
+    if let Ok(mut cache) = cache.lock() {
+        if let Some(analysis) = cache.get(&cache_key) {
+            return Ok(analysis);
+        }
+    }
+
+    let analysis = parse_static_analysis(path, language, code)?;
+    if let Ok(mut cache) = cache.lock() {
+        cache.insert(cache_key, analysis.clone());
+    }
     Ok(analysis)
 }
 
@@ -1190,6 +1265,16 @@ mod tests {
         assert_eq!(first.snippets[0].code, second.snippets[0].code);
         assert_eq!(first.context_id, second.context_id);
         assert!(first.budget.used_chars >= char_count(&first.snippets[0].code));
+
+        let mut different_budget_request = sample_request("function", 12, 37);
+        different_budget_request.budget = Some(ContextBudgetInput {
+            max_chars: Some(20),
+            max_snippets: Some(1),
+        });
+        let different_budget = build_context_bundle(different_budget_request)
+            .expect("different budget context should build");
+
+        assert_ne!(first.context_id, different_budget.context_id);
     }
 
     #[test]
@@ -1220,5 +1305,48 @@ mod tests {
             .signals
             .referenced_identifiers
             .contains(&"name".to_string()));
+    }
+
+    #[test]
+    fn keeps_only_the_nearest_enclosing_control_flow_block() {
+        let code = (1..=40)
+            .map(|line| format!("const line{line} = {line};"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let file = ContextFileInput {
+            path: "src/nested.ts".to_string(),
+            language: "typescript".to_string(),
+            code,
+            code_nodes: vec![
+                sample_node("block", "outer if", 10, 30, Some("block:10-30")),
+                sample_node("block", "inner if", 15, 20, Some("block:15-20")),
+                sample_node("block", "inside target", 16, 17, Some("block:16-17")),
+            ],
+        };
+        let mut candidates = Vec::new();
+
+        append_control_flow_candidates(&mut candidates, &file, &StaticAnalysis::default(), 16, 18);
+
+        let control_flow_ranges: Vec<(usize, usize)> = candidates
+            .iter()
+            .filter(|candidate| candidate.kind == "control_flow")
+            .map(|candidate| (candidate.start_line, candidate.end_line))
+            .collect();
+        assert_eq!(control_flow_ranges, vec![(15, 20)]);
+    }
+
+    #[test]
+    fn static_analysis_cache_is_bounded_and_promotes_hits() {
+        let mut cache = StaticAnalysisCache::default();
+        for index in 0..STATIC_ANALYSIS_CACHE_CAPACITY {
+            cache.insert(format!("key-{index}"), StaticAnalysis::default());
+        }
+
+        assert!(cache.get("key-0").is_some());
+        cache.insert("key-new".to_string(), StaticAnalysis::default());
+
+        assert!(cache.get("key-0").is_some());
+        assert!(cache.get("key-1").is_none());
+        assert_eq!(cache.entries.len(), STATIC_ANALYSIS_CACHE_CAPACITY);
     }
 }
