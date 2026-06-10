@@ -38,7 +38,7 @@ export function buildRangeExplanation(file: CodeFile, selection: LineSelection):
       "多行选择是 CodeReader 的 P0 阅读动作：用户应能从任意代码片段进入解释面板，而不是被迫只读预定义结构节点。",
     riskNotes: [],
     readerNotes: ["这是当前选择生成的临时解释目标，暂不写入 SQLite。"],
-    status: "new_unexplained",
+    status: "transient",
     readingState: "unread",
     createdAt,
     updatedAt: createdAt
@@ -53,7 +53,9 @@ export function findExplanationForSelection(
   explanations: Explanation[],
   selection: LineSelection
 ): Explanation | undefined {
-  const candidates = explanations.filter((explanation) => explanation.targetType !== "file");
+  const candidates = explanations.filter(
+    (explanation) => explanation.targetType !== "file" && explanation.startLine !== undefined
+  );
   const span = (candidate: Explanation) => (candidate.endLine ?? candidate.startLine ?? 0) - (candidate.startLine ?? 0);
 
   const exact = candidates.find((explanation) => {

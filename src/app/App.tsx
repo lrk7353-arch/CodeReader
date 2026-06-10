@@ -240,6 +240,11 @@ export function App() {
       [selectedExplanation.id]: state
     }));
 
+    if (isTransientExplanation(selectedExplanation)) {
+      setWorkspaceStatus("临时多行选择状态已更新，仅保存在当前界面。");
+      return;
+    }
+
     if (!isDesktopRuntime() || !selectedFile.projectId) {
       setWorkspaceStatus("阅读状态已更新，浏览器预览不写入本地库。");
       return;
@@ -255,6 +260,10 @@ export function App() {
 
   async function saveFeedback(feedbackType: ExplanationFeedbackType) {
     if (!selectedExplanation) {
+      return;
+    }
+    if (isTransientExplanation(selectedExplanation)) {
+      setWorkspaceStatus("临时多行选择反馈已记录在当前界面，暂不写入 SQLite。");
       return;
     }
     if (!isDesktopRuntime() || !selectedFile.projectId) {
@@ -446,6 +455,10 @@ function parseRangeSelection(explanationId: string): CodeSelection | undefined {
     startLine: Number(match[1]),
     endLine: Number(match[2])
   };
+}
+
+function isTransientExplanation(explanation: Explanation) {
+  return explanation.status === "transient" || explanation.id.startsWith("range:");
 }
 
 function baseName(path: string) {

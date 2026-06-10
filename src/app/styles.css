@@ -338,6 +338,12 @@ button {
   font-size: 12px;
 }
 
+.status-pill.transient {
+  border-color: #c7b58a;
+  color: #7b5f15;
+  background: #fff9e8;
+}
+
 .meaning-stack {
   display: grid;
   gap: 10px;

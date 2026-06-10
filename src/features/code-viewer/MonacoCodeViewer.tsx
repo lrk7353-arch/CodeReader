@@ -6,7 +6,7 @@ import "monaco-editor/esm/vs/basic-languages/typescript/typescript.contribution"
 import editorWorker from "monaco-editor/esm/vs/editor/editor.worker?worker";
 import tsWorker from "monaco-editor/esm/vs/language/typescript/ts.worker?worker";
 import type { Explanation, SampleFile } from "../../types/explanation";
-import { rangeExplanationId } from "../explanations/selectableExplanations";
+import { findExplanationForSelection, rangeExplanationId } from "../explanations/selectableExplanations";
 
 interface MonacoCodeViewerProps {
   file: SampleFile;
@@ -47,39 +47,6 @@ function targetRange(explanation?: Explanation): CodeSelection | undefined {
     startLine: explanation.startLine,
     endLine: explanation.endLine ?? explanation.startLine
   };
-}
-
-function explanationForRange(file: SampleFile, selection: CodeSelection): Explanation | undefined {
-  const candidates = file.explanations.filter((explanation) => explanation.targetType !== "file");
-  const span = (candidate: Explanation) => (candidate.endLine ?? candidate.startLine ?? 0) - (candidate.startLine ?? 0);
-
-  const exact = candidates.find((explanation) => {
-    const start = explanation.startLine ?? 0;
-    const end = explanation.endLine ?? start;
-    return selection.startLine === start && selection.endLine === end;
-  });
-
-  if (exact) {
-    return exact;
-  }
-
-  if (selection.startLine === selection.endLine) {
-    return candidates
-      .filter((explanation) => {
-        const start = explanation.startLine ?? 0;
-        const end = explanation.endLine ?? start;
-        return selection.startLine >= start && selection.startLine <= end;
-      })
-      .sort((left, right) => span(left) - span(right))[0];
-  }
-
-  return candidates
-    .filter((explanation) => {
-      const start = explanation.startLine ?? 0;
-      const end = explanation.endLine ?? start;
-      return selection.startLine >= start && selection.endLine <= end;
-    })
-    .sort((left, right) => span(left) - span(right))[0];
 }
 
 function normalizeSelection(selection: monaco.Selection): CodeSelection {
@@ -158,7 +125,7 @@ export function MonacoCodeViewer({
       const currentFile = fileRef.current;
       const selection = normalizeSelection(event.selection);
       onSelectionChangeRef.current(selection);
-      const explanation = explanationForRange(currentFile, selection);
+      const explanation = findExplanationForSelection(currentFile.explanations, selection);
       const fallbackId =
         selection.startLine !== selection.endLine
           ? rangeExplanationId(currentFile.id, selection)

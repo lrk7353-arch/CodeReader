@@ -44,6 +44,7 @@ if (isWindowsWslUncPath(root)) {
       `pushd ${cmdQuote(root)}`,
       "if errorlevel 1 exit /b %errorlevel%",
       wslRoot ? `set "CODEREADER_WSL_ROOT=${wslRoot}"` : "",
+      "set \"CODEREADER_WINDOWS_ROOT=%CD%\"",
       "set \"PATH=C:\\ProgramData\\mingw64\\mingw64\\bin;C:\\ProgramData\\chocolatey\\lib\\rust\\tools\\lib\\rustlib\\x86_64-pc-windows-gnu\\bin\\self-contained;%PATH%\"",
       "set \"CARGO_TARGET_DIR=%USERPROFILE%\\.cache\\codereader\\cargo-target\"",
       command,
