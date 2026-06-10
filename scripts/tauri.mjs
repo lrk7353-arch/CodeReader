@@ -46,6 +46,7 @@ if (isWindowsWslUncPath(root)) {
       wslRoot ? `set "CODEREADER_WSL_ROOT=${wslRoot}"` : "",
       "set \"CODEREADER_WINDOWS_ROOT=%CD%\"",
       "set \"PATH=C:\\ProgramData\\mingw64\\mingw64\\bin;%USERPROFILE%\\.rustup\\toolchains\\stable-x86_64-pc-windows-gnu\\bin;%USERPROFILE%\\.rustup\\toolchains\\stable-x86_64-pc-windows-gnu\\lib\\rustlib\\x86_64-pc-windows-gnu\\bin\\self-contained;%PATH%\"",
+      "if not defined CODEREADER_CARGO_TARGET_DIR if exist D:\\CodeReaderCache set \"CODEREADER_CARGO_TARGET_DIR=D:\\CodeReaderCache\\cargo-target\"",
       "if not defined CODEREADER_CARGO_TARGET_DIR set \"CODEREADER_CARGO_TARGET_DIR=%SystemDrive%\\cr-target\"",
       "set \"CARGO_TARGET_DIR=%CODEREADER_CARGO_TARGET_DIR%\"",
       command,

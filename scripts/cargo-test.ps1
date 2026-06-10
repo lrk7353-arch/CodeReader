@@ -6,6 +6,8 @@ $rustBin = Join-Path $rustToolchain "bin"
 $rustSelfContained = Join-Path $rustToolchain "lib\rustlib\x86_64-pc-windows-gnu\bin\self-contained"
 $cargoTarget = if ($env:CODEREADER_CARGO_TARGET_DIR) {
     $env:CODEREADER_CARGO_TARGET_DIR
+} elseif (Test-Path -LiteralPath "D:\CodeReaderCache") {
+    "D:\CodeReaderCache\cargo-target"
 } else {
     Join-Path $env:SystemDrive "cr-target"
 }
