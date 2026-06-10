@@ -13,7 +13,10 @@ interface ExplanationPanelProps {
   contextError?: string;
   contextStatus: ContextPreviewStatus;
   explanation?: Explanation;
+  generationError?: string;
+  generationStatus: "idle" | "generating" | "error";
   onFeedback: (feedbackType: ExplanationFeedbackType) => void;
+  onGenerate: () => void;
   onReadingStateChange: (state: ReadingState) => void;
 }
 
@@ -22,7 +25,10 @@ export function ExplanationPanel({
   contextError,
   contextStatus,
   explanation,
+  generationError,
+  generationStatus,
   onFeedback,
+  onGenerate,
   onReadingStateChange
 }: ExplanationPanelProps) {
   if (!explanation) {
@@ -64,16 +70,35 @@ export function ExplanationPanel({
           风险与阅读提示
         </summary>
         <ul>
+          {explanation.priorKnowledge ? <li>前置知识：{explanation.priorKnowledge}</li> : null}
           {(explanation.riskNotes ?? []).map((note) => (
             <li key={note}>{note}</li>
           ))}
           {(explanation.readerNotes ?? []).map((note) => (
             <li key={note}>{note}</li>
           ))}
+          {explanation.reviewSuggestion ? <li>审阅建议：{explanation.reviewSuggestion}</li> : null}
         </ul>
       </details>
 
+      {explanation.trustReason ? (
+        <details className="detail-drawer">
+          <summary>
+            <CircleHelp size={15} aria-hidden="true" />
+            可信提示与相关行
+          </summary>
+          <div className="trust-detail">
+            <strong>{trustLabel(explanation.trustLabel)}</strong>
+            <p>{explanation.trustReason}</p>
+            <RelatedLines label="依赖" lines={explanation.dependsOnLines} />
+            <RelatedLines label="影响" lines={explanation.affectsLines} />
+          </div>
+        </details>
+      ) : null}
+
       <ContextPreview bundle={contextBundle} error={contextError} status={contextStatus} />
+
+      {generationError ? <p className="generation-error">{generationError}</p> : null}
 
       <ReadingStateControls currentState={explanation.readingState} onChange={onReadingStateChange} />
 
@@ -86,11 +111,47 @@ export function ExplanationPanel({
           <CircleHelp size={16} aria-hidden="true" />
           <span>不对劲</span>
         </button>
-        <button type="button" onClick={() => onFeedback("regenerate_requested")} title="请求重新解释">
-          <RefreshCw size={16} aria-hidden="true" />
-          <span>重新解释</span>
+        <button
+          type="button"
+          onClick={onGenerate}
+          disabled={generationStatus === "generating" || contextStatus !== "ready"}
+          title={explanation.status === "new_unexplained" ? "生成当前解释" : "重新生成当前解释"}
+        >
+          <RefreshCw
+            className={generationStatus === "generating" ? "spin-icon" : undefined}
+            size={16}
+            aria-hidden="true"
+          />
+          <span>
+            {generationStatus === "generating"
+              ? "生成中"
+              : explanation.status === "new_unexplained" || explanation.status === "transient"
+                ? "生成解释"
+                : "重新解释"}
+          </span>
         </button>
       </div>
     </aside>
   );
+}
+
+function RelatedLines({ label, lines }: { label: string; lines?: number[] }) {
+  if (!lines?.length) {
+    return null;
+  }
+  return (
+    <div className="related-lines">
+      <span>{label}</span>
+      <code>{lines.map((line) => `L${line}`).join(", ")}</code>
+    </div>
+  );
+}
+
+function trustLabel(label?: Explanation["trustLabel"]) {
+  const labels = {
+    clear: "解释相对明确",
+    context_needed: "这里依赖更多上下文",
+    review_recommended: "建议重点检查"
+  };
+  return label ? labels[label] : "可信提示";
 }

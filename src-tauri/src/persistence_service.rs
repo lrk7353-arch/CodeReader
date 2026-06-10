@@ -74,6 +74,7 @@ pub struct ExplanationInput {
 pub struct HydratedCodeFilePayload {
     explanations: Vec<ExplanationPayload>,
     database_path: String,
+    project_id: String,
 }
 
 #[derive(Serialize)]
@@ -86,25 +87,74 @@ pub struct PersistenceStatusPayload {
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ExplanationPayload {
-    id: String,
-    file_path: String,
-    file_hash: Option<String>,
-    target_type: String,
-    target_name: Option<String>,
-    start_line: Option<usize>,
-    end_line: Option<usize>,
-    symbol_id: Option<String>,
-    code_hash: Option<String>,
-    anchor_text: Option<String>,
-    code_meaning: String,
-    local_meaning: Option<String>,
-    global_meaning: Option<String>,
-    risk_notes: Vec<String>,
-    reader_notes: Vec<String>,
-    status: String,
-    reading_state: String,
-    created_at: String,
-    updated_at: String,
+    pub(crate) id: String,
+    pub(crate) file_path: String,
+    pub(crate) file_hash: Option<String>,
+    pub(crate) target_type: String,
+    pub(crate) target_name: Option<String>,
+    pub(crate) start_line: Option<usize>,
+    pub(crate) end_line: Option<usize>,
+    pub(crate) symbol_id: Option<String>,
+    pub(crate) code_hash: Option<String>,
+    pub(crate) anchor_text: Option<String>,
+    pub(crate) code_meaning: String,
+    pub(crate) local_meaning: Option<String>,
+    pub(crate) global_meaning: Option<String>,
+    pub(crate) prior_knowledge: Option<String>,
+    pub(crate) review_suggestion: Option<String>,
+    pub(crate) trust_label: Option<String>,
+    pub(crate) trust_reason: Option<String>,
+    pub(crate) depends_on_lines: Vec<usize>,
+    pub(crate) affects_lines: Vec<usize>,
+    pub(crate) risk_notes: Vec<String>,
+    pub(crate) reader_notes: Vec<String>,
+    pub(crate) status: String,
+    pub(crate) reading_state: String,
+    pub(crate) created_at: String,
+    pub(crate) updated_at: String,
+}
+
+pub(crate) struct StoredModelConfig {
+    pub(crate) endpoint: String,
+    pub(crate) model: String,
+    pub(crate) timeout_seconds: u64,
+    pub(crate) updated_at: String,
+}
+
+pub(crate) struct GeneratedExplanationInput {
+    pub(crate) project_id: Option<String>,
+    pub(crate) project_root: Option<String>,
+    pub(crate) file_id: String,
+    pub(crate) file_path: String,
+    pub(crate) language: String,
+    pub(crate) file_hash: String,
+    pub(crate) snapshot_id: String,
+    pub(crate) line_count: usize,
+    pub(crate) explanation_id: String,
+    pub(crate) code_node_id: Option<String>,
+    pub(crate) target_type: String,
+    pub(crate) target_name: Option<String>,
+    pub(crate) symbol_id: Option<String>,
+    pub(crate) start_line: usize,
+    pub(crate) end_line: usize,
+    pub(crate) code_hash: String,
+    pub(crate) anchor_text: String,
+    pub(crate) code_level_meaning: String,
+    pub(crate) local_composition_meaning: String,
+    pub(crate) project_role_meaning: String,
+    pub(crate) prior_knowledge: Option<String>,
+    pub(crate) risk_notes: Vec<String>,
+    pub(crate) learning_note: Option<String>,
+    pub(crate) review_suggestion: Option<String>,
+    pub(crate) trust_label: String,
+    pub(crate) trust_reason: String,
+    pub(crate) depends_on_lines: Vec<usize>,
+    pub(crate) affects_lines: Vec<usize>,
+    pub(crate) display_mode: String,
+    pub(crate) prompt_version: String,
+    pub(crate) model_info: String,
+    pub(crate) context_id: String,
+    pub(crate) context_sources: String,
 }
 
 #[derive(Deserialize)]
@@ -348,7 +398,10 @@ fn hydrate_code_file_at_path(
                 explanation.target_type,
                 request.file.id,
                 explanation.file_path,
-                explanation.file_hash.clone().or_else(|| Some(file_hash.clone())),
+                explanation
+                    .file_hash
+                    .clone()
+                    .or_else(|| Some(file_hash.clone())),
                 snapshot_id,
                 code_node_id,
                 explanation.symbol_id,
@@ -384,6 +437,7 @@ fn hydrate_code_file_at_path(
     Ok(HydratedCodeFilePayload {
         explanations,
         database_path: display_path(database_path),
+        project_id,
     })
 }
 
@@ -455,6 +509,312 @@ fn save_feedback_at_path(
     })
 }
 
+pub(crate) fn load_model_config(database_path: &Path) -> Result<Option<StoredModelConfig>, String> {
+    let conn = open_database(database_path)?;
+    let mut statement = conn
+        .prepare(
+            "SELECT endpoint, model, timeout_seconds, updated_at
+             FROM model_provider_settings
+             WHERE id = 'default'",
+        )
+        .map_err(database_error)?;
+    let mut rows = statement.query([]).map_err(database_error)?;
+    let Some(row) = rows.next().map_err(database_error)? else {
+        return Ok(None);
+    };
+    let timeout_seconds: i64 = row.get(2).map_err(database_error)?;
+    Ok(Some(StoredModelConfig {
+        endpoint: row.get(0).map_err(database_error)?,
+        model: row.get(1).map_err(database_error)?,
+        timeout_seconds: usize::try_from(timeout_seconds.max(1))
+            .unwrap_or(60)
+            .min(300) as u64,
+        updated_at: row.get(3).map_err(database_error)?,
+    }))
+}
+
+pub(crate) fn save_model_config(
+    database_path: &Path,
+    endpoint: &str,
+    model: &str,
+    timeout_seconds: u64,
+) -> Result<StoredModelConfig, String> {
+    let conn = open_database(database_path)?;
+    let updated_at = now_timestamp();
+    conn.execute(
+        "INSERT INTO model_provider_settings
+         (id, endpoint, model, timeout_seconds, updated_at)
+         VALUES ('default', ?1, ?2, ?3, ?4)
+         ON CONFLICT(id) DO UPDATE SET
+           endpoint = excluded.endpoint,
+           model = excluded.model,
+           timeout_seconds = excluded.timeout_seconds,
+           updated_at = excluded.updated_at",
+        params![endpoint, model, timeout_seconds as i64, updated_at],
+    )
+    .map_err(database_error)?;
+
+    Ok(StoredModelConfig {
+        endpoint: endpoint.to_string(),
+        model: model.to_string(),
+        timeout_seconds,
+        updated_at,
+    })
+}
+
+pub(crate) fn delete_model_config(database_path: &Path) -> Result<(), String> {
+    let conn = open_database(database_path)?;
+    conn.execute(
+        "DELETE FROM model_provider_settings WHERE id = 'default'",
+        [],
+    )
+    .map_err(database_error)?;
+    Ok(())
+}
+
+pub(crate) fn save_generated_explanation(
+    database_path: &Path,
+    input: GeneratedExplanationInput,
+) -> Result<ExplanationPayload, String> {
+    let mut conn = open_database(database_path)?;
+    let tx = conn.transaction().map_err(database_error)?;
+    let now = now_timestamp();
+    let project_id = input.project_id.clone().unwrap_or_else(|| {
+        let root = input
+            .project_root
+            .as_deref()
+            .unwrap_or(input.file_path.as_str());
+        format!("project:{}", &sha256_hex(root)[..20])
+    });
+    let project_root = input
+        .project_root
+        .clone()
+        .unwrap_or_else(|| input.file_path.clone());
+    let created_at = tx
+        .query_row(
+            "SELECT created_at FROM explanation_nodes WHERE id = ?1",
+            params![input.explanation_id],
+            |row| row.get::<_, String>(0),
+        )
+        .unwrap_or_else(|_| now.clone());
+    let risk_summary = join_notes(Some(&input.risk_notes));
+    let depends_on_lines = serialize_line_numbers(&input.depends_on_lines)?;
+    let affects_lines = serialize_line_numbers(&input.affects_lines)?;
+
+    tx.execute(
+        "INSERT INTO projects (id, root_path, created_at, updated_at)
+         VALUES (?1, ?2, ?3, ?3)
+         ON CONFLICT(id) DO UPDATE SET root_path = excluded.root_path, updated_at = excluded.updated_at",
+        params![project_id, project_root, now],
+    )
+    .map_err(database_error)?;
+    tx.execute(
+        "INSERT INTO files
+         (id, project_id, path, language, content_hash, last_analyzed_hash, status, updated_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?5, 'valid', ?6)
+         ON CONFLICT(id) DO UPDATE SET
+           project_id = excluded.project_id,
+           path = excluded.path,
+           language = excluded.language,
+           content_hash = excluded.content_hash,
+           last_analyzed_hash = excluded.last_analyzed_hash,
+           status = excluded.status,
+           updated_at = excluded.updated_at",
+        params![
+            input.file_id,
+            project_id,
+            input.file_path,
+            input.language,
+            input.file_hash,
+            now
+        ],
+    )
+    .map_err(database_error)?;
+    tx.execute(
+        "INSERT OR IGNORE INTO code_snapshots
+         (id, project_id, file_id, content_hash, line_count, snapshot_reason, created_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, 'llm_generation', ?6)",
+        params![
+            input.snapshot_id,
+            project_id,
+            input.file_id,
+            input.file_hash,
+            input.line_count as i64,
+            now
+        ],
+    )
+    .map_err(database_error)?;
+
+    tx.execute(
+        "INSERT INTO explanation_nodes
+         (id, project_id, file_id, snapshot_id, code_node_id, explanation_type,
+          start_line, end_line, code_level_meaning, local_composition_meaning,
+          project_role_meaning, prior_knowledge, risk_summary, learning_note,
+          review_suggestion, trust_label, trust_reason, depends_on_lines,
+          affects_lines, display_mode, status, schema_version, prompt_version,
+          model_info, context_id, context_sources, created_at, updated_at)
+         VALUES
+         (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13,
+          ?14, ?15, ?16, ?17, ?18, ?19, ?20, 'valid', ?21, ?22, ?23,
+          ?24, ?25, ?26, ?27)
+         ON CONFLICT(id) DO UPDATE SET
+           project_id = excluded.project_id,
+           file_id = excluded.file_id,
+           snapshot_id = excluded.snapshot_id,
+           code_node_id = excluded.code_node_id,
+           explanation_type = excluded.explanation_type,
+           start_line = excluded.start_line,
+           end_line = excluded.end_line,
+           code_level_meaning = excluded.code_level_meaning,
+           local_composition_meaning = excluded.local_composition_meaning,
+           project_role_meaning = excluded.project_role_meaning,
+           prior_knowledge = excluded.prior_knowledge,
+           risk_summary = excluded.risk_summary,
+           learning_note = excluded.learning_note,
+           review_suggestion = excluded.review_suggestion,
+           trust_label = excluded.trust_label,
+           trust_reason = excluded.trust_reason,
+           depends_on_lines = excluded.depends_on_lines,
+           affects_lines = excluded.affects_lines,
+           display_mode = excluded.display_mode,
+           status = excluded.status,
+           schema_version = excluded.schema_version,
+           prompt_version = excluded.prompt_version,
+           model_info = excluded.model_info,
+           context_id = excluded.context_id,
+           context_sources = excluded.context_sources,
+           updated_at = excluded.updated_at",
+        params![
+            input.explanation_id,
+            project_id,
+            input.file_id,
+            input.snapshot_id,
+            input.code_node_id,
+            input.target_type,
+            input.start_line as i64,
+            input.end_line as i64,
+            input.code_level_meaning,
+            input.local_composition_meaning,
+            input.project_role_meaning,
+            input.prior_knowledge,
+            risk_summary,
+            input.learning_note,
+            input.review_suggestion,
+            input.trust_label,
+            input.trust_reason,
+            depends_on_lines,
+            affects_lines,
+            input.display_mode,
+            SCHEMA_VERSION,
+            input.prompt_version,
+            input.model_info,
+            input.context_id,
+            input.context_sources,
+            created_at,
+            now
+        ],
+    )
+    .map_err(database_error)?;
+
+    let target_id = format!("target:{}", input.explanation_id);
+    tx.execute(
+        "INSERT INTO explanation_targets
+         (id, project_id, explanation_id, target_type, file_id, file_path, file_hash,
+          snapshot_id, code_node_id, symbol_id, start_line, end_line, code_hash,
+          ast_hash, anchor_text, status, created_at, updated_at)
+         VALUES
+         (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13,
+          ?13, ?14, 'valid', ?15, ?16)
+         ON CONFLICT(id) DO UPDATE SET
+           project_id = excluded.project_id,
+           explanation_id = excluded.explanation_id,
+           target_type = excluded.target_type,
+           file_id = excluded.file_id,
+           file_path = excluded.file_path,
+           file_hash = excluded.file_hash,
+           snapshot_id = excluded.snapshot_id,
+           code_node_id = excluded.code_node_id,
+           symbol_id = excluded.symbol_id,
+           start_line = excluded.start_line,
+           end_line = excluded.end_line,
+           code_hash = excluded.code_hash,
+           ast_hash = excluded.ast_hash,
+           anchor_text = excluded.anchor_text,
+           status = excluded.status,
+           updated_at = excluded.updated_at",
+        params![
+            target_id,
+            project_id,
+            input.explanation_id,
+            input.target_type,
+            input.file_id,
+            input.file_path,
+            input.file_hash,
+            input.snapshot_id,
+            input.code_node_id,
+            input.symbol_id,
+            input.start_line as i64,
+            input.end_line as i64,
+            input.code_hash,
+            input.anchor_text,
+            created_at,
+            now
+        ],
+    )
+    .map_err(database_error)?;
+
+    tx.execute(
+        "INSERT OR IGNORE INTO user_reading_states
+         (id, project_id, explanation_id, state, note, updated_at)
+         VALUES (?1, ?2, ?3, 'unread', NULL, ?4)",
+        params![
+            reading_state_id(&project_id, &input.explanation_id),
+            project_id,
+            input.explanation_id,
+            now
+        ],
+    )
+    .map_err(database_error)?;
+
+    let reading_state = tx
+        .query_row(
+            "SELECT state FROM user_reading_states
+             WHERE project_id = ?1 AND explanation_id = ?2",
+            params![project_id, input.explanation_id],
+            |row| row.get::<_, String>(0),
+        )
+        .unwrap_or_else(|_| "unread".to_string());
+    tx.commit().map_err(database_error)?;
+
+    Ok(ExplanationPayload {
+        id: input.explanation_id,
+        file_path: input.file_path,
+        file_hash: Some(input.file_hash),
+        target_type: input.target_type,
+        target_name: input.target_name,
+        start_line: Some(input.start_line),
+        end_line: Some(input.end_line),
+        symbol_id: input.symbol_id,
+        code_hash: Some(input.code_hash),
+        anchor_text: Some(input.anchor_text),
+        code_meaning: input.code_level_meaning,
+        local_meaning: Some(input.local_composition_meaning),
+        global_meaning: Some(input.project_role_meaning),
+        prior_knowledge: input.prior_knowledge,
+        review_suggestion: input.review_suggestion,
+        trust_label: Some(input.trust_label),
+        trust_reason: Some(input.trust_reason),
+        depends_on_lines: input.depends_on_lines,
+        affects_lines: input.affects_lines,
+        risk_notes: input.risk_notes,
+        reader_notes: input.learning_note.into_iter().collect(),
+        status: "valid".to_string(),
+        reading_state,
+        created_at,
+        updated_at: now,
+    })
+}
+
 fn load_explanations(
     conn: &Connection,
     project_id: &str,
@@ -477,8 +837,14 @@ fn load_explanations(
                e.code_level_meaning,
                e.local_composition_meaning,
                e.project_role_meaning,
+               e.prior_knowledge,
                e.risk_summary,
                e.learning_note,
+               e.review_suggestion,
+               e.trust_label,
+               e.trust_reason,
+               e.depends_on_lines,
+               e.affects_lines,
                t.status,
                COALESCE(s.state, 'unread') AS reading_state,
                e.created_at,
@@ -508,8 +874,10 @@ fn load_explanations(
 
     let rows = statement
         .query_map(params![project_id, file_id, snapshot_id], |row| {
-            let risk_summary: Option<String> = row.get(13)?;
-            let learning_note: Option<String> = row.get(14)?;
+            let risk_summary: Option<String> = row.get(14)?;
+            let learning_note: Option<String> = row.get(15)?;
+            let depends_on_lines: Option<String> = row.get(19)?;
+            let affects_lines: Option<String> = row.get(20)?;
             Ok(ExplanationPayload {
                 id: row.get(0)?,
                 file_path: row.get(1)?,
@@ -524,12 +892,18 @@ fn load_explanations(
                 code_meaning: row.get(10)?,
                 local_meaning: row.get(11)?,
                 global_meaning: row.get(12)?,
+                prior_knowledge: row.get(13)?,
+                review_suggestion: row.get(16)?,
+                trust_label: row.get(17)?,
+                trust_reason: row.get(18)?,
+                depends_on_lines: parse_line_numbers(depends_on_lines),
+                affects_lines: parse_line_numbers(affects_lines),
                 risk_notes: split_notes(risk_summary),
                 reader_notes: split_notes(learning_note),
-                status: row.get(15)?,
-                reading_state: row.get(16)?,
-                created_at: row.get(17)?,
-                updated_at: row.get(18)?,
+                status: row.get(21)?,
+                reading_state: row.get(22)?,
+                created_at: row.get(23)?,
+                updated_at: row.get(24)?,
             })
         })
         .map_err(database_error)?;
@@ -620,11 +994,15 @@ fn initialize_schema(conn: &Connection) -> Result<(), String> {
           trust_label TEXT,
           trust_reason TEXT,
           raw_confidence REAL,
+          depends_on_lines TEXT,
+          affects_lines TEXT,
           display_mode TEXT,
           status TEXT NOT NULL,
           schema_version TEXT NOT NULL,
           prompt_version TEXT NOT NULL,
           model_info TEXT,
+          context_id TEXT,
+          context_sources TEXT,
           created_at TEXT NOT NULL,
           updated_at TEXT NOT NULL
         );
@@ -685,6 +1063,14 @@ fn initialize_schema(conn: &Connection) -> Result<(), String> {
           created_at TEXT NOT NULL
         );
 
+        CREATE TABLE IF NOT EXISTS model_provider_settings (
+          id TEXT PRIMARY KEY,
+          endpoint TEXT NOT NULL,
+          model TEXT NOT NULL,
+          timeout_seconds INTEGER NOT NULL,
+          updated_at TEXT NOT NULL
+        );
+
         CREATE INDEX IF NOT EXISTS idx_explanation_nodes_file
           ON explanation_nodes(project_id, file_id, snapshot_id);
         CREATE INDEX IF NOT EXISTS idx_explanation_targets_explanation
@@ -693,16 +1079,47 @@ fn initialize_schema(conn: &Connection) -> Result<(), String> {
           ON user_reading_states(project_id, explanation_id);
         ",
     )
-    .map_err(database_error)
+    .map_err(database_error)?;
+
+    ensure_column(conn, "explanation_nodes", "depends_on_lines", "TEXT")?;
+    ensure_column(conn, "explanation_nodes", "affects_lines", "TEXT")?;
+    ensure_column(conn, "explanation_nodes", "context_id", "TEXT")?;
+    ensure_column(conn, "explanation_nodes", "context_sources", "TEXT")?;
+    Ok(())
 }
 
 #[cfg(not(test))]
-fn database_path(app: &AppHandle) -> Result<PathBuf, String> {
+pub(crate) fn database_path(app: &AppHandle) -> Result<PathBuf, String> {
     let app_data_dir = app
         .path()
         .app_data_dir()
         .map_err(|error| format!("Failed to resolve CodeReader data directory: {error}"))?;
     Ok(app_data_dir.join(DATABASE_FILE_NAME))
+}
+
+fn ensure_column(
+    conn: &Connection,
+    table: &str,
+    column: &str,
+    definition: &str,
+) -> Result<(), String> {
+    let mut statement = conn
+        .prepare(&format!("PRAGMA table_info({table})"))
+        .map_err(database_error)?;
+    let columns = statement
+        .query_map([], |row| row.get::<_, String>(1))
+        .map_err(database_error)?;
+    for existing in columns {
+        if existing.map_err(database_error)? == column {
+            return Ok(());
+        }
+    }
+    conn.execute(
+        &format!("ALTER TABLE {table} ADD COLUMN {column} {definition}"),
+        [],
+    )
+    .map_err(database_error)?;
+    Ok(())
 }
 
 fn stable_project_id(file: &PersistenceCodeFile) -> String {
@@ -788,6 +1205,17 @@ fn split_notes(value: Option<String>) -> Vec<String> {
         .collect()
 }
 
+fn serialize_line_numbers(lines: &[usize]) -> Result<String, String> {
+    serde_json::to_string(lines)
+        .map_err(|error| format!("Failed to serialize explanation line relations: {error}"))
+}
+
+fn parse_line_numbers(value: Option<String>) -> Vec<usize> {
+    value
+        .and_then(|json| serde_json::from_str::<Vec<usize>>(&json).ok())
+        .unwrap_or_default()
+}
+
 fn line_count(code: &str) -> usize {
     code.lines().count().max(1)
 }
@@ -848,7 +1276,8 @@ mod tests {
     #[test]
     fn saves_explanation_feedback() {
         let database_path = temp_database_path("feedback");
-        hydrate_code_file_at_path(&database_path, sample_request()).expect("hydrate should prepare DB");
+        hydrate_code_file_at_path(&database_path, sample_request())
+            .expect("hydrate should prepare DB");
         let saved = save_feedback_at_path(
             &database_path,
             SaveFeedbackRequest {
@@ -871,6 +1300,88 @@ mod tests {
             )
             .expect("count should query");
         assert_eq!(count, 1);
+
+        let _ = std::fs::remove_file(database_path);
+    }
+
+    #[test]
+    fn saves_and_reloads_generated_explanation() {
+        let database_path = temp_database_path("generated");
+        let input = GeneratedExplanationInput {
+            project_id: Some("project:test".to_string()),
+            project_root: Some("C:/test-project".to_string()),
+            file_id: "file:test".to_string(),
+            file_path: "C:/test-project/src/example.ts".to_string(),
+            language: "typescript".to_string(),
+            file_hash: "file-hash".to_string(),
+            snapshot_id: "snapshot:test".to_string(),
+            line_count: 5,
+            explanation_id: "exp:test".to_string(),
+            code_node_id: None,
+            target_type: "line".to_string(),
+            target_name: Some("line 2".to_string()),
+            symbol_id: None,
+            start_line: 2,
+            end_line: 2,
+            code_hash: "code-hash".to_string(),
+            anchor_text: "const value = input;".to_string(),
+            code_level_meaning: "读取输入。".to_string(),
+            local_composition_meaning: "为后续校验准备值。".to_string(),
+            project_role_meaning: "当前上下文不足。".to_string(),
+            prior_knowledge: Some("变量赋值。".to_string()),
+            risk_notes: vec!["[validation / medium] 检查输入校验。".to_string()],
+            learning_note: Some("理解 const。".to_string()),
+            review_suggestion: Some("检查后续分支。".to_string()),
+            trust_label: "context_needed".to_string(),
+            trust_reason: "只提供了局部上下文。".to_string(),
+            depends_on_lines: vec![1],
+            affects_lines: vec![3],
+            display_mode: "plain".to_string(),
+            prompt_version: "test-prompt".to_string(),
+            model_info: r#"{"provider":"test","model":"fixture"}"#.to_string(),
+            context_id: "context:test".to_string(),
+            context_sources: "[]".to_string(),
+        };
+
+        let saved =
+            save_generated_explanation(&database_path, input).expect("generated explanation saves");
+        assert_eq!(saved.code_meaning, "读取输入。");
+        assert_eq!(saved.trust_label.as_deref(), Some("context_needed"));
+
+        let conn = open_database(&database_path).expect("database opens");
+        let restored = load_explanations(&conn, "project:test", "file:test", "snapshot:test")
+            .expect("generated explanation reloads");
+        assert_eq!(restored.len(), 1);
+        assert_eq!(restored[0].depends_on_lines, vec![1]);
+        assert_eq!(restored[0].affects_lines, vec![3]);
+        assert_eq!(
+            restored[0].review_suggestion.as_deref(),
+            Some("检查后续分支。")
+        );
+
+        let _ = std::fs::remove_file(database_path);
+    }
+
+    #[test]
+    fn saves_and_deletes_model_config() {
+        let database_path = temp_database_path("model-config");
+        save_model_config(
+            &database_path,
+            "https://api.example.com/v1/chat/completions",
+            "example-model",
+            45,
+        )
+        .expect("model config saves");
+        let stored = load_model_config(&database_path)
+            .expect("model config loads")
+            .expect("model config exists");
+        assert_eq!(stored.model, "example-model");
+        assert_eq!(stored.timeout_seconds, 45);
+
+        delete_model_config(&database_path).expect("model config deletes");
+        assert!(load_model_config(&database_path)
+            .expect("deleted model config queries")
+            .is_none());
 
         let _ = std::fs::remove_file(database_path);
     }

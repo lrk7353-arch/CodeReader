@@ -1,18 +1,22 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { FilePlus2, FolderOpen } from "lucide-react";
+import { FilePlus2, FolderOpen, Settings2 } from "lucide-react";
 import { sampleFiles } from "../data/sampleProject";
 import type {
   CodeFile,
   ContextBundle,
   Explanation,
   ExplanationFeedbackType,
+  ModelConfig,
   ProjectScanResult,
-  ReadingState
+  ReadingState,
+  SaveModelConfigInput
 } from "../types/explanation";
 import { FileExplorer } from "../features/file-explorer/FileExplorer";
 import { MonacoCodeViewer, type CodeSelection } from "../features/code-viewer/MonacoCodeViewer";
 import { ExplanationPanel } from "../features/explanation-panel/ExplanationPanel";
 import type { ContextPreviewStatus } from "../features/context-preview/ContextPreview";
+import { GenerationConfirmDialog } from "../features/explanation-generation/GenerationConfirmDialog";
+import { ModelSettingsDialog } from "../features/model-settings/ModelSettingsDialog";
 import {
   buildRangeExplanation,
   buildSelectableExplanations,
@@ -20,6 +24,8 @@ import {
 } from "../features/explanations/selectableExplanations";
 import {
   buildExplanationContext,
+  generateExplanation,
+  getModelConfig,
   isDesktopRuntime,
   hydrateCodeFilePersistence,
   initializePersistence,
@@ -27,10 +33,13 @@ import {
   pickAndLoadCodeFile,
   pickAndScanProject,
   persistExplanationFeedback,
-  persistReadingState
+  persistReadingState,
+  resetModelConfig,
+  saveModelConfig
 } from "../services/desktopWorkspace";
 
 type PersistenceStatus = "preview" | "initializing" | "ready" | "error";
+type GenerationStatus = "idle" | "generating" | "error";
 
 export function App() {
   const [files, setFiles] = useState<CodeFile[]>(sampleFiles);
@@ -53,6 +62,13 @@ export function App() {
   const [contextStatus, setContextStatus] = useState<ContextPreviewStatus>(
     isDesktopRuntime() ? "loading" : "unavailable"
   );
+  const [modelConfig, setModelConfig] = useState<ModelConfig>();
+  const [modelSettingsOpen, setModelSettingsOpen] = useState(false);
+  const [modelSettingsBusy, setModelSettingsBusy] = useState(false);
+  const [modelSettingsError, setModelSettingsError] = useState("");
+  const [generationConfirmOpen, setGenerationConfirmOpen] = useState(false);
+  const [generationStatus, setGenerationStatus] = useState<GenerationStatus>("idle");
+  const [generationError, setGenerationError] = useState("");
 
   const selectedFile = useMemo(
     () => files.find((file) => file.id === selectedFileId) ?? files[0] ?? sampleFiles[0],
@@ -125,10 +141,16 @@ export function App() {
 
     let cancelled = false;
     void initializePersistence()
-      .then((status) => {
+      .then(async (status) => {
+        const hydratedSamples = await Promise.all(
+          sampleFiles.map((file) =>
+            hydrateCodeFilePersistence(file, buildSelectableExplanations(file))
+          )
+        );
         if (cancelled) {
           return;
         }
+        setFiles(hydratedSamples);
         setDatabasePath(status.databasePath);
         setPersistenceStatus(status.initialized ? "ready" : "error");
         setWorkspaceStatus((current) => (current === "示例工作区" ? "本地库已就绪" : current));
@@ -145,6 +167,33 @@ export function App() {
       cancelled = true;
     };
   }, []);
+
+  useEffect(() => {
+    if (!isDesktopRuntime()) {
+      return;
+    }
+    let cancelled = false;
+    void getModelConfig()
+      .then((config) => {
+        if (!cancelled) {
+          setModelConfig(config);
+        }
+      })
+      .catch((error) => {
+        if (!cancelled) {
+          setWorkspaceStatus(`模型配置读取失败：${errorMessage(error)}`);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    setGenerationConfirmOpen(false);
+    setGenerationStatus("idle");
+    setGenerationError("");
+  }, [selectedExplanationId, selectedFileId]);
 
   useEffect(() => {
     if (!isDesktopRuntime() || !selectedExplanation || !selectedFile.code) {
@@ -328,6 +377,106 @@ export function App() {
     }
   }
 
+  function requestExplanationGeneration() {
+    if (!isDesktopRuntime()) {
+      setWorkspaceStatus("真实解释生成需要在 Tauri 桌面端运行。");
+      return;
+    }
+    if (!selectedExplanation || !contextBundle || contextStatus !== "ready") {
+      setGenerationStatus("error");
+      setGenerationError("上下文尚未准备完成，请稍后重试。");
+      return;
+    }
+    if (!modelConfig?.configured) {
+      setModelSettingsError("");
+      setModelSettingsOpen(true);
+      setWorkspaceStatus("请先配置模型端点、模型名称和 API Key。");
+      return;
+    }
+    setGenerationError("");
+    setGenerationStatus("idle");
+    setGenerationConfirmOpen(true);
+  }
+
+  async function confirmExplanationGeneration() {
+    if (!selectedExplanation || !contextBundle || !modelConfig) {
+      return;
+    }
+    setGenerationStatus("generating");
+    setGenerationError("");
+    try {
+      const result = await generateExplanation(selectedFile, selectedExplanation);
+      setFiles((current) =>
+        current.map((file) =>
+          file.id === selectedFile.id
+            ? {
+              ...file,
+              explanations: upsertExplanation(file.explanations, result.explanation)
+            }
+            : file
+        )
+      );
+      setSelectedExplanationId(result.explanation.id);
+      setReadingStates((current) => ({
+        ...current,
+        [result.explanation.id]: result.explanation.readingState
+      }));
+      setGenerationConfirmOpen(false);
+      setGenerationStatus("idle");
+      setWorkspaceStatus(
+        `解释已生成并保存：${result.model}${result.attempts > 1 ? "（结构修复后通过）" : ""}`
+      );
+    } catch (error) {
+      const message = errorMessage(error);
+      setGenerationStatus("error");
+      setGenerationError(message);
+      setWorkspaceStatus(message);
+    }
+  }
+
+  async function persistModelConfig(input: SaveModelConfigInput) {
+    setModelSettingsBusy(true);
+    setModelSettingsError("");
+    try {
+      const config = await saveModelConfig(input);
+      setModelConfig(config);
+      if (config.configured) {
+        setModelSettingsOpen(false);
+        setWorkspaceStatus(`模型配置已保存：${config.model}`);
+      } else {
+        setModelSettingsError("端点和模型已保存；远程端点还需要填写 API Key。");
+      }
+    } catch (error) {
+      setModelSettingsError(errorMessage(error));
+    } finally {
+      setModelSettingsBusy(false);
+    }
+  }
+
+  async function clearModelConfig() {
+    setModelSettingsBusy(true);
+    setModelSettingsError("");
+    try {
+      const config = await resetModelConfig();
+      setModelConfig(config);
+      setModelSettingsOpen(false);
+      setWorkspaceStatus("模型配置和 API Key 已清除。");
+    } catch (error) {
+      setModelSettingsError(errorMessage(error));
+    } finally {
+      setModelSettingsBusy(false);
+    }
+  }
+
+  function openModelSettings() {
+    if (!isDesktopRuntime()) {
+      setWorkspaceStatus("模型配置需要在 Tauri 桌面端运行。");
+      return;
+    }
+    setModelSettingsError("");
+    setModelSettingsOpen(true);
+  }
+
   async function openFile() {
     if (!isDesktopRuntime()) {
       setWorkspaceStatus("本地文件打开需要在 Tauri 桌面端运行。");
@@ -409,6 +558,10 @@ export function App() {
             <FolderOpen size={16} aria-hidden="true" />
             <span>打开项目</span>
           </button>
+          <button type="button" onClick={openModelSettings} title="配置 LLM">
+            <Settings2 size={16} aria-hidden="true" />
+            <span>模型</span>
+          </button>
         </div>
         <div className="topbar-status">
           <span>{workspaceStatus}</span>
@@ -437,7 +590,10 @@ export function App() {
           contextError={contextError}
           contextStatus={contextStatus}
           explanation={selectedExplanation}
+          generationError={generationError}
+          generationStatus={generationStatus}
           onFeedback={saveFeedback}
+          onGenerate={requestExplanationGeneration}
           onReadingStateChange={updateReadingState}
         />
       </section>
@@ -457,7 +613,36 @@ export function App() {
         >
           {persistenceLabel(persistenceStatus)}
         </span>
+        <span className={modelConfig?.configured ? "model-ready" : "model-unconfigured"}>
+          {modelConfig?.configured ? modelConfig.model : "模型未配置"}
+        </span>
       </footer>
+
+      <ModelSettingsDialog
+        busy={modelSettingsBusy}
+        config={modelConfig}
+        error={modelSettingsError}
+        open={modelSettingsOpen}
+        onClose={() => setModelSettingsOpen(false)}
+        onResetConfig={clearModelConfig}
+        onSave={persistModelConfig}
+      />
+      {modelConfig && contextBundle && selectedExplanation ? (
+        <GenerationConfirmDialog
+          busy={generationStatus === "generating"}
+          config={modelConfig}
+          contextBundle={contextBundle}
+          error={generationError}
+          explanation={selectedExplanation}
+          open={generationConfirmOpen}
+          onCancel={() => {
+            setGenerationConfirmOpen(false);
+            setGenerationStatus("idle");
+            setGenerationError("");
+          }}
+          onConfirm={confirmExplanationGeneration}
+        />
+      ) : null}
     </main>
   );
 }
@@ -536,4 +721,12 @@ function persistenceTooltip(status: PersistenceStatus) {
     error: "CodeReader SQLite 数据库初始化或写入失败"
   };
   return tooltips[status];
+}
+
+function upsertExplanation(explanations: Explanation[], next: Explanation) {
+  const existingIndex = explanations.findIndex((explanation) => explanation.id === next.id);
+  if (existingIndex === -1) {
+    return [...explanations, next];
+  }
+  return explanations.map((explanation, index) => (index === existingIndex ? next : explanation));
 }

@@ -38,6 +38,12 @@ export interface Explanation {
   codeMeaning: string;
   localMeaning?: string;
   globalMeaning?: string;
+  priorKnowledge?: string;
+  reviewSuggestion?: string;
+  trustLabel?: "clear" | "context_needed" | "review_recommended";
+  trustReason?: string;
+  dependsOnLines?: number[];
+  affectsLines?: number[];
   riskNotes?: string[];
   readerNotes?: string[];
   status: ExplanationStatus;
@@ -153,4 +159,28 @@ export interface ContextBundle {
   sources: ContextSource[];
   budget: ContextBudgetResult;
   warnings: string[];
+}
+
+export interface ModelConfig {
+  endpoint: string;
+  model: string;
+  timeoutSeconds: number;
+  hasApiKey: boolean;
+  configured: boolean;
+  updatedAt?: string;
+}
+
+export interface SaveModelConfigInput {
+  endpoint: string;
+  model: string;
+  timeoutSeconds: number;
+  apiKey?: string;
+}
+
+export interface GenerateExplanationResult {
+  explanation: Explanation;
+  contextId: string;
+  provider: string;
+  model: string;
+  attempts: number;
 }

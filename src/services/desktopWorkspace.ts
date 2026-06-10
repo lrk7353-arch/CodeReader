@@ -5,8 +5,11 @@ import type {
   ContextBundle,
   Explanation,
   ExplanationFeedbackType,
+  GenerateExplanationResult,
+  ModelConfig,
   ProjectScanResult,
-  ReadingState
+  ReadingState,
+  SaveModelConfigInput
 } from "../types/explanation";
 
 const codeFileFilters = [
@@ -70,7 +73,7 @@ export async function hydrateCodeFilePersistence(
   seedExplanations: Explanation[]
 ): Promise<CodeFile> {
   ensureDesktopRuntime();
-  const persisted = await invoke<{ explanations: Explanation[]; databasePath: string }>(
+  const persisted = await invoke<{ explanations: Explanation[]; databasePath: string; projectId: string }>(
     "hydrate_code_file_persistence",
     {
       request: {
@@ -85,6 +88,7 @@ export async function hydrateCodeFilePersistence(
   return {
     ...file,
     databasePath: persisted.databasePath,
+    projectId: persisted.projectId,
     explanations: Array.isArray(persisted.explanations) ? persisted.explanations : seedExplanations
   };
 }
@@ -114,6 +118,59 @@ export async function buildExplanationContext(
         endLine: explanation.endLine,
         symbolId: explanation.symbolId
       }
+    }
+  });
+}
+
+export async function getModelConfig(): Promise<ModelConfig> {
+  ensureDesktopRuntime();
+  return invoke<ModelConfig>("get_model_config");
+}
+
+export async function saveModelConfig(input: SaveModelConfigInput): Promise<ModelConfig> {
+  ensureDesktopRuntime();
+  return invoke<ModelConfig>("save_model_config", {
+    request: input
+  });
+}
+
+export async function resetModelConfig(): Promise<ModelConfig> {
+  ensureDesktopRuntime();
+  return invoke<ModelConfig>("reset_model_config");
+}
+
+export async function generateExplanation(
+  file: CodeFile,
+  explanation: Explanation,
+  displayMode: "plain" | "detailed" = "plain"
+): Promise<GenerateExplanationResult> {
+  ensureDesktopRuntime();
+  return invoke<GenerateExplanationResult>("generate_explanation", {
+    request: {
+      file: {
+        id: file.id,
+        path: file.path,
+        projectId: file.projectId,
+        projectRoot: file.projectRoot,
+        language: file.language,
+        code: file.code,
+        fileHash: file.fileHash,
+        snapshotId: file.snapshotId,
+        codeNodes: file.codeNodes ?? []
+      },
+      target: {
+        id: explanation.id,
+        targetType: explanation.targetType,
+        targetName: explanation.targetName,
+        startLine: explanation.startLine,
+        endLine: explanation.endLine,
+        symbolId: explanation.symbolId,
+        codeHash: explanation.codeHash,
+        anchorText: explanation.anchorText,
+        status: explanation.status
+      },
+      displayMode,
+      codeTransmissionApproved: true
     }
   });
 }

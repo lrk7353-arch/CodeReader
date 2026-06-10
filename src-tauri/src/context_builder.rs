@@ -14,119 +14,119 @@ const STATIC_ANALYSIS_CACHE_CAPACITY: usize = 16;
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct BuildContextRequest {
-    file: ContextFileInput,
-    target: ContextTargetInput,
-    budget: Option<ContextBudgetInput>,
+    pub(crate) file: ContextFileInput,
+    pub(crate) target: ContextTargetInput,
+    pub(crate) budget: Option<ContextBudgetInput>,
 }
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct ContextFileInput {
-    path: String,
-    language: String,
-    code: String,
+pub(crate) struct ContextFileInput {
+    pub(crate) path: String,
+    pub(crate) language: String,
+    pub(crate) code: String,
     #[serde(default)]
-    code_nodes: Vec<ContextNodeInput>,
+    pub(crate) code_nodes: Vec<ContextNodeInput>,
 }
 
 #[derive(Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
-struct ContextNodeInput {
-    id: String,
-    node_type: String,
-    name: String,
-    start_line: usize,
-    end_line: usize,
-    symbol_id: Option<String>,
-    anchor_text: String,
+pub(crate) struct ContextNodeInput {
+    pub(crate) id: String,
+    pub(crate) node_type: String,
+    pub(crate) name: String,
+    pub(crate) start_line: usize,
+    pub(crate) end_line: usize,
+    pub(crate) symbol_id: Option<String>,
+    pub(crate) anchor_text: String,
 }
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct ContextTargetInput {
-    target_type: String,
-    target_name: Option<String>,
-    start_line: Option<usize>,
-    end_line: Option<usize>,
-    symbol_id: Option<String>,
+pub(crate) struct ContextTargetInput {
+    pub(crate) target_type: String,
+    pub(crate) target_name: Option<String>,
+    pub(crate) start_line: Option<usize>,
+    pub(crate) end_line: Option<usize>,
+    pub(crate) symbol_id: Option<String>,
 }
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct ContextBudgetInput {
-    max_chars: Option<usize>,
-    max_snippets: Option<usize>,
+pub(crate) struct ContextBudgetInput {
+    pub(crate) max_chars: Option<usize>,
+    pub(crate) max_snippets: Option<usize>,
 }
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ContextBundle {
-    context_id: String,
-    strategy: String,
-    target: ContextTargetSummary,
-    snippets: Vec<ContextSnippet>,
-    signals: ContextSignals,
-    sources: Vec<ContextSource>,
-    budget: ContextBudgetResult,
-    warnings: Vec<String>,
+    pub(crate) context_id: String,
+    pub(crate) strategy: String,
+    pub(crate) target: ContextTargetSummary,
+    pub(crate) snippets: Vec<ContextSnippet>,
+    pub(crate) signals: ContextSignals,
+    pub(crate) sources: Vec<ContextSource>,
+    pub(crate) budget: ContextBudgetResult,
+    pub(crate) warnings: Vec<String>,
 }
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
-struct ContextTargetSummary {
-    target_type: String,
-    target_name: String,
-    file_path: String,
-    start_line: usize,
-    end_line: usize,
-    symbol_id: Option<String>,
+pub(crate) struct ContextTargetSummary {
+    pub(crate) target_type: String,
+    pub(crate) target_name: String,
+    pub(crate) file_path: String,
+    pub(crate) start_line: usize,
+    pub(crate) end_line: usize,
+    pub(crate) symbol_id: Option<String>,
 }
 
 #[derive(Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
-struct ContextSnippet {
-    source_id: String,
-    kind: String,
-    label: String,
-    file_path: String,
-    start_line: usize,
-    end_line: usize,
-    code: String,
-    reason: String,
-    is_summary: bool,
+pub(crate) struct ContextSnippet {
+    pub(crate) source_id: String,
+    pub(crate) kind: String,
+    pub(crate) label: String,
+    pub(crate) file_path: String,
+    pub(crate) start_line: usize,
+    pub(crate) end_line: usize,
+    pub(crate) code: String,
+    pub(crate) reason: String,
+    pub(crate) is_summary: bool,
 }
 
 #[derive(Serialize, Default)]
 #[serde(rename_all = "camelCase")]
-struct ContextSignals {
-    referenced_identifiers: Vec<String>,
-    defined_identifiers: Vec<String>,
-    input_identifiers: Vec<String>,
-    output_identifiers: Vec<String>,
-    called_functions: Vec<String>,
+pub(crate) struct ContextSignals {
+    pub(crate) referenced_identifiers: Vec<String>,
+    pub(crate) defined_identifiers: Vec<String>,
+    pub(crate) input_identifiers: Vec<String>,
+    pub(crate) output_identifiers: Vec<String>,
+    pub(crate) called_functions: Vec<String>,
 }
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
-struct ContextSource {
-    source_id: String,
-    file_path: String,
-    start_line: usize,
-    end_line: usize,
-    node_id: Option<String>,
-    reason: String,
+pub(crate) struct ContextSource {
+    pub(crate) source_id: String,
+    pub(crate) file_path: String,
+    pub(crate) start_line: usize,
+    pub(crate) end_line: usize,
+    pub(crate) node_id: Option<String>,
+    pub(crate) reason: String,
 }
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
-struct ContextBudgetResult {
-    requested_max_chars: usize,
-    effective_max_chars: usize,
-    used_chars: usize,
-    max_snippets: usize,
-    omitted_snippets: usize,
-    expanded_for_target: bool,
-    truncated: bool,
+pub(crate) struct ContextBudgetResult {
+    pub(crate) requested_max_chars: usize,
+    pub(crate) effective_max_chars: usize,
+    pub(crate) used_chars: usize,
+    pub(crate) max_snippets: usize,
+    pub(crate) omitted_snippets: usize,
+    pub(crate) expanded_for_target: bool,
+    pub(crate) truncated: bool,
 }
 
 #[derive(Clone)]
@@ -206,7 +206,7 @@ pub fn build_explanation_context(request: BuildContextRequest) -> Result<Context
     build_context_bundle(request)
 }
 
-fn build_context_bundle(request: BuildContextRequest) -> Result<ContextBundle, String> {
+pub(crate) fn build_context_bundle(request: BuildContextRequest) -> Result<ContextBundle, String> {
     let line_count = request.file.code.lines().count().max(1);
     let target_type = request.target.target_type.as_str();
     if matches!(target_type, "module" | "project") {
