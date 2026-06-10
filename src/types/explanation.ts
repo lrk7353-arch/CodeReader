@@ -64,6 +64,36 @@ export interface CodeNode {
   anchorText: string;
 }
 
+export type EditorLanguage =
+  | "c"
+  | "cpp"
+  | "css"
+  | "html"
+  | "java"
+  | "javascript"
+  | "json"
+  | "markdown"
+  | "plaintext"
+  | "python"
+  | "ruby"
+  | "rust"
+  | "shell"
+  | "sql"
+  | "typescript"
+  | "xml"
+  | "yaml";
+
+export type FilePreviewKind = "code" | "text" | "unavailable";
+
+export interface FileCapability {
+  previewKind: FilePreviewKind;
+  canPreview: boolean;
+  canExplain: boolean;
+  language: EditorLanguage;
+  reason?: string;
+  sizeBytes: number;
+}
+
 export interface CodeFile {
   id: string;
   name: string;
@@ -71,7 +101,7 @@ export interface CodeFile {
   projectId?: string;
   projectRoot?: string;
   relativePath?: string;
-  language: "typescript" | "javascript";
+  language: EditorLanguage;
   code: string;
   fileHash?: string;
   snapshotId?: string;
@@ -80,6 +110,7 @@ export interface CodeFile {
   changeSummary?: ChangeSummary;
   databasePath?: string;
   parseError?: boolean;
+  capability?: FileCapability;
   source?: "sample" | "local";
   isLoaded?: boolean;
 }
@@ -108,12 +139,26 @@ export interface ProjectFileEntry {
   projectId?: string;
   projectRoot?: string;
   relativePath: string;
-  language: "typescript" | "javascript";
+  language: EditorLanguage;
+  capability: FileCapability;
+}
+
+export interface ProjectTreeNode {
+  id: string;
+  parentId?: string;
+  name: string;
+  path: string;
+  relativePath: string;
+  kind: "directory" | "file";
+  capability?: FileCapability;
 }
 
 export interface ProjectScanResult {
   rootPath: string;
   files: ProjectFileEntry[];
+  nodes: ProjectTreeNode[];
+  truncated: boolean;
+  skippedEntries: number;
 }
 
 export type ContextStrategy = "line" | "range" | "function" | "file";

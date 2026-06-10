@@ -2,8 +2,7 @@ import { RefreshCw } from "lucide-react";
 import { useEffect, useMemo, useRef } from "react";
 import "monaco-editor/esm/vs/editor/edcore.main";
 import * as monaco from "monaco-editor/esm/vs/editor/editor.api";
-import "monaco-editor/esm/vs/basic-languages/javascript/javascript.contribution";
-import "monaco-editor/esm/vs/basic-languages/typescript/typescript.contribution";
+import "monaco-editor/esm/vs/basic-languages/monaco.contribution";
 import editorWorker from "monaco-editor/esm/vs/editor/editor.worker?worker";
 import tsWorker from "monaco-editor/esm/vs/language/typescript/ts.worker?worker";
 import type { Explanation, SampleFile } from "../../types/explanation";
@@ -63,6 +62,9 @@ function createModel(file: SampleFile) {
   const uri = uriForFile(file);
   const existing = monaco.editor.getModel(uri);
   if (existing) {
+    if (existing.getLanguageId() !== file.language) {
+      monaco.editor.setModelLanguage(existing, file.language);
+    }
     if (existing.getValue() !== file.code) {
       existing.setValue(file.code);
     }
@@ -130,6 +132,10 @@ export function MonacoCodeViewer({
       const currentFile = fileRef.current;
       const selection = normalizeSelection(event.selection);
       onSelectionChangeRef.current(selection);
+      if (currentFile.capability?.canExplain === false) {
+        onSelectExplanationRef.current("");
+        return;
+      }
       const explanation = findExplanationForSelection(currentFile.explanations, selection);
       const fallbackId =
         selection.startLine !== selection.endLine
@@ -270,7 +276,15 @@ export function MonacoCodeViewer({
           ) : null}
         </span>
       </div>
-      <div className="monaco-shell" ref={containerRef} />
+      <div className="editor-stage">
+        <div className="monaco-shell" ref={containerRef} />
+        {file.capability?.canPreview === false ? (
+          <div className="editor-unavailable" role="status">
+            <strong>此文件无法安全预览</strong>
+            <span>{file.capability.reason ?? "当前文件类型不支持文本预览。"}</span>
+          </div>
+        ) : null}
+      </div>
     </section>
   );
 }

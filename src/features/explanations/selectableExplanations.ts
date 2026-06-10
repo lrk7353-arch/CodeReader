@@ -6,6 +6,9 @@ interface LineSelection {
 }
 
 export function buildSelectableExplanations(file: CodeFile): Explanation[] {
+  if (file.capability?.canExplain === false) {
+    return [];
+  }
   if (file.explanations.length > 0) {
     return file.explanations;
   }

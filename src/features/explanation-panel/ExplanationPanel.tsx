@@ -1,6 +1,7 @@
-import { AlertTriangle, Check, CircleHelp, RefreshCw } from "lucide-react";
+import { AlertTriangle, Check, CircleHelp, FileText, FileWarning, RefreshCw } from "lucide-react";
 import type {
   ChangeSummary as ChangeSummaryData,
+  CodeFile,
   ContextBundle,
   Explanation,
   ExplanationFeedbackType,
@@ -11,6 +12,7 @@ import { ChangeSummary } from "../change-summary/ChangeSummary";
 import { ReadingStateControls } from "../reading-state/ReadingStateControls";
 
 interface ExplanationPanelProps {
+  file: CodeFile;
   contextBundle?: ContextBundle;
   changeSummary?: ChangeSummaryData;
   contextError?: string;
@@ -25,6 +27,7 @@ interface ExplanationPanelProps {
 }
 
 export function ExplanationPanel({
+  file,
   contextBundle,
   changeSummary,
   contextError,
@@ -38,9 +41,31 @@ export function ExplanationPanel({
   onReadingStateChange
 }: ExplanationPanelProps) {
   if (!explanation) {
+    const canPreview = file.capability?.canPreview !== false;
+    const title = canPreview ? "只读文本预览" : "无法预览此文件";
     return (
-      <aside className="explanation-panel">
-        <div className="panel-title">Explanation</div>
+      <aside className="explanation-panel" aria-label="File capability">
+        <div className="explanation-header">
+          <div>
+            <span className="target-type">{file.capability?.previewKind ?? "file"}</span>
+            <h2>{file.name}</h2>
+          </div>
+          <span className="status-pill unsupported">{canPreview ? "只读" : "不可预览"}</span>
+        </div>
+        <div className="file-capability-state">
+          {canPreview ? (
+            <FileText size={20} aria-hidden="true" />
+          ) : (
+            <FileWarning size={20} aria-hidden="true" />
+          )}
+          <div>
+            <strong>{title}</strong>
+            <p>
+              {file.capability?.reason ??
+                "当前文件可以在编辑器中查看，但暂不支持 Tree-sitter 结构化代码解释。"}
+            </p>
+          </div>
+        </div>
       </aside>
     );
   }

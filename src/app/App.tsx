@@ -8,6 +8,7 @@ import type {
   ExplanationFeedbackType,
   ModelConfig,
   ProjectScanResult,
+  ProjectTreeNode,
   ReadingState,
   SaveModelConfigInput
 } from "../types/explanation";
@@ -43,6 +44,7 @@ type GenerationStatus = "idle" | "generating" | "error";
 
 export function App() {
   const [files, setFiles] = useState<CodeFile[]>(sampleFiles);
+  const [projectNodes, setProjectNodes] = useState<ProjectTreeNode[]>([]);
   const [selectedFileId, setSelectedFileId] = useState(files[0]?.id ?? "");
   const [selectedExplanationId, setSelectedExplanationId] = useState("exp-file-login-controller");
   const [selectedCodeSelection, setSelectedCodeSelection] = useState<CodeSelection>({
@@ -79,6 +81,9 @@ export function App() {
   const selectableExplanations = useMemo(() => buildSelectableExplanations(selectedFile), [selectedFile]);
 
   const transientRangeExplanation = useMemo(() => {
+    if (selectedFile.capability?.canExplain === false) {
+      return undefined;
+    }
     if (selectedCodeSelection.startLine === selectedCodeSelection.endLine) {
       return undefined;
     }
@@ -106,6 +111,19 @@ export function App() {
       hydratedExplanations.find((item) => item.id === selectedExplanationId) ?? hydratedExplanations[0]
     );
   }, [hydratedExplanations, selectedExplanationId]);
+
+  const fileStatus = useMemo(() => {
+    if (selectedFile.capability?.canPreview === false) {
+      return { explanation: "不可预览", reading: "—" };
+    }
+    if (selectedFile.capability?.canExplain === false) {
+      return { explanation: "只读预览", reading: "—" };
+    }
+    return {
+      explanation: explanationStatusLabel(selectedExplanation?.status ?? "valid"),
+      reading: selectedExplanation?.readingState ?? "unread"
+    };
+  }, [selectedExplanation, selectedFile.capability]);
 
   const selectedFileForViewer = useMemo<CodeFile>(
     () => ({
@@ -197,7 +215,12 @@ export function App() {
   }, [selectedExplanationId, selectedFileId]);
 
   useEffect(() => {
-    if (!isDesktopRuntime() || !selectedExplanation || !selectedFile.code) {
+    if (
+      !isDesktopRuntime() ||
+      !selectedExplanation ||
+      !selectedFile.code ||
+      selectedFile.capability?.canExplain === false
+    ) {
       setContextBundle(undefined);
       setContextError("");
       setContextStatus("unavailable");
@@ -256,6 +279,13 @@ export function App() {
   }, []);
 
   const hydrateLoadedFile = useCallback(async (file: CodeFile) => {
+    if (file.capability?.canExplain === false) {
+      return {
+        ...file,
+        codeNodes: [],
+        explanations: []
+      };
+    }
     const seedExplanations = buildSelectableExplanations(file);
     if (!isDesktopRuntime()) {
       return {
@@ -388,6 +418,13 @@ export function App() {
   const selectFile = useCallback(
     (fileId: string) => {
       const file = files.find((item) => item.id === fileId) ?? files[0] ?? sampleFiles[0];
+      if (file.capability?.canPreview === false) {
+        setSelectedFileId(file.id);
+        setSelectedExplanationId("");
+        setSelectedCodeSelection({ startLine: 1, endLine: 1 });
+        setWorkspaceStatus(file.capability.reason ?? "该文件暂不支持预览。");
+        return;
+      }
       if (file.source === "local" && !file.isLoaded) {
         void loadAndSelectFile(file.path, file.relativePath, file.id, file.projectRoot);
         return;
@@ -569,6 +606,7 @@ export function App() {
         return;
       }
       const hydratedFile = await hydrateLoadedFile(file);
+      setProjectNodes([]);
       setFiles([hydratedFile]);
       setActiveLoadedFile(hydratedFile);
       setWorkspaceStatus(`已加载 ${hydratedFile.path}`);
@@ -591,8 +629,9 @@ export function App() {
         setWorkspaceStatus("已取消打开项目");
         return;
       }
+      setProjectNodes(project.nodes);
       if (project.files.length === 0) {
-        setWorkspaceStatus("未找到 JS/TS/JSX/TSX 文件");
+        setWorkspaceStatus("项目中没有可显示的文件");
         return;
       }
 
@@ -605,10 +644,26 @@ export function App() {
         source: "local",
         isLoaded: false
       }));
+      const previewableFiles = project.files.filter((file) => file.capability.canPreview);
+      if (previewableFiles.length === 0) {
+        setFiles(placeholders);
+        setSelectedFileId(placeholders[0]?.id ?? "");
+        setSelectedExplanationId("");
+        setSelectedCodeSelection({ startLine: 1, endLine: 1 });
+        setWorkspaceStatus(`项目包含 ${project.files.length} 个文件，但没有可安全预览的文本文件。`);
+        return;
+      }
       const activeFirstFile = await hydrateLoadedFile(await loadFirstAvailableProjectFile(project));
       setFiles(placeholders.map((file) => (file.id === activeFirstFile.id ? activeFirstFile : file)));
       setActiveLoadedFile(activeFirstFile);
-      setWorkspaceStatus(`${project.files.length} 个代码文件：${project.rootPath}`);
+      const scanNote = project.truncated
+        ? "，扫描已达到安全预算"
+        : project.skippedEntries > 0
+          ? `，跳过 ${project.skippedEntries} 个不可读取项`
+          : "";
+      setWorkspaceStatus(
+        `${project.files.length} 个文件，${previewableFiles.length} 个可预览：${project.rootPath}${scanNote}`
+      );
     } catch (error) {
       setWorkspaceStatus(errorMessage(error));
     } finally {
@@ -651,6 +706,7 @@ export function App() {
       <section className="workspace" aria-label="CodeReader workspace">
         <FileExplorer
           files={filesForExplorer}
+          projectNodes={projectNodes}
           selectedFileId={selectedFile.id}
           selectedExplanationId={selectedExplanation?.id}
           loadingFileId={loadingFileId}
@@ -671,6 +727,7 @@ export function App() {
           refreshBusy={isWorkspaceBusy}
         />
         <ExplanationPanel
+          file={selectedFile}
           changeSummary={selectedFile.changeSummary}
           contextBundle={contextBundle}
           contextError={contextError}
@@ -703,8 +760,8 @@ export function App() {
             ? `line:${selectedCodeSelection.startLine}`
             : `lines:${selectedCodeSelection.startLine}-${selectedCodeSelection.endLine}`}
         </span>
-        <span>{explanationStatusLabel(selectedExplanation?.status ?? "valid")}</span>
-        <span>{selectedExplanation?.readingState ?? "unread"}</span>
+        <span>{fileStatus.explanation}</span>
+        <span>{fileStatus.reading}</span>
         <span
           className={`persistence-status ${persistenceStatus}`}
           title={databasePath || persistenceTooltip(persistenceStatus)}
@@ -754,7 +811,7 @@ function errorMessage(error: unknown) {
 
 async function loadFirstAvailableProjectFile(project: ProjectScanResult): Promise<CodeFile> {
   const failures: string[] = [];
-  for (const file of project.files) {
+  for (const file of project.files.filter((item) => item.capability.canPreview)) {
     try {
       const loadedFile = await loadCodeFile(file.path, project.rootPath);
       return {
@@ -767,7 +824,7 @@ async function loadFirstAvailableProjectFile(project: ProjectScanResult): Promis
     }
   }
 
-  throw new Error(`已扫描到 ${project.files.length} 个代码文件，但没有文件可读取。${failures[0] ?? ""}`);
+  throw new Error(`已扫描到 ${project.files.length} 个文件，但没有可预览文件能被读取。${failures[0] ?? ""}`);
 }
 
 function sameSelection(left: CodeSelection, right: CodeSelection) {

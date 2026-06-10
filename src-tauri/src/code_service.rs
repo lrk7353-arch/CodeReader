@@ -8,6 +8,8 @@ use walkdir::{DirEntry, WalkDir};
 use crate::utils::sha256_hex;
 
 const PROJECT_SCAN_MAX_DEPTH: usize = 8;
+const PROJECT_SCAN_MAX_ENTRIES: usize = 10_000;
+const MAX_PREVIEW_BYTES: u64 = 2 * 1024 * 1024;
 const IGNORED_DIRS: &[&str] = &[
     ".cache",
     ".git",
@@ -28,6 +30,76 @@ const IGNORED_DIRS: &[&str] = &[
     "target",
     "venv",
 ];
+const TEXT_EXTENSIONS: &[&str] = &[
+    "bat",
+    "bash",
+    "c",
+    "cfg",
+    "cmd",
+    "conf",
+    "cpp",
+    "cs",
+    "css",
+    "env",
+    "fish",
+    "go",
+    "h",
+    "hpp",
+    "htm",
+    "html",
+    "ini",
+    "java",
+    "json",
+    "jsonc",
+    "kt",
+    "kts",
+    "less",
+    "lock",
+    "log",
+    "markdown",
+    "md",
+    "mdx",
+    "php",
+    "properties",
+    "ps1",
+    "py",
+    "rb",
+    "rs",
+    "scss",
+    "sh",
+    "sql",
+    "svelte",
+    "swift",
+    "toml",
+    "txt",
+    "vue",
+    "xml",
+    "yaml",
+    "yml",
+    "zsh",
+];
+const TEXT_FILE_NAMES: &[&str] = &[
+    ".dockerignore",
+    ".editorconfig",
+    ".env",
+    ".eslintignore",
+    ".eslintrc",
+    ".gitattributes",
+    ".gitignore",
+    ".npmrc",
+    ".prettierignore",
+    ".prettierrc",
+    "changelog",
+    "dockerfile",
+    "license",
+    "makefile",
+    "readme",
+];
+const BINARY_EXTENSIONS: &[&str] = &[
+    "7z", "a", "avi", "bmp", "class", "dll", "dylib", "eot", "exe", "gif", "gz", "ico", "jar",
+    "jpeg", "jpg", "lockb", "mov", "mp3", "mp4", "o", "obj", "otf", "pdf", "png", "so", "tar",
+    "ttf", "wasm", "webm", "webp", "woff", "woff2", "zip",
+];
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -44,6 +116,7 @@ pub struct CodeFilePayload {
     snapshot_id: String,
     code_nodes: Vec<CodeNodePayload>,
     parse_error: bool,
+    capability: FileCapabilityPayload,
     source: String,
 }
 
@@ -66,9 +139,12 @@ pub struct CodeNodePayload {
 pub struct ProjectScanPayload {
     root_path: String,
     files: Vec<ProjectFilePayload>,
+    nodes: Vec<ProjectTreeNodePayload>,
+    truncated: bool,
+    skipped_entries: usize,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct ProjectFilePayload {
     id: String,
@@ -76,6 +152,30 @@ pub struct ProjectFilePayload {
     path: String,
     relative_path: String,
     language: String,
+    capability: FileCapabilityPayload,
+}
+
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct ProjectTreeNodePayload {
+    id: String,
+    parent_id: Option<String>,
+    name: String,
+    path: String,
+    relative_path: String,
+    kind: String,
+    capability: Option<FileCapabilityPayload>,
+}
+
+#[derive(Serialize, Clone, Debug, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct FileCapabilityPayload {
+    preview_kind: String,
+    can_preview: bool,
+    can_explain: bool,
+    language: String,
+    reason: Option<String>,
+    size_bytes: u64,
 }
 
 #[cfg_attr(not(test), tauri::command)]
@@ -84,17 +184,14 @@ pub fn load_code_file(path: String) -> Result<CodeFilePayload, String> {
     if !path.is_file() {
         return Err("The selected path is not a readable file.".to_string());
     }
-
-    let language = language_for_path(&path)
-        .ok_or_else(|| "CodeReader MVP currently supports JS, JSX, TS, and TSX files.".to_string())?;
-    let code = std::fs::read_to_string(&path)
-        .map_err(|error| format!("Failed to read file: {error}"))?;
-
-    Ok(code_file_payload(path, None, language, code))
+    load_file_payload(path, None)
 }
 
 #[cfg_attr(not(test), tauri::command)]
-pub fn load_project_code_file(path: String, project_root: String) -> Result<CodeFilePayload, String> {
+pub fn load_project_code_file(
+    path: String,
+    project_root: String,
+) -> Result<CodeFilePayload, String> {
     let project_root = canonicalize_input_path(&project_root, "project root")?;
     if !project_root.is_dir() {
         return Err("The selected project root is not a readable folder.".to_string());
@@ -108,12 +205,7 @@ pub fn load_project_code_file(path: String, project_root: String) -> Result<Code
         return Err("The selected file is outside the active project root.".to_string());
     }
 
-    let language = language_for_path(&path)
-        .ok_or_else(|| "CodeReader MVP currently supports JS, JSX, TS, and TSX files.".to_string())?;
-    let code = std::fs::read_to_string(&path)
-        .map_err(|error| format!("Failed to read file: {error}"))?;
-
-    Ok(code_file_payload(path, Some(&project_root), language, code))
+    load_file_payload(path, Some(&project_root))
 }
 
 #[cfg_attr(not(test), tauri::command)]
@@ -124,45 +216,136 @@ pub fn scan_project(path: String) -> Result<ProjectScanPayload, String> {
     }
 
     let mut files = Vec::new();
+    let mut nodes = Vec::new();
+    let mut truncated = false;
+    let mut skipped_entries = 0;
     for entry in WalkDir::new(&root)
         .max_depth(PROJECT_SCAN_MAX_DEPTH)
+        .follow_links(false)
         .into_iter()
         .filter_entry(|entry| !is_ignored_entry(entry))
-        .filter_map(Result::ok)
     {
-        let path = entry.path();
-        if !path.is_file() {
+        let entry = match entry {
+            Ok(entry) => entry,
+            Err(_) => {
+                skipped_entries += 1;
+                continue;
+            }
+        };
+        if entry.depth() == 0 {
             continue;
         }
-        let Some(language) = language_for_path(path) else {
-            continue;
-        };
+        if nodes.len() >= PROJECT_SCAN_MAX_ENTRIES {
+            truncated = true;
+            break;
+        }
+
+        let path = entry.path();
         let relative_path = relative_path(path, &root);
-        files.push(ProjectFilePayload {
+        if entry.file_type().is_dir() {
+            if entry.depth() == PROJECT_SCAN_MAX_DEPTH
+                && std::fs::read_dir(path)
+                    .ok()
+                    .and_then(|mut entries| entries.next())
+                    .is_some()
+            {
+                truncated = true;
+            }
+            nodes.push(ProjectTreeNodePayload {
+                id: directory_id(path),
+                parent_id: parent_node_id(path, &root),
+                name: file_name(path),
+                path: display_path(path),
+                relative_path,
+                kind: "directory".to_string(),
+                capability: None,
+            });
+            continue;
+        }
+
+        let size_bytes = entry.metadata().map(|metadata| metadata.len()).unwrap_or(0);
+        let capability = classify_file(path, size_bytes, entry.file_type().is_symlink());
+        let file = ProjectFilePayload {
             id: file_id(path),
             name: file_name(path),
             path: display_path(path),
+            relative_path: relative_path.clone(),
+            language: capability.language.clone(),
+            capability: capability.clone(),
+        };
+        nodes.push(ProjectTreeNodePayload {
+            id: file.id.clone(),
+            parent_id: parent_node_id(path, &root),
+            name: file.name.clone(),
+            path: file.path.clone(),
             relative_path,
-            language: language.monaco_language().to_string(),
+            kind: "file".to_string(),
+            capability: Some(capability),
         });
+        files.push(file);
     }
 
     files.sort_by(|left, right| left.relative_path.cmp(&right.relative_path));
+    nodes.sort_by(|left, right| {
+        left.relative_path
+            .cmp(&right.relative_path)
+            .then(left.kind.cmp(&right.kind))
+    });
 
     Ok(ProjectScanPayload {
         root_path: display_path(&root),
         files,
+        nodes,
+        truncated,
+        skipped_entries,
     })
 }
 
-fn code_file_payload(
+fn load_file_payload(
     path: PathBuf,
     project_root: Option<&Path>,
-    language: CodeLanguage,
+) -> Result<CodeFilePayload, String> {
+    let metadata = std::fs::metadata(&path)
+        .map_err(|error| format!("Failed to inspect file metadata: {error}"))?;
+    let capability = classify_file(&path, metadata.len(), false);
+    if !capability.can_preview {
+        return Err(capability
+            .reason
+            .clone()
+            .unwrap_or_else(|| "This file cannot be previewed.".to_string()));
+    }
+    let code = std::fs::read_to_string(&path).map_err(|error| {
+        if error.kind() == std::io::ErrorKind::InvalidData {
+            "This file is not valid UTF-8 text and cannot be previewed safely.".to_string()
+        } else {
+            format!("Failed to read file: {error}")
+        }
+    })?;
+
+    let code_language = language_for_path(&path);
+    Ok(file_payload(
+        path,
+        project_root,
+        code_language,
+        capability,
+        code,
+    ))
+}
+
+fn file_payload(
+    path: PathBuf,
+    project_root: Option<&Path>,
+    code_language: Option<CodeLanguage>,
+    capability: FileCapabilityPayload,
     code: String,
 ) -> CodeFilePayload {
     let file_hash = sha256_hex(&code);
-    let parse_result = parse_code_nodes(&path, language, &code, &file_hash);
+    let parse_result = code_language
+        .map(|language| parse_code_nodes(&path, language, &code, &file_hash))
+        .unwrap_or(ParseResult {
+            nodes: Vec::new(),
+            has_error: false,
+        });
     let project_root_path = project_root
         .map(Path::to_path_buf)
         .or_else(|| path.parent().map(Path::to_path_buf))
@@ -176,12 +359,13 @@ fn code_file_payload(
         project_id: project_id(&project_root_path),
         project_root: project_root_display,
         relative_path: project_root.map(|root| relative_path(&path, root)),
-        language: language.monaco_language().to_string(),
+        language: capability.language.clone(),
         code,
         snapshot_id: format!("snapshot:{}", &file_hash[..16]),
         file_hash,
         code_nodes: parse_result.nodes,
         parse_error: parse_result.has_error,
+        capability,
         source: "local".to_string(),
     }
 }
@@ -261,12 +445,7 @@ fn collect_nodes(node: Node<'_>, code: &str, path: &Path, nodes: &mut Vec<CodeNo
     }
 }
 
-fn code_node_payload(
-    node: Node<'_>,
-    code: &str,
-    path: &Path,
-    node_type: &str,
-) -> CodeNodePayload {
+fn code_node_payload(node: Node<'_>, code: &str, path: &Path, node_type: &str) -> CodeNodePayload {
     let node_text = node_text(node, code);
     let start_line = node.start_position().row + 1;
     let end_line = node.end_position().row + 1;
@@ -315,14 +494,8 @@ fn classify_node(kind: &str) -> Option<&'static str> {
         | "generator_function_declaration"
         | "method_definition"
         | "arrow_function" => Some("function"),
-        "catch_clause"
-        | "do_statement"
-        | "for_in_statement"
-        | "for_of_statement"
-        | "for_statement"
-        | "if_statement"
-        | "switch_statement"
-        | "try_statement"
+        "catch_clause" | "do_statement" | "for_in_statement" | "for_of_statement"
+        | "for_statement" | "if_statement" | "switch_statement" | "try_statement"
         | "while_statement" => Some("block"),
         _ => None,
     }
@@ -401,13 +574,121 @@ impl CodeLanguage {
 }
 
 fn language_for_path(path: &Path) -> Option<CodeLanguage> {
-    match path.extension()?.to_string_lossy().to_ascii_lowercase().as_str() {
+    match path
+        .extension()?
+        .to_string_lossy()
+        .to_ascii_lowercase()
+        .as_str()
+    {
         "js" => Some(CodeLanguage::JavaScript),
         "jsx" => Some(CodeLanguage::Jsx),
         "ts" => Some(CodeLanguage::TypeScript),
         "tsx" => Some(CodeLanguage::Tsx),
         _ => None,
     }
+}
+
+fn classify_file(path: &Path, size_bytes: u64, is_symlink: bool) -> FileCapabilityPayload {
+    if is_symlink {
+        return unavailable_capability(
+            size_bytes,
+            "Symbolic links are visible but are not followed or previewed.".to_string(),
+        );
+    }
+    if size_bytes > MAX_PREVIEW_BYTES {
+        return unavailable_capability(
+            size_bytes,
+            format!(
+                "The file is too large to preview safely (limit: {} MB).",
+                MAX_PREVIEW_BYTES / 1024 / 1024
+            ),
+        );
+    }
+    if let Some(language) = language_for_path(path) {
+        return FileCapabilityPayload {
+            preview_kind: "code".to_string(),
+            can_preview: true,
+            can_explain: true,
+            language: language.monaco_language().to_string(),
+            reason: None,
+            size_bytes,
+        };
+    }
+
+    let extension = path
+        .extension()
+        .map(|value| value.to_string_lossy().to_ascii_lowercase())
+        .unwrap_or_default();
+    if BINARY_EXTENSIONS.contains(&extension.as_str()) {
+        return unavailable_capability(
+            size_bytes,
+            "This appears to be a binary file and cannot be shown as text.".to_string(),
+        );
+    }
+    if TEXT_EXTENSIONS.contains(&extension.as_str()) || is_known_text_name(path) {
+        return FileCapabilityPayload {
+            preview_kind: "text".to_string(),
+            can_preview: true,
+            can_explain: false,
+            language: preview_language(path),
+            reason: Some(
+                "Read-only preview is available, but structured code explanation is not supported."
+                    .to_string(),
+            ),
+            size_bytes,
+        };
+    }
+
+    unavailable_capability(
+        size_bytes,
+        "This file type is visible in the project tree but is not supported for preview."
+            .to_string(),
+    )
+}
+
+fn unavailable_capability(size_bytes: u64, reason: String) -> FileCapabilityPayload {
+    FileCapabilityPayload {
+        preview_kind: "unavailable".to_string(),
+        can_preview: false,
+        can_explain: false,
+        language: "plaintext".to_string(),
+        reason: Some(reason),
+        size_bytes,
+    }
+}
+
+fn is_known_text_name(path: &Path) -> bool {
+    let lower_name = file_name(path).to_ascii_lowercase();
+    TEXT_FILE_NAMES.iter().any(|name| lower_name == *name)
+        || lower_name.starts_with(".env.")
+        || ["changelog.", "dockerfile.", "license.", "readme."]
+            .iter()
+            .any(|prefix| lower_name.starts_with(prefix))
+}
+
+fn preview_language(path: &Path) -> String {
+    let extension = path
+        .extension()
+        .map(|value| value.to_string_lossy().to_ascii_lowercase())
+        .unwrap_or_default();
+    match extension.as_str() {
+        "bash" | "fish" | "sh" | "zsh" => "shell",
+        "c" | "h" => "c",
+        "cpp" | "hpp" => "cpp",
+        "css" | "less" | "scss" => "css",
+        "htm" | "html" => "html",
+        "java" => "java",
+        "json" | "jsonc" => "json",
+        "markdown" | "md" | "mdx" => "markdown",
+        "py" => "python",
+        "rb" => "ruby",
+        "rs" => "rust",
+        "sql" => "sql",
+        "xml" => "xml",
+        "yaml" | "yml" => "yaml",
+        _ => "plaintext",
+    }
+    .to_string()
 }
 
 fn is_ignored_entry(entry: &DirEntry) -> bool {
@@ -517,6 +798,16 @@ fn project_id(root: &Path) -> String {
     format!("project:{}", &hash[..20])
 }
 
+fn directory_id(path: &Path) -> String {
+    let hash = sha256_hex(&display_path(path));
+    format!("directory:{}", &hash[..20])
+}
+
+fn parent_node_id(path: &Path, root: &Path) -> Option<String> {
+    let parent = path.parent()?;
+    (parent != root).then(|| directory_id(parent))
+}
+
 fn file_name(path: &Path) -> String {
     path.file_name()
         .map(|value| value.to_string_lossy().to_string())
@@ -564,22 +855,36 @@ mod tests {
     #[test]
     fn parses_typescript_structure_targets() {
         let code = include_str!("../../examples/small/login-controller.ts").to_string();
-        let payload = code_file_payload(
-            PathBuf::from("examples/small/login-controller.ts"),
+        let path = PathBuf::from("examples/small/login-controller.ts");
+        let payload = file_payload(
+            path.clone(),
             None,
-            CodeLanguage::TypeScript,
+            Some(CodeLanguage::TypeScript),
+            classify_file(&path, code.len() as u64, false),
             code,
         );
 
         assert!(!payload.parse_error);
-        assert!(payload.code_nodes.iter().any(|node| node.node_type == "file"));
-        assert!(payload.code_nodes.iter().any(|node| node.node_type == "import"));
-        assert!(payload.code_nodes.iter().any(|node| node.node_type == "export"));
+        assert!(payload
+            .code_nodes
+            .iter()
+            .any(|node| node.node_type == "file"));
+        assert!(payload
+            .code_nodes
+            .iter()
+            .any(|node| node.node_type == "import"));
+        assert!(payload
+            .code_nodes
+            .iter()
+            .any(|node| node.node_type == "export"));
         assert!(payload
             .code_nodes
             .iter()
             .any(|node| node.node_type == "function" && node.name == "loginUser"));
-        assert!(payload.code_nodes.iter().any(|node| node.node_type == "block"));
+        assert!(payload
+            .code_nodes
+            .iter()
+            .any(|node| node.node_type == "block"));
     }
 
     #[test]
@@ -592,17 +897,22 @@ mod tests {
             .map(|file| file.relative_path.as_str())
             .collect();
 
+        assert!(
+            scan.files
+                .iter()
+                .any(|file| file.relative_path == "small/login-controller.ts"),
+            "scanned paths: {scanned_paths:?}"
+        );
+        assert!(
+            scan.files
+                .iter()
+                .any(|file| file.relative_path == "small/user-store.ts"),
+            "scanned paths: {scanned_paths:?}"
+        );
         assert!(scan
             .files
             .iter()
-            .any(|file| file.relative_path == "small/login-controller.ts"), "scanned paths: {scanned_paths:?}");
-        assert!(scan
-            .files
-            .iter()
-            .any(|file| file.relative_path == "small/user-store.ts"), "scanned paths: {scanned_paths:?}");
-        assert!(scan
-            .files
-            .iter()
+            .filter(|file| file.capability.can_explain)
             .all(|file| file.language == "typescript" || file.language == "javascript"));
     }
 
@@ -618,8 +928,11 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
 
         std::fs::create_dir_all(root.join("src")).expect("create source dir");
-        std::fs::write(root.join("src/visible.ts"), "export const visible = true;\n")
-            .expect("write visible file");
+        std::fs::write(
+            root.join("src/visible.ts"),
+            "export const visible = true;\n",
+        )
+        .expect("write visible file");
 
         std::fs::create_dir_all(root.join("node_modules_backup/pkg")).expect("create ignored dir");
         std::fs::write(
@@ -630,8 +943,11 @@ mod tests {
 
         let deep_dir = root.join("l1/l2/l3/l4/l5/l6/l7/l8/l9");
         std::fs::create_dir_all(&deep_dir).expect("create deep dir");
-        std::fs::write(deep_dir.join("too-deep.ts"), "export const tooDeep = true;\n")
-            .expect("write deep file");
+        std::fs::write(
+            deep_dir.join("too-deep.ts"),
+            "export const tooDeep = true;\n",
+        )
+        .expect("write deep file");
 
         let scan = scan_project(display_path(&root)).expect("temp project should scan");
         let scanned_paths: Vec<&str> = scan
@@ -642,15 +958,125 @@ mod tests {
 
         assert!(scanned_paths.contains(&"src/visible.ts"));
         assert!(
-            !scanned_paths.iter().any(|path| path.contains("node_modules")),
+            !scanned_paths
+                .iter()
+                .any(|path| path.contains("node_modules")),
             "scanned paths: {scanned_paths:?}"
         );
         assert!(
-            !scanned_paths.iter().any(|path| path.contains("too-deep.ts")),
+            !scanned_paths
+                .iter()
+                .any(|path| path.contains("too-deep.ts")),
             "scanned paths: {scanned_paths:?}"
         );
 
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn scan_project_returns_stable_hierarchy_and_file_capabilities() {
+        let root = temp_project_path("hierarchy");
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(root.join("src/admin")).expect("create admin dir");
+        std::fs::create_dir_all(root.join("src/public")).expect("create public dir");
+        std::fs::write(root.join("README.md"), "# Demo\n").expect("write readme");
+        std::fs::write(root.join("package.json"), "{\"name\":\"demo\"}\n")
+            .expect("write package file");
+        std::fs::write(
+            root.join("src/admin/index.ts"),
+            "export const admin = true;\n",
+        )
+        .expect("write admin file");
+        std::fs::write(
+            root.join("src/public/index.ts"),
+            "export const publicValue = true;\n",
+        )
+        .expect("write public file");
+        std::fs::write(root.join("logo.png"), [0_u8, 1, 2, 3]).expect("write binary file");
+
+        let scan = scan_project(display_path(&root)).expect("project should scan");
+        let src = scan
+            .nodes
+            .iter()
+            .find(|node| node.relative_path == "src")
+            .expect("src directory should exist");
+        let admin = scan
+            .nodes
+            .iter()
+            .find(|node| node.relative_path == "src/admin")
+            .expect("admin directory should exist");
+        let admin_index = scan
+            .nodes
+            .iter()
+            .find(|node| node.relative_path == "src/admin/index.ts")
+            .expect("admin index should exist");
+        let public_index = scan
+            .nodes
+            .iter()
+            .find(|node| node.relative_path == "src/public/index.ts")
+            .expect("public index should exist");
+        let readme = scan
+            .files
+            .iter()
+            .find(|file| file.relative_path == "README.md")
+            .expect("readme should exist");
+        let binary = scan
+            .files
+            .iter()
+            .find(|file| file.relative_path == "logo.png")
+            .expect("binary should remain visible");
+
+        assert_eq!(src.kind, "directory");
+        assert_eq!(admin.parent_id.as_deref(), Some(src.id.as_str()));
+        assert_eq!(admin_index.parent_id.as_deref(), Some(admin.id.as_str()));
+        assert_ne!(admin_index.id, public_index.id);
+        assert_eq!(readme.capability.preview_kind, "text");
+        assert!(readme.capability.can_preview);
+        assert!(!readme.capability.can_explain);
+        assert_eq!(binary.capability.preview_kind, "unavailable");
+        assert!(!binary.capability.can_preview);
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn loads_text_preview_without_tree_sitter_nodes() {
+        let root = temp_project_path("text-preview");
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).expect("create project root");
+        let readme = root.join("README.md");
+        std::fs::write(&readme, "# CodeReader\n\nProject notes.\n").expect("write readme");
+
+        let payload = load_project_code_file(display_path(&readme), display_path(&root))
+            .expect("text preview should load");
+
+        assert_eq!(payload.language, "markdown");
+        assert!(payload.capability.can_preview);
+        assert!(!payload.capability.can_explain);
+        assert!(payload.code_nodes.is_empty());
+        assert!(!payload.parse_error);
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn rejects_binary_large_and_symlink_preview_capabilities() {
+        let binary = classify_file(Path::new("image.png"), 512, false);
+        let large = classify_file(Path::new("README.md"), MAX_PREVIEW_BYTES + 1, false);
+        let symlink = classify_file(Path::new("linked.ts"), 32, true);
+
+        assert_eq!(binary.preview_kind, "unavailable");
+        assert!(!binary.can_preview);
+        assert!(!large.can_preview);
+        assert!(large
+            .reason
+            .as_deref()
+            .is_some_and(|reason| reason.contains("too large")));
+        assert!(!symlink.can_preview);
+        assert!(symlink
+            .reason
+            .as_deref()
+            .is_some_and(|reason| reason.contains("Symbolic")));
     }
 
     #[test]
@@ -690,5 +1116,15 @@ mod tests {
             "/home/konglingrui/CodeReader"
         )
         .is_none());
+    }
+
+    fn temp_project_path(name: &str) -> PathBuf {
+        std::env::temp_dir().join(format!(
+            "codereader-{name}-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("system time should be after epoch")
+                .as_nanos()
+        ))
     }
 }

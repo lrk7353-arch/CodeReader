@@ -13,13 +13,6 @@ import type {
   SaveModelConfigInput
 } from "../types/explanation";
 
-const codeFileFilters = [
-  {
-    name: "Code files",
-    extensions: ["js", "jsx", "ts", "tsx"]
-  }
-];
-
 export function isDesktopRuntime() {
   return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 }
@@ -28,8 +21,7 @@ export async function pickAndLoadCodeFile(): Promise<CodeFile | null> {
   ensureDesktopRuntime();
   const selectedPath = await open({
     directory: false,
-    multiple: false,
-    filters: codeFileFilters
+    multiple: false
   });
   if (typeof selectedPath !== "string") {
     return null;
@@ -56,7 +48,7 @@ export async function loadCodeFile(path: string, projectRoot?: string): Promise<
     : await invoke<CodeFile>("load_code_file", { path });
   const explanations = Array.isArray(file.explanations) ? file.explanations : [];
   const codeNodes = Array.isArray(file.codeNodes) ? file.codeNodes : [];
-  if (import.meta.env.DEV && codeNodes.length === 0) {
+  if (import.meta.env.DEV && file.capability?.canExplain !== false && codeNodes.length === 0) {
     console.warn(`[CodeReader] codeNodes empty for ${path} - parse may have failed or payload changed.`);
   }
   return {
@@ -220,7 +212,10 @@ async function scanProject(path: string): Promise<ProjectScanResult> {
   const project = await invoke<ProjectScanResult>("scan_project", { path });
   return {
     ...project,
-    files: Array.isArray(project.files) ? project.files : []
+    files: Array.isArray(project.files) ? project.files : [],
+    nodes: Array.isArray(project.nodes) ? project.nodes : [],
+    truncated: Boolean(project.truncated),
+    skippedEntries: Number(project.skippedEntries) || 0
   };
 }
 

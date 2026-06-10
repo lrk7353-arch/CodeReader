@@ -174,6 +174,7 @@ button {
   margin-bottom: 4px;
 }
 
+.directory-row,
 .file-row,
 .target-row {
   display: flex;
@@ -191,6 +192,16 @@ button {
 
 .file-row {
   padding: 0 8px;
+}
+
+.directory-row {
+  padding-right: 8px;
+  font-weight: 600;
+}
+
+.directory-row svg:first-child {
+  flex: 0 0 auto;
+  color: #737c80;
 }
 
 .target-list {
@@ -220,12 +231,23 @@ button {
   color: #81878a;
 }
 
+.directory-row:hover,
 .file-row:hover,
 .target-row:hover,
 .file-row.active,
 .target-row.active {
   background: #dce8e0;
   color: #143c34;
+}
+
+.file-row.unavailable {
+  color: #7b8082;
+}
+
+.file-row.unavailable:hover,
+.file-row.unavailable.active {
+  background: #e6e5e1;
+  color: #5e6467;
 }
 
 .row-meta {
@@ -254,6 +276,7 @@ button {
 }
 
 .editor-toolbar > span:first-child,
+.directory-row span,
 .file-row span,
 .target-row span,
 .statusbar span {
@@ -277,9 +300,40 @@ button {
 }
 
 .monaco-shell {
+  height: 100%;
   min-width: 0;
   min-height: 0;
   background: #fbfaf6;
+}
+
+.editor-stage {
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+}
+
+.editor-unavailable {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  align-content: center;
+  justify-items: center;
+  gap: 8px;
+  background: #f4f3ef;
+  color: #555e62;
+  padding: 24px;
+  text-align: center;
+}
+
+.editor-unavailable strong {
+  color: #30383c;
+  font-size: 14px;
+}
+
+.editor-unavailable span {
+  max-width: 420px;
+  font-size: 12px;
+  line-height: 1.55;
 }
 
 .monaco-shell .monaco-editor,
@@ -412,6 +466,32 @@ button {
   border-color: #c6c9ca;
   background: #f0f1f1;
   color: #666d70;
+}
+
+.status-pill.unsupported {
+  border-color: #c5c8c9;
+  background: #f0f1f1;
+  color: #62696c;
+}
+
+.file-capability-state {
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr);
+  align-items: start;
+  gap: 10px;
+  color: #687074;
+  padding: 16px 12px;
+}
+
+.file-capability-state strong {
+  color: #30383c;
+  font-size: 13px;
+}
+
+.file-capability-state p {
+  margin: 5px 0 0;
+  font-size: 12px;
+  line-height: 1.55;
 }
 
 .change-summary {

@@ -40,7 +40,13 @@ function runSync(label, command, commandArgs) {
 }
 
 const wslRoot = process.env.CODEREADER_WSL_ROOT ?? (process.platform === "win32" ? toWslPath(root) : null);
-if (wslRoot) {
+const windowsRoot = process.platform === "win32" ? process.env.CODEREADER_WINDOWS_ROOT : null;
+
+if (windowsRoot) {
+  run(process.execPath, [resolve(root, "node_modules/vite/bin/vite.js"), ...args], {
+    cwd: windowsRoot
+  });
+} else if (wslRoot) {
   runSync("Native dependency repair", process.execPath, [
     resolve(root, "scripts/repair-native-deps.mjs")
   ]);
