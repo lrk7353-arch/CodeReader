@@ -2076,6 +2076,71 @@ mod tests {
     }
 
     #[test]
+    fn python_explanation_restores_and_invalidates_after_function_change() {
+        let database_path = temp_database_path("python-change");
+        let baseline = python_request(
+            "hash:python-base",
+            "snapshot:python-base",
+            "hash:python-function-base",
+            "@trace\ndef greet(name: str = \"world\") -> str:\n    return f\"Hello, {name}\"\n",
+        );
+        hydrate_code_file_at_path(&database_path, baseline)
+            .expect("Python baseline should hydrate");
+        mark_explanation_valid(&database_path, "exp:target:python:function");
+
+        let reopened = hydrate_code_file_at_path(
+            &database_path,
+            python_request(
+                "hash:python-base",
+                "snapshot:python-base",
+                "hash:python-function-base",
+                "@trace\ndef greet(name: str = \"world\") -> str:\n    return f\"Hello, {name}\"\n",
+            ),
+        )
+        .expect("Python snapshot should reopen");
+        let restored = reopened
+            .explanations
+            .iter()
+            .find(|item| item.id == "exp:target:python:function")
+            .expect("Python function explanation should restore");
+        assert_eq!(restored.status, "valid");
+
+        let modified = hydrate_code_file_at_path(
+            &database_path,
+            python_request(
+                "hash:python-modified",
+                "snapshot:python-modified",
+                "hash:python-function-modified",
+                "@trace\ndef greet(name: str = \"world\") -> str:\n    return f\"Welcome, {name}!\"\n",
+            ),
+        )
+        .expect("modified Python file should hydrate");
+        let invalidated = modified
+            .explanations
+            .iter()
+            .find(|item| item.id == "exp:target:python:function")
+            .expect("existing Python explanation should remain available");
+        assert_eq!(invalidated.status, "invalid");
+        assert_eq!(invalidated.code_meaning, "Python function meaning");
+        assert!(modified
+            .change_summary
+            .as_ref()
+            .is_some_and(|summary| summary.modified_nodes >= 1));
+
+        let conn = open_database(&database_path).expect("database should open");
+        let language: String = conn
+            .query_row(
+                "SELECT language FROM files WHERE id = ?1",
+                params!["file:python"],
+                |row| row.get(0),
+            )
+            .expect("Python file language should query");
+        assert_eq!(language, "python");
+
+        let _ = std::fs::remove_file(database_path);
+    }
+
+    #[test]
     fn added_function_gets_new_unexplained_placeholder() {
         let database_path = temp_database_path("change-added");
         hydrate_code_file_at_path(&database_path, sample_request())
@@ -2317,6 +2382,89 @@ mod tests {
                 code_nodes,
             },
             seed_explanations,
+        }
+    }
+
+    fn python_request(
+        file_hash: &str,
+        snapshot_id: &str,
+        function_hash: &str,
+        code: &str,
+    ) -> HydrateCodeFileRequest {
+        HydrateCodeFileRequest {
+            file: PersistenceCodeFile {
+                id: "file:python".to_string(),
+                path: "examples/service.py".to_string(),
+                project_id: Some("project:python".to_string()),
+                project_root: Some("examples".to_string()),
+                relative_path: Some("service.py".to_string()),
+                language: "python".to_string(),
+                code: code.to_string(),
+                file_hash: Some(file_hash.to_string()),
+                snapshot_id: Some(snapshot_id.to_string()),
+                code_nodes: vec![
+                    node(
+                        "target:python:file",
+                        "file",
+                        "service.py",
+                        1,
+                        3,
+                        file_hash,
+                        "@trace",
+                    ),
+                    node(
+                        "target:python:function",
+                        "function",
+                        "greet",
+                        1,
+                        3,
+                        function_hash,
+                        "@trace",
+                    ),
+                ],
+            },
+            seed_explanations: vec![
+                ExplanationInput {
+                    id: "exp:target:python:file".to_string(),
+                    file_path: "examples/service.py".to_string(),
+                    file_hash: Some(file_hash.to_string()),
+                    target_type: "file".to_string(),
+                    start_line: Some(1),
+                    end_line: Some(3),
+                    symbol_id: None,
+                    code_hash: Some(file_hash.to_string()),
+                    anchor_text: Some("@trace".to_string()),
+                    code_meaning: "Python file meaning".to_string(),
+                    local_meaning: None,
+                    global_meaning: None,
+                    risk_notes: None,
+                    reader_notes: None,
+                    status: "new_unexplained".to_string(),
+                    reading_state: "unread".to_string(),
+                    created_at: "2026-06-11T00:00:00.000Z".to_string(),
+                    updated_at: "2026-06-11T00:00:00.000Z".to_string(),
+                },
+                ExplanationInput {
+                    id: "exp:target:python:function".to_string(),
+                    file_path: "examples/service.py".to_string(),
+                    file_hash: Some(file_hash.to_string()),
+                    target_type: "function".to_string(),
+                    start_line: Some(1),
+                    end_line: Some(3),
+                    symbol_id: Some("function:examples/service.py:greet".to_string()),
+                    code_hash: Some(function_hash.to_string()),
+                    anchor_text: Some("@trace".to_string()),
+                    code_meaning: "Python function meaning".to_string(),
+                    local_meaning: None,
+                    global_meaning: None,
+                    risk_notes: None,
+                    reader_notes: None,
+                    status: "new_unexplained".to_string(),
+                    reading_state: "unread".to_string(),
+                    created_at: "2026-06-11T00:00:00.000Z".to_string(),
+                    updated_at: "2026-06-11T00:00:00.000Z".to_string(),
+                },
+            ],
         }
     }
 

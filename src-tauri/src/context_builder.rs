@@ -147,6 +147,8 @@ struct StaticAnalysis {
     definitions: Vec<Definition>,
     calls: Vec<SyntaxSnippet>,
     returns: Vec<SyntaxSnippet>,
+    module_assignments: Vec<SyntaxSnippet>,
+    entry_points: Vec<SyntaxSnippet>,
     identifiers: BTreeMap<String, Vec<usize>>,
 }
 
@@ -225,6 +227,11 @@ pub(crate) fn build_context_bundle(request: BuildContextRequest) -> Result<Conte
         .unwrap_or_else(|| default_target_name(target_type, start_line, end_line));
 
     let mut warnings = Vec::new();
+    if request.file.language == "python" {
+        warnings.push(
+            "当前 Python 上下文仅覆盖文件内结构与调用线索，不推断完整跨文件调用图。".to_string(),
+        );
+    }
     let analysis = match cached_static_analysis(
         &request.file.path,
         &request.file.language,
@@ -479,6 +486,26 @@ fn append_file_candidates(
         ));
     }
 
+    for assignment in &analysis.module_assignments {
+        candidates.push(candidate_from_syntax(
+            assignment,
+            "module_assignment",
+            "模块级赋值",
+            "文件级上下文保留模块常量或入口依赖，但不展开无关实现。",
+            2,
+        ));
+    }
+
+    for entry_point in &analysis.entry_points {
+        candidates.push(candidate_from_syntax(
+            entry_point,
+            "entry_point",
+            "模块入口",
+            "Python 主入口信号决定模块作为脚本运行时的启动路径。",
+            2,
+        ));
+    }
+
     for node in file
         .code_nodes
         .iter()
@@ -584,12 +611,14 @@ fn append_called_function_candidates(
         {
             continue;
         }
+        let (signature_end_line, signature) =
+            structure_signature(&file.code, node.start_line, node.end_line);
         candidates.push(CandidateSnippet {
             kind: "called_function",
             label: format!("调用目标 {}", node.name),
             start_line: node.start_line,
-            end_line: node.start_line,
-            code: lines_inclusive(&file.code, node.start_line, node.start_line),
+            end_line: signature_end_line,
+            code: signature,
             reason: "当前函数调用了该本地函数，仅加入签名避免扩张上下文。".to_string(),
             is_summary: true,
             priority: 3,
@@ -744,11 +773,12 @@ fn build_signals(analysis: &StaticAnalysis, start_line: usize, end_line: usize) 
 }
 
 fn parse_static_analysis(path: &str, language: &str, code: &str) -> Result<StaticAnalysis, String> {
-    let grammar: Language = match file_extension(path) {
-        Some("tsx") => tree_sitter_typescript::LANGUAGE_TSX.into(),
+    let (grammar, is_python): (Language, bool) = match file_extension(path) {
+        Some("tsx") => (tree_sitter_typescript::LANGUAGE_TSX.into(), false),
         _ => match language {
-            "javascript" => tree_sitter_javascript::LANGUAGE.into(),
-            "typescript" => tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into(),
+            "javascript" => (tree_sitter_javascript::LANGUAGE.into(), false),
+            "python" => (tree_sitter_python::LANGUAGE.into(), true),
+            "typescript" => (tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into(), false),
             _ => return Err(format!("Unsupported Context Builder language: {language}")),
         },
     };
@@ -760,7 +790,7 @@ fn parse_static_analysis(path: &str, language: &str, code: &str) -> Result<Stati
         .parse(code, None)
         .ok_or_else(|| "Context Builder could not parse this file.".to_string())?;
     let mut analysis = StaticAnalysis::default();
-    collect_static_analysis(tree.root_node(), code, &mut analysis);
+    collect_static_analysis(tree.root_node(), code, is_python, &mut analysis);
     Ok(analysis)
 }
 
@@ -785,7 +815,27 @@ fn cached_static_analysis(
     Ok(analysis)
 }
 
-fn collect_static_analysis(node: Node<'_>, code: &str, analysis: &mut StaticAnalysis) {
+fn collect_static_analysis(
+    node: Node<'_>,
+    code: &str,
+    is_python: bool,
+    analysis: &mut StaticAnalysis,
+) {
+    if is_python {
+        collect_python_static_analysis(node, code, analysis);
+    } else {
+        collect_javascript_static_analysis(node, code, analysis);
+    }
+
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        if child.is_named() {
+            collect_static_analysis(child, code, is_python, analysis);
+        }
+    }
+}
+
+fn collect_javascript_static_analysis(node: Node<'_>, code: &str, analysis: &mut StaticAnalysis) {
     match node.kind() {
         "import_statement" => analysis.imports.push(syntax_snippet(node, code, "")),
         "variable_declarator" => {
@@ -842,12 +892,127 @@ fn collect_static_analysis(node: Node<'_>, code: &str, analysis: &mut StaticAnal
         "return_statement" => analysis.returns.push(syntax_snippet(node, code, "return")),
         _ => {}
     }
+}
 
-    let mut cursor = node.walk();
-    for child in node.children(&mut cursor) {
-        if child.is_named() {
-            collect_static_analysis(child, code, analysis);
+fn collect_python_static_analysis(node: Node<'_>, code: &str, analysis: &mut StaticAnalysis) {
+    match node.kind() {
+        "import_statement" | "import_from_statement" => {
+            analysis.imports.push(syntax_snippet(node, code, ""))
         }
+        "function_definition" => {
+            if let Some(name_node) = node.child_by_field_name("name") {
+                let name = node_text(name_node, code).trim();
+                if !name.is_empty() {
+                    analysis.definitions.push(Definition {
+                        name: name.to_string(),
+                        start_line: node.start_position().row + 1,
+                        end_line: node.end_position().row + 1,
+                        code: function_signature(node, code),
+                        is_parameter: false,
+                    });
+                }
+            }
+            if let Some(parameters) = node.child_by_field_name("parameters") {
+                for name in python_parameter_names(parameters, code) {
+                    analysis.definitions.push(Definition {
+                        name,
+                        start_line: parameters.start_position().row + 1,
+                        end_line: parameters.end_position().row + 1,
+                        code: node_text(parameters, code).trim().to_string(),
+                        is_parameter: true,
+                    });
+                }
+            }
+        }
+        "class_definition" => {
+            if let Some(name_node) = node.child_by_field_name("name") {
+                let name = node_text(name_node, code).trim();
+                if !name.is_empty() {
+                    analysis.definitions.push(Definition {
+                        name: name.to_string(),
+                        start_line: node.start_position().row + 1,
+                        end_line: node.end_position().row + 1,
+                        code: function_signature(node, code),
+                        is_parameter: false,
+                    });
+                }
+            }
+        }
+        "assignment" => {
+            if let Some(left) = node.child_by_field_name("left") {
+                let names = python_binding_names(left, code);
+                let snippet = syntax_snippet(node, code, &names.join(", "));
+                for name in names {
+                    analysis.definitions.push(Definition {
+                        name,
+                        start_line: snippet.start_line,
+                        end_line: snippet.end_line,
+                        code: snippet.code.clone(),
+                        is_parameter: false,
+                    });
+                }
+                if is_python_module_scope(node) && !snippet.name.is_empty() {
+                    analysis.module_assignments.push(snippet);
+                }
+            }
+        }
+        "named_expression" => {
+            if let Some(name_node) = node.child_by_field_name("name") {
+                let name = node_text(name_node, code).trim();
+                if !name.is_empty() {
+                    let snippet = syntax_snippet(node, code, name);
+                    analysis.definitions.push(Definition {
+                        name: name.to_string(),
+                        start_line: snippet.start_line,
+                        end_line: snippet.end_line,
+                        code: snippet.code,
+                        is_parameter: false,
+                    });
+                }
+            }
+        }
+        "for_statement" => {
+            if let Some(left) = node.child_by_field_name("left") {
+                let snippet = syntax_snippet(left, code, "");
+                for name in python_binding_names(left, code) {
+                    analysis.definitions.push(Definition {
+                        name,
+                        start_line: snippet.start_line,
+                        end_line: snippet.end_line,
+                        code: snippet.code.clone(),
+                        is_parameter: false,
+                    });
+                }
+            }
+        }
+        "identifier" => {
+            let name = node_text(node, code).trim();
+            if !name.is_empty() {
+                analysis
+                    .identifiers
+                    .entry(name.to_string())
+                    .or_default()
+                    .push(node.start_position().row + 1);
+            }
+        }
+        "call" => {
+            if let Some(function) = node.child_by_field_name("function") {
+                let name = call_name(node_text(function, code));
+                analysis.calls.push(syntax_snippet(node, code, &name));
+            }
+        }
+        "return_statement" => analysis.returns.push(syntax_snippet(node, code, "return")),
+        "if_statement"
+            if is_python_module_scope(node)
+                && node
+                    .child_by_field_name("condition")
+                    .is_some_and(|condition| is_python_main_guard(node_text(condition, code))) =>
+        {
+            analysis
+                .entry_points
+                .push(syntax_snippet(node, code, "__main__"))
+        }
+        _ => {}
     }
 }
 
@@ -877,6 +1042,87 @@ fn collect_identifier_names(node: Node<'_>, code: &str, names: &mut Vec<String>)
             collect_identifier_names(child, code, names);
         }
     }
+}
+
+fn python_parameter_names(parameters: Node<'_>, code: &str) -> Vec<String> {
+    let mut names = Vec::new();
+    let mut cursor = parameters.walk();
+    for child in parameters.named_children(&mut cursor) {
+        names.extend(python_binding_names(child, code));
+    }
+    names.sort();
+    names.dedup();
+    names
+}
+
+fn python_binding_names(node: Node<'_>, code: &str) -> Vec<String> {
+    let mut names = Vec::new();
+    collect_python_binding_names(node, code, &mut names);
+    names.sort();
+    names.dedup();
+    names
+}
+
+fn collect_python_binding_names(node: Node<'_>, code: &str, names: &mut Vec<String>) {
+    match node.kind() {
+        "identifier" => {
+            let name = node_text(node, code).trim();
+            if !name.is_empty() {
+                names.push(name.to_string());
+            }
+        }
+        "default_parameter" | "typed_default_parameter" => {
+            if let Some(name) = node.child_by_field_name("name") {
+                collect_python_binding_names(name, code, names);
+            }
+        }
+        "typed_parameter" => {
+            let type_id = node.child_by_field_name("type").map(|child| child.id());
+            let mut cursor = node.walk();
+            for child in node.named_children(&mut cursor) {
+                if Some(child.id()) != type_id {
+                    collect_python_binding_names(child, code, names);
+                }
+            }
+        }
+        "dictionary_splat_pattern"
+        | "list_pattern"
+        | "list_splat_pattern"
+        | "parameter"
+        | "pattern_list"
+        | "tuple_pattern" => {
+            let mut cursor = node.walk();
+            for child in node.named_children(&mut cursor) {
+                collect_python_binding_names(child, code, names);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn is_python_module_scope(node: Node<'_>) -> bool {
+    let mut current = node.parent();
+    while let Some(parent) = current {
+        match parent.kind() {
+            "module" => return true,
+            "class_definition" | "function_definition" | "lambda" => return false,
+            _ => current = parent.parent(),
+        }
+    }
+    false
+}
+
+fn is_python_main_guard(condition: &str) -> bool {
+    condition.contains("__name__") && condition.contains("__main__") && condition.contains("==")
+}
+
+fn function_signature(node: Node<'_>, code: &str) -> String {
+    node_text(node, code)
+        .lines()
+        .map(str::trim)
+        .find(|line| !line.is_empty())
+        .unwrap_or("")
+        .to_string()
 }
 
 fn syntax_snippet(node: Node<'_>, code: &str, name: &str) -> SyntaxSnippet {
@@ -1077,6 +1323,35 @@ fn lines_inclusive(code: &str, start_line: usize, end_line: usize) -> String {
         .join("\n")
 }
 
+fn structure_signature(code: &str, start_line: usize, end_line: usize) -> (usize, String) {
+    let lines: Vec<&str> = code.lines().collect();
+    let start_index = start_line.saturating_sub(1);
+    let end_index = end_line.min(lines.len());
+    if start_index >= end_index {
+        return (start_line, String::new());
+    }
+
+    let mut signature_end = start_index;
+    let starts_with_decorator = lines[start_index].trim_start().starts_with('@');
+    if starts_with_decorator {
+        for (index, line) in lines[start_index..end_index].iter().enumerate() {
+            let trimmed = line.trim_start();
+            signature_end = start_index + index;
+            if trimmed.starts_with("def ")
+                || trimmed.starts_with("async def ")
+                || trimmed.starts_with("class ")
+            {
+                break;
+            }
+        }
+    }
+
+    (
+        signature_end + 1,
+        lines[start_index..=signature_end].join("\n"),
+    )
+}
+
 fn ranges_intersect(
     left_start: usize,
     left_end: usize,
@@ -1176,6 +1451,84 @@ mod tests {
         }
     }
 
+    fn python_request(
+        target_type: &str,
+        start_line: Option<usize>,
+        end_line: Option<usize>,
+    ) -> BuildContextRequest {
+        BuildContextRequest {
+            file: ContextFileInput {
+                path: "examples/python/service.py".to_string(),
+                language: "python".to_string(),
+                code: python_code().to_string(),
+                code_nodes: python_nodes(),
+            },
+            target: ContextTargetInput {
+                target_type: target_type.to_string(),
+                target_name: None,
+                start_line,
+                end_line,
+                symbol_id: None,
+            },
+            budget: None,
+        }
+    }
+
+    fn python_code() -> &'static str {
+        r#"from pathlib import Path
+from contextlib import asynccontextmanager
+
+DEFAULT_LIMIT = 10
+
+def trace(func):
+    return func
+
+class Repository:
+    @classmethod
+    async def load(cls, user_id: int = 1):
+        return {"id": user_id}
+
+@trace
+async def process(user_id: int, limit: int = DEFAULT_LIMIT) -> dict | None:
+    path = Path("data.json")
+    try:
+        with path.open() as handle:
+            data = handle.read()
+        if not data:
+            return None
+        result = await Repository.load(user_id)
+        return result
+    except OSError:
+        return None
+
+if __name__ == "__main__":
+    print("ready")
+"#
+    }
+
+    fn python_nodes() -> Vec<ContextNodeInput> {
+        vec![
+            sample_node("file", "service.py", 1, 28, None),
+            sample_node("import", "from pathlib import Path", 1, 1, None),
+            sample_node(
+                "import",
+                "from contextlib import asynccontextmanager",
+                2,
+                2,
+                None,
+            ),
+            sample_node("function", "trace", 6, 7, Some("function:trace")),
+            sample_node("class", "Repository", 9, 12, Some("class:Repository")),
+            sample_node("function", "load", 10, 12, Some("function:load")),
+            sample_node("function", "process", 14, 25, Some("function:process")),
+            sample_node("block", "try", 17, 25, Some("block:17-25")),
+            sample_node("block", "with", 18, 19, Some("block:18-19")),
+            sample_node("block", "if", 20, 21, Some("block:20-21")),
+            sample_node("block", "except", 24, 25, Some("block:24-25")),
+            sample_node("block", "if", 27, 28, Some("block:27-28")),
+        ]
+    }
+
     #[test]
     fn builds_line_context_with_structure_and_variable_definitions() {
         let bundle = build_context_bundle(sample_request("line", 20, 20))
@@ -1229,6 +1582,93 @@ mod tests {
             .signals
             .called_functions
             .contains(&"verifyPassword".to_string()));
+    }
+
+    #[test]
+    fn builds_python_line_context_with_class_and_parameter_scope() {
+        let bundle = build_context_bundle(python_request("line", Some(22), Some(22)))
+            .expect("Python line context should build");
+
+        assert_eq!(bundle.strategy, "line");
+        assert!(bundle
+            .snippets
+            .iter()
+            .any(|snippet| snippet.kind == "containing_structure"
+                && snippet.code.contains("async def process")));
+        assert!(bundle
+            .signals
+            .input_identifiers
+            .contains(&"user_id".to_string()));
+        assert!(bundle
+            .signals
+            .called_functions
+            .contains(&"load".to_string()));
+        assert!(bundle
+            .warnings
+            .iter()
+            .any(|warning| warning.contains("跨文件调用图")));
+    }
+
+    #[test]
+    fn builds_python_range_context_with_inputs_outputs_and_control_flow() {
+        let bundle = build_context_bundle(python_request("range", Some(18), Some(19)))
+            .expect("Python range context should build");
+
+        assert_eq!(bundle.strategy, "range");
+        assert!(bundle
+            .signals
+            .input_identifiers
+            .contains(&"path".to_string()));
+        assert!(bundle
+            .signals
+            .output_identifiers
+            .contains(&"data".to_string()));
+        assert!(bundle
+            .snippets
+            .iter()
+            .any(|snippet| snippet.kind == "control_flow" && snippet.code.contains("try:")));
+    }
+
+    #[test]
+    fn builds_python_function_context_with_decorator_import_and_local_call() {
+        let bundle = build_context_bundle(python_request("function", Some(14), Some(25)))
+            .expect("Python function context should build");
+
+        assert_eq!(bundle.strategy, "function");
+        assert!(bundle.snippets[0].code.starts_with("@trace"));
+        assert!(bundle
+            .snippets
+            .iter()
+            .any(|snippet| snippet.kind == "related_import" && snippet.code.contains("pathlib")));
+        assert!(bundle
+            .snippets
+            .iter()
+            .any(|snippet| snippet.kind == "called_function"
+                && snippet.code.contains("async def load")));
+    }
+
+    #[test]
+    fn builds_python_file_context_without_full_file_leakage() {
+        let full_code = python_code().to_string();
+        let bundle = build_context_bundle(python_request("file", None, None))
+            .expect("Python file context should build");
+
+        assert_eq!(bundle.strategy, "file");
+        assert!(bundle.snippets[0].is_summary);
+        assert!(bundle.snippets[0].code.contains("function process"));
+        assert!(bundle
+            .snippets
+            .iter()
+            .any(|snippet| snippet.kind == "module_assignment"
+                && snippet.code.contains("DEFAULT_LIMIT")));
+        assert!(bundle
+            .snippets
+            .iter()
+            .any(|snippet| snippet.kind == "entry_point" && snippet.code.contains("__main__")));
+        assert!(bundle
+            .snippets
+            .iter()
+            .all(|snippet| snippet.code != full_code));
     }
 
     #[test]

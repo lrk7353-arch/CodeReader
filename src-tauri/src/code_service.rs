@@ -411,7 +411,7 @@ fn parse_code_nodes(
     };
 
     let root = tree.root_node();
-    collect_nodes(root, code, path, &mut nodes);
+    collect_nodes(root, code, path, language, &mut nodes);
     nodes.sort_by(|left, right| {
         left.start_line
             .cmp(&right.start_line)
@@ -432,15 +432,21 @@ fn parse_code_nodes(
     }
 }
 
-fn collect_nodes(node: Node<'_>, code: &str, path: &Path, nodes: &mut Vec<CodeNodePayload>) {
-    if let Some(node_type) = classify_node(node.kind()) {
+fn collect_nodes(
+    node: Node<'_>,
+    code: &str,
+    path: &Path,
+    language: CodeLanguage,
+    nodes: &mut Vec<CodeNodePayload>,
+) {
+    if let Some(node_type) = classify_node(node, language) {
         nodes.push(code_node_payload(node, code, path, node_type));
     }
 
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
         if child.is_named() {
-            collect_nodes(child, code, path, nodes);
+            collect_nodes(child, code, path, language, nodes);
         }
     }
 }
@@ -484,8 +490,35 @@ fn code_node_payload(node: Node<'_>, code: &str, path: &Path, node_type: &str) -
     }
 }
 
-fn classify_node(kind: &str) -> Option<&'static str> {
-    match kind {
+fn classify_node(node: Node<'_>, language: CodeLanguage) -> Option<&'static str> {
+    if language == CodeLanguage::Python {
+        if matches!(node.kind(), "function_definition" | "class_definition")
+            && node
+                .parent()
+                .is_some_and(|parent| parent.kind() == "decorated_definition")
+        {
+            return None;
+        }
+        return match node.kind() {
+            "import_statement" | "import_from_statement" => Some("import"),
+            "decorated_definition" => {
+                node.child_by_field_name("definition")
+                    .and_then(|definition| match definition.kind() {
+                        "function_definition" => Some("function"),
+                        "class_definition" => Some("class"),
+                        _ => None,
+                    })
+            }
+            "function_definition" => Some("function"),
+            "class_definition" => Some("class"),
+            "case_clause" | "elif_clause" | "else_clause" | "except_clause" | "finally_clause"
+            | "for_statement" | "if_statement" | "match_statement" | "try_statement"
+            | "while_statement" | "with_statement" => Some("block"),
+            _ => None,
+        };
+    }
+
+    match node.kind() {
         "import_statement" => Some("import"),
         "export_statement" => Some("export"),
         "class_declaration" => Some("class"),
@@ -502,6 +535,17 @@ fn classify_node(kind: &str) -> Option<&'static str> {
 }
 
 fn node_name(node: Node<'_>, code: &str, node_type: &str, anchor_text: &str) -> String {
+    if node.kind() == "decorated_definition" {
+        if let Some(definition) = node.child_by_field_name("definition") {
+            if let Some(name_node) = definition.child_by_field_name("name") {
+                let name = node_text(name_node, code).trim();
+                if !name.is_empty() {
+                    return name.to_string();
+                }
+            }
+        }
+    }
+
     if let Some(name_node) = node.child_by_field_name("name") {
         let name = node_text(name_node, code).trim();
         if !name.is_empty() {
@@ -534,12 +578,19 @@ fn node_name(node: Node<'_>, code: &str, node_type: &str, anchor_text: &str) -> 
 fn block_name(kind: &str) -> &'static str {
     match kind {
         "catch_clause" => "catch",
+        "case_clause" => "case",
         "do_statement" => "do",
+        "elif_clause" => "elif",
+        "else_clause" => "else",
+        "except_clause" => "except",
+        "finally_clause" => "finally",
         "for_in_statement" | "for_of_statement" | "for_statement" => "for",
         "if_statement" => "if",
+        "match_statement" => "match",
         "switch_statement" => "switch",
         "try_statement" => "try",
         "while_statement" => "while",
+        "with_statement" => "with",
         _ => "block",
     }
 }
@@ -548,10 +599,11 @@ fn node_text<'a>(node: Node<'_>, code: &'a str) -> &'a str {
     node.utf8_text(code.as_bytes()).unwrap_or("")
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 enum CodeLanguage {
     JavaScript,
     Jsx,
+    Python,
     TypeScript,
     Tsx,
 }
@@ -560,6 +612,7 @@ impl CodeLanguage {
     fn monaco_language(self) -> &'static str {
         match self {
             CodeLanguage::JavaScript | CodeLanguage::Jsx => "javascript",
+            CodeLanguage::Python => "python",
             CodeLanguage::TypeScript | CodeLanguage::Tsx => "typescript",
         }
     }
@@ -567,6 +620,7 @@ impl CodeLanguage {
     fn tree_sitter_language(self) -> Language {
         match self {
             CodeLanguage::JavaScript | CodeLanguage::Jsx => tree_sitter_javascript::LANGUAGE.into(),
+            CodeLanguage::Python => tree_sitter_python::LANGUAGE.into(),
             CodeLanguage::TypeScript => tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into(),
             CodeLanguage::Tsx => tree_sitter_typescript::LANGUAGE_TSX.into(),
         }
@@ -582,6 +636,7 @@ fn language_for_path(path: &Path) -> Option<CodeLanguage> {
     {
         "js" => Some(CodeLanguage::JavaScript),
         "jsx" => Some(CodeLanguage::Jsx),
+        "py" => Some(CodeLanguage::Python),
         "ts" => Some(CodeLanguage::TypeScript),
         "tsx" => Some(CodeLanguage::Tsx),
         _ => None,
@@ -885,6 +940,78 @@ mod tests {
             .code_nodes
             .iter()
             .any(|node| node.node_type == "block"));
+    }
+
+    #[test]
+    fn parses_python_structure_targets_and_decorators() {
+        let code = r#"from contextlib import asynccontextmanager
+
+@trace
+async def fetch_user(user_id: int) -> dict | None:
+    try:
+        with open("users.json") as handle:
+            match user_id:
+                case 0:
+                    return None
+                case _:
+                    return {"id": user_id}
+    except OSError:
+        return None
+    finally:
+        audit(user_id)
+
+@register
+class Repository:
+    @classmethod
+    async def load(cls, user_id: int = 1):
+        return await fetch_user(user_id)
+
+if __name__ == "__main__":
+    print("ready")
+"#
+        .to_string();
+        let path = PathBuf::from("examples/python/service.py");
+        let payload = file_payload(
+            path.clone(),
+            None,
+            Some(CodeLanguage::Python),
+            classify_file(&path, code.len() as u64, false),
+            code,
+        );
+
+        assert!(!payload.parse_error);
+        assert_eq!(payload.language, "python");
+        assert!(payload.capability.can_explain);
+        assert!(payload
+            .code_nodes
+            .iter()
+            .any(|node| node.node_type == "import"));
+        let fetch_user_nodes: Vec<&CodeNodePayload> = payload
+            .code_nodes
+            .iter()
+            .filter(|node| node.node_type == "function" && node.name == "fetch_user")
+            .collect();
+        assert_eq!(fetch_user_nodes.len(), 1);
+        assert_eq!(fetch_user_nodes[0].start_line, 3);
+        let repository = payload
+            .code_nodes
+            .iter()
+            .find(|node| node.node_type == "class" && node.name == "Repository")
+            .expect("decorated class should be extracted");
+        assert_eq!(repository.anchor_text, "@register");
+        assert!(payload
+            .code_nodes
+            .iter()
+            .any(|node| node.node_type == "function" && node.name == "load"));
+        for block_name in ["try", "with", "match", "case", "except", "finally", "if"] {
+            assert!(
+                payload
+                    .code_nodes
+                    .iter()
+                    .any(|node| node.node_type == "block" && node.name == block_name),
+                "missing Python block: {block_name}"
+            );
+        }
     }
 
     #[test]
