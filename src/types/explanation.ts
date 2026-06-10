@@ -6,6 +6,8 @@ export type ExplanationTargetType =
   | "block"
   | "function"
   | "class"
+  | "statement"
+  | "query"
   | "file"
   | "module"
   | "project";
@@ -161,7 +163,7 @@ export interface ProjectScanResult {
   skippedEntries: number;
 }
 
-export type ContextStrategy = "line" | "range" | "function" | "file";
+export type ContextStrategy = "line" | "range" | "function" | "statement" | "file";
 
 export interface ContextTargetSummary {
   targetType: ExplanationTargetType;

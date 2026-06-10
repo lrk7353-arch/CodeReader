@@ -468,8 +468,9 @@ fn code_node_payload(node: Node<'_>, code: &str, path: &Path, node_type: &str) -
     let id_hash = sha256_hex(&node_hash_seed);
     let symbol_id = match node_type {
         "function" | "class" => Some(format!("{}:{}:{}", node_type, display_path(path), name)),
-        "block" => Some(format!(
-            "block:{}:{}-{}",
+        "block" | "statement" | "query" => Some(format!(
+            "{}:{}:{}-{}",
+            node_type,
             display_path(path),
             start_line,
             end_line
@@ -491,6 +492,23 @@ fn code_node_payload(node: Node<'_>, code: &str, path: &Path, node_type: &str) -
 }
 
 fn classify_node(node: Node<'_>, language: CodeLanguage) -> Option<&'static str> {
+    if language == CodeLanguage::Sql {
+        return match node.kind() {
+            "statement"
+                if !node
+                    .parent()
+                    .is_some_and(|parent| matches!(parent.kind(), "cte" | "subquery")) =>
+            {
+                Some("statement")
+            }
+            "transaction" => Some("statement"),
+            "cte" | "subquery" => Some("query"),
+            "group_by" | "join" | "limit" | "order_by" | "returning" | "set_operation"
+            | "when_clause" | "where" => Some("block"),
+            _ => None,
+        };
+    }
+
     if language == CodeLanguage::Python {
         if matches!(node.kind(), "function_definition" | "class_definition")
             && node
@@ -535,6 +553,34 @@ fn classify_node(node: Node<'_>, language: CodeLanguage) -> Option<&'static str>
 }
 
 fn node_name(node: Node<'_>, code: &str, node_type: &str, anchor_text: &str) -> String {
+    if node.kind() == "statement" || node.kind() == "transaction" {
+        return sql_statement_name(node, code);
+    }
+
+    if node.kind() == "cte" {
+        let mut cursor = node.walk();
+        if let Some(name_node) = node
+            .named_children(&mut cursor)
+            .find(|child| child.kind() == "identifier")
+        {
+            let name = node_text(name_node, code).trim();
+            if !name.is_empty() {
+                return format!("CTE {name}");
+            }
+        }
+        return "CTE".to_string();
+    }
+
+    if node.kind() == "subquery" {
+        if let Some(name_node) = node.child_by_field_name("name") {
+            let name = node_text(name_node, code).trim();
+            if !name.is_empty() {
+                return format!("subquery {name}");
+            }
+        }
+        return "subquery".to_string();
+    }
+
     if node.kind() == "decorated_definition" {
         if let Some(definition) = node.child_by_field_name("definition") {
             if let Some(name_node) = definition.child_by_field_name("name") {
@@ -587,12 +633,76 @@ fn block_name(kind: &str) -> &'static str {
         "for_in_statement" | "for_of_statement" | "for_statement" => "for",
         "if_statement" => "if",
         "match_statement" => "match",
+        "group_by" => "GROUP BY",
+        "join" => "JOIN",
+        "limit" => "LIMIT",
+        "order_by" => "ORDER BY",
+        "returning" => "RETURNING",
+        "set_operation" => "set operation",
         "switch_statement" => "switch",
         "try_statement" => "try",
         "while_statement" => "while",
+        "when_clause" => "WHEN",
+        "where" => "WHERE",
         "with_statement" => "with",
         _ => "block",
     }
+}
+
+fn sql_statement_name(node: Node<'_>, code: &str) -> String {
+    if node.kind() == "transaction" {
+        return "transaction".to_string();
+    }
+
+    if let Some(operation) = find_sql_operation(node) {
+        let label = match operation.kind() {
+            "select" => "SELECT",
+            "insert" => "INSERT",
+            "update" => "UPDATE",
+            "delete" => "DELETE",
+            "create_table" => "CREATE TABLE",
+            "create_view" => "CREATE VIEW",
+            "create_materialized_view" => "CREATE MATERIALIZED VIEW",
+            "create_function" => "CREATE FUNCTION",
+            "alter_table" => "ALTER TABLE",
+            "drop_table" => "DROP TABLE",
+            "merge" => "MERGE",
+            _ => operation.kind(),
+        };
+        return format!("{label} statement");
+    }
+
+    truncate(&first_non_empty_line(node_text(node, code)), 80)
+}
+
+fn find_sql_operation(node: Node<'_>) -> Option<Node<'_>> {
+    if matches!(
+        node.kind(),
+        "select"
+            | "insert"
+            | "update"
+            | "delete"
+            | "create_table"
+            | "create_view"
+            | "create_materialized_view"
+            | "create_function"
+            | "alter_table"
+            | "drop_table"
+            | "merge"
+    ) {
+        return Some(node);
+    }
+
+    let mut cursor = node.walk();
+    for child in node.named_children(&mut cursor) {
+        if child.kind() == "cte" {
+            continue;
+        }
+        if let Some(operation) = find_sql_operation(child) {
+            return Some(operation);
+        }
+    }
+    None
 }
 
 fn node_text<'a>(node: Node<'_>, code: &'a str) -> &'a str {
@@ -604,6 +714,7 @@ enum CodeLanguage {
     JavaScript,
     Jsx,
     Python,
+    Sql,
     TypeScript,
     Tsx,
 }
@@ -613,6 +724,7 @@ impl CodeLanguage {
         match self {
             CodeLanguage::JavaScript | CodeLanguage::Jsx => "javascript",
             CodeLanguage::Python => "python",
+            CodeLanguage::Sql => "sql",
             CodeLanguage::TypeScript | CodeLanguage::Tsx => "typescript",
         }
     }
@@ -621,6 +733,7 @@ impl CodeLanguage {
         match self {
             CodeLanguage::JavaScript | CodeLanguage::Jsx => tree_sitter_javascript::LANGUAGE.into(),
             CodeLanguage::Python => tree_sitter_python::LANGUAGE.into(),
+            CodeLanguage::Sql => tree_sitter_sequel::LANGUAGE.into(),
             CodeLanguage::TypeScript => tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into(),
             CodeLanguage::Tsx => tree_sitter_typescript::LANGUAGE_TSX.into(),
         }
@@ -637,6 +750,7 @@ fn language_for_path(path: &Path) -> Option<CodeLanguage> {
         "js" => Some(CodeLanguage::JavaScript),
         "jsx" => Some(CodeLanguage::Jsx),
         "py" => Some(CodeLanguage::Python),
+        "sql" => Some(CodeLanguage::Sql),
         "ts" => Some(CodeLanguage::TypeScript),
         "tsx" => Some(CodeLanguage::Tsx),
         _ => None,
@@ -1010,6 +1124,77 @@ if __name__ == "__main__":
                     .iter()
                     .any(|node| node.node_type == "block" && node.name == block_name),
                 "missing Python block: {block_name}"
+            );
+        }
+    }
+
+    #[test]
+    fn parses_sql_statements_queries_and_data_flow_clauses() {
+        let code = r#"WITH active_users AS (
+    SELECT u.id, u.team_id
+    FROM users u
+    WHERE u.active = TRUE
+),
+team_totals AS (
+    SELECT team_id, COUNT(*) AS member_count
+    FROM active_users
+    GROUP BY team_id
+)
+SELECT t.name, tt.member_count
+FROM teams t
+JOIN team_totals tt ON tt.team_id = t.id
+WHERE tt.member_count > 5
+ORDER BY tt.member_count DESC
+LIMIT 20;
+
+UPDATE audit_log
+SET reviewed = TRUE
+WHERE created_at < CURRENT_DATE;
+"#
+        .to_string();
+        let path = PathBuf::from("examples/sql/report.sql");
+        let payload = file_payload(
+            path.clone(),
+            None,
+            Some(CodeLanguage::Sql),
+            classify_file(&path, code.len() as u64, false),
+            code,
+        );
+
+        assert!(!payload.parse_error);
+        assert_eq!(payload.language, "sql");
+        assert!(payload.capability.can_explain);
+        assert_eq!(
+            payload
+                .code_nodes
+                .iter()
+                .filter(|node| node.node_type == "statement")
+                .count(),
+            2
+        );
+        assert!(payload
+            .code_nodes
+            .iter()
+            .any(|node| node.node_type == "statement" && node.name == "SELECT statement"));
+        assert!(payload
+            .code_nodes
+            .iter()
+            .any(|node| node.node_type == "statement" && node.name == "UPDATE statement"));
+        assert!(payload
+            .code_nodes
+            .iter()
+            .any(|node| node.node_type == "query" && node.name == "CTE active_users"));
+        assert!(payload
+            .code_nodes
+            .iter()
+            .any(|node| node.node_type == "query" && node.name == "CTE team_totals"));
+        for block_name in ["JOIN", "WHERE", "GROUP BY", "ORDER BY", "LIMIT"] {
+            assert!(
+                payload
+                    .code_nodes
+                    .iter()
+                    .any(|node| node.node_type == "block" && node.name == block_name),
+                "missing SQL block: {block_name}"
             );
         }
     }

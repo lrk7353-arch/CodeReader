@@ -415,8 +415,8 @@ mod tests {
         let result = detect_changes(
             old,
             new,
-            &[old_node.clone()],
-            &[new_node.clone()],
+            std::slice::from_ref(&old_node),
+            std::slice::from_ref(&new_node),
             &[explanation("exp-login", &old_node)],
         );
 
@@ -439,7 +439,7 @@ mod tests {
         let result = detect_changes(
             old,
             new,
-            &[old_node.clone()],
+            std::slice::from_ref(&old_node),
             &[new_node],
             &[explanation("exp-login", &old_node)],
         );
@@ -462,7 +462,7 @@ mod tests {
         let result = detect_changes(
             old,
             new,
-            &[old_node.clone()],
+            std::slice::from_ref(&old_node),
             &[new_node],
             &[explanation("exp-login", &old_node)],
         );
@@ -480,7 +480,7 @@ mod tests {
         let result = detect_changes(
             old,
             new,
-            &[old_node.clone()],
+            std::slice::from_ref(&old_node),
             &[],
             &[explanation("exp-login", &old_node)],
         );

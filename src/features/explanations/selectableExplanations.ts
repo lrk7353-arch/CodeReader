@@ -143,6 +143,8 @@ function targetTypeLabel(targetType: ExplanationTargetType) {
     block: "代码块",
     function: "函数",
     class: "类",
+    statement: "SQL 语句",
+    query: "SQL 查询",
     file: "文件",
     module: "模块",
     project: "项目"

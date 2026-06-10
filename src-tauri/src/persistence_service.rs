@@ -440,13 +440,15 @@ fn hydrate_code_file_at_path(
     {
         apply_change_detection(
             &tx,
-            &project_id,
-            &request.file.id,
-            &file_hash,
-            &snapshot_id,
-            before_snapshot_id.as_deref(),
-            detection,
-            &now,
+            ChangeDetectionPersistence {
+                project_id: &project_id,
+                file_id: &request.file.id,
+                after_hash: &file_hash,
+                after_snapshot_id: &snapshot_id,
+                before_snapshot_id: before_snapshot_id.as_deref(),
+                detection,
+                created_at: &now,
+            },
         )?;
         detection.covered_new_node_ids.clone()
     } else {
@@ -1249,16 +1251,30 @@ fn load_covered_code_node_ids(
     Ok(node_ids)
 }
 
+struct ChangeDetectionPersistence<'a> {
+    project_id: &'a str,
+    file_id: &'a str,
+    after_hash: &'a str,
+    after_snapshot_id: &'a str,
+    before_snapshot_id: Option<&'a str>,
+    detection: &'a ChangeDetectionResult,
+    created_at: &'a str,
+}
+
 fn apply_change_detection(
     conn: &Connection,
-    project_id: &str,
-    file_id: &str,
-    after_hash: &str,
-    after_snapshot_id: &str,
-    before_snapshot_id: Option<&str>,
-    detection: &ChangeDetectionResult,
-    created_at: &str,
+    context: ChangeDetectionPersistence<'_>,
 ) -> Result<(), String> {
+    let ChangeDetectionPersistence {
+        project_id,
+        file_id,
+        after_hash,
+        after_snapshot_id,
+        before_snapshot_id,
+        detection,
+        created_at,
+    } = context;
+
     for migration in &detection.migrations {
         conn.execute(
             "UPDATE explanation_nodes
@@ -2141,6 +2157,70 @@ mod tests {
     }
 
     #[test]
+    fn sql_explanation_restores_and_invalidates_after_statement_change() {
+        let database_path = temp_database_path("sql-change");
+        let baseline = sql_request(
+            "hash:sql-base",
+            "snapshot:sql-base",
+            "hash:sql-statement-base",
+            "SELECT user_id, COUNT(*) AS total\nFROM events\nWHERE created_at >= CURRENT_DATE\nGROUP BY user_id;\n",
+        );
+        hydrate_code_file_at_path(&database_path, baseline).expect("SQL baseline should hydrate");
+        mark_explanation_valid(&database_path, "exp:target:sql:statement");
+
+        let reopened = hydrate_code_file_at_path(
+            &database_path,
+            sql_request(
+                "hash:sql-base",
+                "snapshot:sql-base",
+                "hash:sql-statement-base",
+                "SELECT user_id, COUNT(*) AS total\nFROM events\nWHERE created_at >= CURRENT_DATE\nGROUP BY user_id;\n",
+            ),
+        )
+        .expect("SQL snapshot should reopen");
+        let restored = reopened
+            .explanations
+            .iter()
+            .find(|item| item.id == "exp:target:sql:statement")
+            .expect("SQL statement explanation should restore");
+        assert_eq!(restored.status, "valid");
+
+        let modified = hydrate_code_file_at_path(
+            &database_path,
+            sql_request(
+                "hash:sql-modified",
+                "snapshot:sql-modified",
+                "hash:sql-statement-modified",
+                "SELECT user_id, COUNT(*) AS total\nFROM events\nWHERE created_at >= CURRENT_DATE - INTERVAL '7 days'\nGROUP BY user_id;\n",
+            ),
+        )
+        .expect("modified SQL file should hydrate");
+        let invalidated = modified
+            .explanations
+            .iter()
+            .find(|item| item.id == "exp:target:sql:statement")
+            .expect("existing SQL explanation should remain available");
+        assert_eq!(invalidated.status, "invalid");
+        assert_eq!(invalidated.code_meaning, "SQL statement meaning");
+        assert!(modified
+            .change_summary
+            .as_ref()
+            .is_some_and(|summary| summary.modified_nodes >= 1));
+
+        let conn = open_database(&database_path).expect("database should open");
+        let language: String = conn
+            .query_row(
+                "SELECT language FROM files WHERE id = ?1",
+                params!["file:sql"],
+                |row| row.get(0),
+            )
+            .expect("SQL file language should query");
+        assert_eq!(language, "sql");
+
+        let _ = std::fs::remove_file(database_path);
+    }
+
+    #[test]
     fn added_function_gets_new_unexplained_placeholder() {
         let database_path = temp_database_path("change-added");
         hydrate_code_file_at_path(&database_path, sample_request())
@@ -2455,6 +2535,89 @@ mod tests {
                     code_hash: Some(function_hash.to_string()),
                     anchor_text: Some("@trace".to_string()),
                     code_meaning: "Python function meaning".to_string(),
+                    local_meaning: None,
+                    global_meaning: None,
+                    risk_notes: None,
+                    reader_notes: None,
+                    status: "new_unexplained".to_string(),
+                    reading_state: "unread".to_string(),
+                    created_at: "2026-06-11T00:00:00.000Z".to_string(),
+                    updated_at: "2026-06-11T00:00:00.000Z".to_string(),
+                },
+            ],
+        }
+    }
+
+    fn sql_request(
+        file_hash: &str,
+        snapshot_id: &str,
+        statement_hash: &str,
+        code: &str,
+    ) -> HydrateCodeFileRequest {
+        HydrateCodeFileRequest {
+            file: PersistenceCodeFile {
+                id: "file:sql".to_string(),
+                path: "examples/report.sql".to_string(),
+                project_id: Some("project:sql".to_string()),
+                project_root: Some("examples".to_string()),
+                relative_path: Some("report.sql".to_string()),
+                language: "sql".to_string(),
+                code: code.to_string(),
+                file_hash: Some(file_hash.to_string()),
+                snapshot_id: Some(snapshot_id.to_string()),
+                code_nodes: vec![
+                    node(
+                        "target:sql:file",
+                        "file",
+                        "report.sql",
+                        1,
+                        4,
+                        file_hash,
+                        "SELECT user_id, COUNT(*) AS total",
+                    ),
+                    node(
+                        "target:sql:statement",
+                        "statement",
+                        "SELECT statement",
+                        1,
+                        4,
+                        statement_hash,
+                        "SELECT user_id, COUNT(*) AS total",
+                    ),
+                ],
+            },
+            seed_explanations: vec![
+                ExplanationInput {
+                    id: "exp:target:sql:file".to_string(),
+                    file_path: "examples/report.sql".to_string(),
+                    file_hash: Some(file_hash.to_string()),
+                    target_type: "file".to_string(),
+                    start_line: Some(1),
+                    end_line: Some(4),
+                    symbol_id: None,
+                    code_hash: Some(file_hash.to_string()),
+                    anchor_text: Some("SELECT user_id, COUNT(*) AS total".to_string()),
+                    code_meaning: "SQL file meaning".to_string(),
+                    local_meaning: None,
+                    global_meaning: None,
+                    risk_notes: None,
+                    reader_notes: None,
+                    status: "new_unexplained".to_string(),
+                    reading_state: "unread".to_string(),
+                    created_at: "2026-06-11T00:00:00.000Z".to_string(),
+                    updated_at: "2026-06-11T00:00:00.000Z".to_string(),
+                },
+                ExplanationInput {
+                    id: "exp:target:sql:statement".to_string(),
+                    file_path: "examples/report.sql".to_string(),
+                    file_hash: Some(file_hash.to_string()),
+                    target_type: "statement".to_string(),
+                    start_line: Some(1),
+                    end_line: Some(4),
+                    symbol_id: Some("statement:examples/report.sql:1-4".to_string()),
+                    code_hash: Some(statement_hash.to_string()),
+                    anchor_text: Some("SELECT user_id, COUNT(*) AS total".to_string()),
+                    code_meaning: "SQL statement meaning".to_string(),
                     local_meaning: None,
                     global_meaning: None,
                     risk_notes: None,

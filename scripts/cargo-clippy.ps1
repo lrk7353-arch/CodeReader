@@ -15,7 +15,7 @@ New-Item -ItemType Directory -Force -Path $cargoTarget | Out-Null
 $env:Path = "$mingw;$rustBin;$rustSelfContained;$env:Path"
 $env:CARGO_TARGET_DIR = $cargoTarget
 
-cargo test --manifest-path src-tauri/Cargo.toml --lib
+cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
 if ($LASTEXITCODE -ne 0) {
     exit $LASTEXITCODE
 }

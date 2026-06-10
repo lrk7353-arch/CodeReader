@@ -1,16 +1,53 @@
 import { execSync } from "node:child_process";
+import { delimiter, join } from "node:path";
+
+const windowsRustToolchain =
+  process.platform === "win32" && process.env.USERPROFILE
+    ? join(
+        process.env.USERPROFILE,
+        ".rustup",
+        "toolchains",
+        "stable-x86_64-pc-windows-gnu"
+      )
+    : null;
+const commandEnv = windowsRustToolchain
+  ? {
+      ...process.env,
+      Path: [
+        "C:\\ProgramData\\mingw64\\mingw64\\bin",
+        join(windowsRustToolchain, "bin"),
+        join(
+          windowsRustToolchain,
+          "lib",
+          "rustlib",
+          "x86_64-pc-windows-gnu",
+          "bin",
+          "self-contained"
+        ),
+        process.env.Path ?? process.env.PATH ?? ""
+      ].join(delimiter)
+    }
+  : process.env;
 
 const checks = [
   ["node", "node --version"],
   ["npm", "npm --version"],
   ["git", "git --version"],
   ["rustc", "rustc --version"],
-  ["cargo", "cargo --version"]
+  ["cargo", "cargo --version"],
+  ["clippy", "cargo clippy --version"],
+  ["gcc", "gcc --version"]
 ];
 
 const results = checks.map(([name, command]) => {
   try {
-    const value = execSync(command, { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
+    const value = execSync(command, {
+      encoding: "utf8",
+      env: commandEnv,
+      stdio: ["ignore", "pipe", "pipe"]
+    })
+      .trim()
+      .split(/\r?\n/, 1)[0];
     return { name, ok: true, value };
   } catch {
     return { name, ok: false, value: "not found" };

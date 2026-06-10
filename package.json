@@ -10,6 +10,7 @@
     "tauri": "node scripts/tauri.mjs",
     "cargo:check": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/cargo-check.ps1",
     "cargo:test": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/cargo-test.ps1",
+    "cargo:clippy": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/cargo-clippy.ps1",
     "test": "node scripts/test.mjs",
     "doctor": "node scripts/check-environment.mjs",
     "repair:native": "node scripts/repair-native-deps.mjs"

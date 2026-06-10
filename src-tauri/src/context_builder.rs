@@ -150,6 +150,18 @@ struct StaticAnalysis {
     module_assignments: Vec<SyntaxSnippet>,
     entry_points: Vec<SyntaxSnippet>,
     identifiers: BTreeMap<String, Vec<usize>>,
+    sql_statements: Vec<SyntaxSnippet>,
+    sql_ctes: Vec<SyntaxSnippet>,
+    sql_sources: Vec<SyntaxSnippet>,
+    sql_writes: Vec<SyntaxSnippet>,
+    sql_clauses: Vec<SyntaxSnippet>,
+}
+
+#[derive(Clone, Copy)]
+enum AnalysisLanguage {
+    JavaScript,
+    Python,
+    Sql,
 }
 
 #[derive(Default)]
@@ -232,6 +244,12 @@ pub(crate) fn build_context_bundle(request: BuildContextRequest) -> Result<Conte
             "当前 Python 上下文仅覆盖文件内结构与调用线索，不推断完整跨文件调用图。".to_string(),
         );
     }
+    if request.file.language == "sql" {
+        warnings.push(
+            "当前 SQL 支持面向通用 SQL 与常见 PostgreSQL、MySQL、SQLite 语法交集；未连接数据库 schema，也不推断运行时查询计划。"
+                .to_string(),
+        );
+    }
     let analysis = match cached_static_analysis(
         &request.file.path,
         &request.file.language,
@@ -243,7 +261,19 @@ pub(crate) fn build_context_bundle(request: BuildContextRequest) -> Result<Conte
             StaticAnalysis::default()
         }
     };
-    let signals = build_signals(&analysis, start_line, end_line);
+    let signals = if request.file.language == "sql" {
+        let (signal_start, signal_end) = smallest_containing_node(
+            &request.file.code_nodes,
+            start_line,
+            end_line,
+            &["query", "statement"],
+        )
+        .map(|node| (node.start_line, node.end_line))
+        .unwrap_or((start_line, end_line));
+        build_sql_signals(&analysis, signal_start, signal_end)
+    } else {
+        build_signals(&analysis, start_line, end_line)
+    };
     let strategy = strategy_for_target(target_type).to_string();
     let mut candidates = build_candidates(
         &request.file,
@@ -393,6 +423,17 @@ fn build_candidates(
     analysis: &StaticAnalysis,
     signals: &ContextSignals,
 ) -> Vec<CandidateSnippet> {
+    if file.language == "sql" {
+        return build_sql_candidates(
+            file,
+            target_type,
+            target_name,
+            start_line,
+            end_line,
+            analysis,
+        );
+    }
+
     let mut candidates = Vec::new();
     if target_type == "file" {
         candidates.push(CandidateSnippet {
@@ -465,6 +506,157 @@ fn build_candidates(
     }
 
     if target.target_type == "range" && containing_function.is_none() {
+        append_neighborhood_candidate(&mut candidates, file, start_line, end_line);
+    }
+
+    candidates
+}
+
+fn build_sql_candidates(
+    file: &ContextFileInput,
+    target_type: &str,
+    target_name: &str,
+    start_line: usize,
+    end_line: usize,
+    analysis: &StaticAnalysis,
+) -> Vec<CandidateSnippet> {
+    let mut candidates = Vec::new();
+    if target_type == "file" {
+        candidates.push(CandidateSnippet {
+            kind: "target",
+            label: format!("{target_name} SQL structure"),
+            start_line,
+            end_line,
+            code: file_outline(&file.code_nodes),
+            reason: "SQL 文件解释使用语句、查询与关键子句目录，避免把整个脚本无差别发送给模型。"
+                .to_string(),
+            is_summary: true,
+            priority: 0,
+        });
+        for statement in &analysis.sql_statements {
+            let signature = statement
+                .code
+                .lines()
+                .map(str::trim)
+                .find(|line| !line.is_empty())
+                .unwrap_or("")
+                .to_string();
+            candidates.push(CandidateSnippet {
+                kind: "sql_statement",
+                label: statement.name.clone(),
+                start_line: statement.start_line,
+                end_line: statement.start_line,
+                code: signature,
+                reason: "文件级上下文只保留每条 SQL 语句的入口，不展开完整查询体。".to_string(),
+                is_summary: true,
+                priority: 1,
+            });
+        }
+        for cte in &analysis.sql_ctes {
+            let signature = cte
+                .code
+                .lines()
+                .map(str::trim)
+                .find(|line| !line.is_empty())
+                .unwrap_or("")
+                .to_string();
+            candidates.push(CandidateSnippet {
+                kind: "sql_cte",
+                label: cte.name.clone(),
+                start_line: cte.start_line,
+                end_line: cte.start_line,
+                code: signature,
+                reason: "CTE 名称与首行帮助建立 SQL 文件内的数据流目录。".to_string(),
+                is_summary: true,
+                priority: 2,
+            });
+        }
+        return candidates;
+    }
+
+    candidates.push(CandidateSnippet {
+        kind: "target",
+        label: target_name.to_string(),
+        start_line,
+        end_line,
+        code: lines_inclusive(&file.code, start_line, end_line),
+        reason: "当前 SQL 解释目标必须完整出现在上下文中。".to_string(),
+        is_summary: false,
+        priority: 0,
+    });
+
+    if let Some(node) = smallest_containing_node(
+        &file.code_nodes,
+        start_line,
+        end_line,
+        &["query", "statement"],
+    ) {
+        if node.start_line != start_line || node.end_line != end_line {
+            candidates.push(candidate_from_node(
+                file,
+                node,
+                "containing_sql",
+                "所在 SQL 语句或查询提供 CTE、读写目标及完整过滤边界。",
+                1,
+            ));
+        }
+    }
+
+    let target_code = lines_inclusive(&file.code, start_line, end_line);
+    for cte in &analysis.sql_ctes {
+        if cte.start_line >= start_line && cte.end_line <= end_line {
+            continue;
+        }
+        if !cte.name.is_empty() && contains_identifier(&target_code, &cte.name) {
+            candidates.push(candidate_from_syntax(
+                cte,
+                "sql_cte",
+                "相关 CTE",
+                "当前目标引用了该 CTE，加入其定义以解释数据来源。",
+                2,
+            ));
+        }
+    }
+
+    for write in &analysis.sql_writes {
+        if ranges_intersect(write.start_line, write.end_line, start_line, end_line) {
+            candidates.push(candidate_from_syntax(
+                write,
+                "sql_write",
+                "写入目标",
+                "该 SQL 片段会创建、更新或删除数据对象，需要明确副作用边界。",
+                2,
+            ));
+        }
+    }
+
+    for source in &analysis.sql_sources {
+        if ranges_intersect(source.start_line, source.end_line, start_line, end_line)
+            || contains_identifier(&target_code, &source.name)
+        {
+            candidates.push(candidate_from_syntax(
+                source,
+                "sql_source",
+                "读取来源",
+                "该关系参与当前查询的数据输入或连接。",
+                3,
+            ));
+        }
+    }
+
+    for clause in &analysis.sql_clauses {
+        if ranges_intersect(clause.start_line, clause.end_line, start_line, end_line) {
+            candidates.push(candidate_from_syntax(
+                clause,
+                "sql_clause",
+                "相关 SQL 子句",
+                "该子句约束过滤、连接、聚合、排序或结果数量。",
+                4,
+            ));
+        }
+    }
+
+    if matches!(target_type, "line" | "range") {
         append_neighborhood_candidate(&mut candidates, file, start_line, end_line);
     }
 
@@ -772,13 +964,77 @@ fn build_signals(analysis: &StaticAnalysis, start_line: usize, end_line: usize) 
     }
 }
 
+fn build_sql_signals(
+    analysis: &StaticAnalysis,
+    start_line: usize,
+    end_line: usize,
+) -> ContextSignals {
+    let referenced_identifiers: BTreeSet<String> = analysis
+        .identifiers
+        .iter()
+        .filter(|(_, lines)| {
+            lines
+                .iter()
+                .any(|line| *line >= start_line && *line <= end_line)
+        })
+        .map(|(name, _)| name.clone())
+        .collect();
+    let defined_identifiers: BTreeSet<String> = analysis
+        .sql_ctes
+        .iter()
+        .filter(|cte| cte.start_line >= start_line && cte.end_line <= end_line)
+        .map(|cte| cte.name.clone())
+        .collect();
+    let input_identifiers: BTreeSet<String> = analysis
+        .sql_sources
+        .iter()
+        .filter(|source| ranges_intersect(source.start_line, source.end_line, start_line, end_line))
+        .map(|source| source.name.clone())
+        .collect();
+    let output_identifiers: BTreeSet<String> = analysis
+        .sql_writes
+        .iter()
+        .filter(|write| ranges_intersect(write.start_line, write.end_line, start_line, end_line))
+        .map(|write| write.name.clone())
+        .chain(defined_identifiers.iter().cloned())
+        .collect();
+    let called_functions: BTreeSet<String> = analysis
+        .calls
+        .iter()
+        .filter(|call| call.start_line >= start_line && call.end_line <= end_line)
+        .map(|call| call.name.clone())
+        .filter(|name| !name.is_empty())
+        .collect();
+
+    ContextSignals {
+        referenced_identifiers: referenced_identifiers.into_iter().collect(),
+        defined_identifiers: defined_identifiers.into_iter().collect(),
+        input_identifiers: input_identifiers.into_iter().collect(),
+        output_identifiers: output_identifiers.into_iter().collect(),
+        called_functions: called_functions.into_iter().collect(),
+    }
+}
+
 fn parse_static_analysis(path: &str, language: &str, code: &str) -> Result<StaticAnalysis, String> {
-    let (grammar, is_python): (Language, bool) = match file_extension(path) {
-        Some("tsx") => (tree_sitter_typescript::LANGUAGE_TSX.into(), false),
+    let (grammar, analysis_language): (Language, AnalysisLanguage) = match file_extension(path) {
+        Some("tsx") => (
+            tree_sitter_typescript::LANGUAGE_TSX.into(),
+            AnalysisLanguage::JavaScript,
+        ),
         _ => match language {
-            "javascript" => (tree_sitter_javascript::LANGUAGE.into(), false),
-            "python" => (tree_sitter_python::LANGUAGE.into(), true),
-            "typescript" => (tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into(), false),
+            "javascript" => (
+                tree_sitter_javascript::LANGUAGE.into(),
+                AnalysisLanguage::JavaScript,
+            ),
+            "python" => (
+                tree_sitter_python::LANGUAGE.into(),
+                AnalysisLanguage::Python,
+            ),
+            "sql" => (tree_sitter_sequel::LANGUAGE.into(), AnalysisLanguage::Sql),
+            "typescript" => (
+                tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into(),
+                AnalysisLanguage::JavaScript,
+            ),
             _ => return Err(format!("Unsupported Context Builder language: {language}")),
         },
     };
@@ -790,7 +1046,7 @@ fn parse_static_analysis(path: &str, language: &str, code: &str) -> Result<Stati
         .parse(code, None)
         .ok_or_else(|| "Context Builder could not parse this file.".to_string())?;
     let mut analysis = StaticAnalysis::default();
-    collect_static_analysis(tree.root_node(), code, is_python, &mut analysis);
+    collect_static_analysis(tree.root_node(), code, analysis_language, &mut analysis);
     Ok(analysis)
 }
 
@@ -818,19 +1074,19 @@ fn cached_static_analysis(
 fn collect_static_analysis(
     node: Node<'_>,
     code: &str,
-    is_python: bool,
+    language: AnalysisLanguage,
     analysis: &mut StaticAnalysis,
 ) {
-    if is_python {
-        collect_python_static_analysis(node, code, analysis);
-    } else {
-        collect_javascript_static_analysis(node, code, analysis);
+    match language {
+        AnalysisLanguage::JavaScript => collect_javascript_static_analysis(node, code, analysis),
+        AnalysisLanguage::Python => collect_python_static_analysis(node, code, analysis),
+        AnalysisLanguage::Sql => collect_sql_static_analysis(node, code, analysis),
     }
 
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
         if child.is_named() {
-            collect_static_analysis(child, code, is_python, analysis);
+            collect_static_analysis(child, code, language, analysis);
         }
     }
 }
@@ -1014,6 +1270,198 @@ fn collect_python_static_analysis(node: Node<'_>, code: &str, analysis: &mut Sta
         }
         _ => {}
     }
+}
+
+fn collect_sql_static_analysis(node: Node<'_>, code: &str, analysis: &mut StaticAnalysis) {
+    match node.kind() {
+        "statement"
+            if !node
+                .parent()
+                .is_some_and(|parent| matches!(parent.kind(), "cte" | "subquery")) =>
+        {
+            let operation = sql_operation_kind(node).unwrap_or("SQL");
+            let snippet = syntax_snippet(node, code, &format!("{operation} statement"));
+            if is_sql_write_operation(operation) {
+                let target = sql_write_target(node, code).unwrap_or_else(|| operation.to_string());
+                analysis.sql_writes.push(SyntaxSnippet {
+                    name: target.clone(),
+                    start_line: snippet.start_line,
+                    end_line: snippet.end_line,
+                    code: snippet.code.clone(),
+                });
+            }
+            analysis.sql_statements.push(snippet);
+        }
+        "transaction" => analysis
+            .sql_statements
+            .push(syntax_snippet(node, code, "transaction")),
+        "cte" => {
+            let name = sql_cte_name(node, code).unwrap_or_else(|| "CTE".to_string());
+            analysis.sql_ctes.push(syntax_snippet(node, code, &name));
+        }
+        "relation" if has_ancestor_kind(node, &["from", "join"]) => {
+            let name = sql_relation_name(node, code);
+            if !name.is_empty() {
+                analysis.sql_sources.push(syntax_snippet(node, code, &name));
+            }
+        }
+        "group_by" | "join" | "limit" | "order_by" | "returning" | "set_operation"
+        | "when_clause" | "where" => {
+            analysis
+                .sql_clauses
+                .push(syntax_snippet(node, code, node.kind()));
+        }
+        "invocation" => {
+            let name = first_descendant_text(node, code, &["object_reference", "identifier"])
+                .unwrap_or_default();
+            analysis.calls.push(syntax_snippet(node, code, &name));
+        }
+        "identifier" => {
+            let name = node_text(node, code).trim();
+            if !name.is_empty() {
+                analysis
+                    .identifiers
+                    .entry(name.to_string())
+                    .or_default()
+                    .push(node.start_position().row + 1);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn sql_operation_kind(node: Node<'_>) -> Option<&'static str> {
+    let operation = match node.kind() {
+        "select" => Some("SELECT"),
+        "insert" => Some("INSERT"),
+        "update" => Some("UPDATE"),
+        "delete" => Some("DELETE"),
+        "create_table" => Some("CREATE TABLE"),
+        "create_view" => Some("CREATE VIEW"),
+        "create_materialized_view" => Some("CREATE MATERIALIZED VIEW"),
+        "create_function" => Some("CREATE FUNCTION"),
+        "alter_table" => Some("ALTER TABLE"),
+        "drop_table" => Some("DROP TABLE"),
+        "merge" => Some("MERGE"),
+        _ => None,
+    };
+    if operation.is_some() {
+        return operation;
+    }
+
+    let mut cursor = node.walk();
+    for child in node.named_children(&mut cursor) {
+        if child.kind() == "cte" {
+            continue;
+        }
+        if let Some(operation) = sql_operation_kind(child) {
+            return Some(operation);
+        }
+    }
+    None
+}
+
+fn is_sql_write_operation(operation: &str) -> bool {
+    matches!(
+        operation,
+        "INSERT"
+            | "UPDATE"
+            | "DELETE"
+            | "CREATE TABLE"
+            | "CREATE VIEW"
+            | "CREATE MATERIALIZED VIEW"
+            | "CREATE FUNCTION"
+            | "ALTER TABLE"
+            | "DROP TABLE"
+            | "MERGE"
+    )
+}
+
+fn sql_cte_name(node: Node<'_>, code: &str) -> Option<String> {
+    let mut cursor = node.walk();
+    let name = node
+        .named_children(&mut cursor)
+        .find(|child| child.kind() == "identifier")
+        .map(|child| node_text(child, code).trim().to_string())
+        .filter(|name| !name.is_empty());
+    name
+}
+
+fn sql_write_target(node: Node<'_>, code: &str) -> Option<String> {
+    let operation_kind = sql_operation_kind(node)?;
+    let operation_node = find_descendant_kind(
+        node,
+        &[
+            "insert",
+            "update",
+            "delete",
+            "create_table",
+            "create_view",
+            "create_materialized_view",
+            "create_function",
+            "alter_table",
+            "drop_table",
+            "merge",
+        ],
+    )?;
+    let preferred_kinds: &[&str] = if operation_kind == "DELETE" {
+        &["relation", "object_reference", "identifier"]
+    } else {
+        &["object_reference", "relation", "identifier"]
+    };
+    first_descendant_text(operation_node, code, preferred_kinds)
+        .or_else(|| first_descendant_text(node, code, preferred_kinds))
+}
+
+fn sql_relation_name(node: Node<'_>, code: &str) -> String {
+    first_descendant_text(node, code, &["object_reference", "identifier"])
+        .unwrap_or_else(|| node_text(node, code).trim().to_string())
+}
+
+fn find_descendant_kind<'tree>(node: Node<'tree>, kinds: &[&str]) -> Option<Node<'tree>> {
+    if kinds.contains(&node.kind()) {
+        return Some(node);
+    }
+    let mut cursor = node.walk();
+    for child in node.named_children(&mut cursor) {
+        if child.kind() == "cte" {
+            continue;
+        }
+        if let Some(found) = find_descendant_kind(child, kinds) {
+            return Some(found);
+        }
+    }
+    None
+}
+
+fn first_descendant_text(node: Node<'_>, code: &str, kinds: &[&str]) -> Option<String> {
+    if kinds.contains(&node.kind()) {
+        let text = node_text(node, code).trim();
+        if !text.is_empty() {
+            return Some(text.to_string());
+        }
+    }
+    let mut cursor = node.walk();
+    for child in node.named_children(&mut cursor) {
+        if let Some(text) = first_descendant_text(child, code, kinds) {
+            return Some(text);
+        }
+    }
+    None
+}
+
+fn has_ancestor_kind(node: Node<'_>, kinds: &[&str]) -> bool {
+    let mut current = node.parent();
+    while let Some(parent) = current {
+        if kinds.contains(&parent.kind()) {
+            return true;
+        }
+        if matches!(parent.kind(), "statement" | "cte" | "subquery") {
+            return false;
+        }
+        current = parent.parent();
+    }
+    false
 }
 
 fn identifier_names(node: Node<'_>, code: &str) -> Vec<String> {
@@ -1266,7 +1714,7 @@ fn file_outline(nodes: &[ContextNodeInput]) -> String {
         .filter(|node| {
             matches!(
                 node.node_type.as_str(),
-                "import" | "export" | "class" | "function" | "block"
+                "import" | "export" | "class" | "function" | "block" | "statement" | "query"
             )
         })
         .map(|node| {
@@ -1292,6 +1740,7 @@ fn strategy_for_target(target_type: &str) -> &'static str {
         "line" | "import" | "export" => "line",
         "range" | "block" => "range",
         "function" | "class" => "function",
+        "statement" | "query" => "statement",
         "file" => "file",
         _ => "line",
     }
@@ -1302,6 +1751,7 @@ fn default_max_chars(target_type: &str) -> usize {
         "line" | "import" | "export" => 8_000,
         "range" | "block" => 10_000,
         "function" | "class" => 14_000,
+        "statement" | "query" => 14_000,
         "file" => 10_000,
         _ => 8_000,
     }
@@ -1529,6 +1979,82 @@ if __name__ == "__main__":
         ]
     }
 
+    fn sql_request(
+        target_type: &str,
+        start_line: Option<usize>,
+        end_line: Option<usize>,
+    ) -> BuildContextRequest {
+        BuildContextRequest {
+            file: ContextFileInput {
+                path: "examples/sql/report.sql".to_string(),
+                language: "sql".to_string(),
+                code: sql_code().to_string(),
+                code_nodes: sql_nodes(),
+            },
+            target: ContextTargetInput {
+                target_type: target_type.to_string(),
+                target_name: None,
+                start_line,
+                end_line,
+                symbol_id: None,
+            },
+            budget: None,
+        }
+    }
+
+    fn sql_code() -> &'static str {
+        r#"WITH active_users AS (
+    SELECT u.id, u.team_id
+    FROM users u
+    WHERE u.active = TRUE
+),
+team_totals AS (
+    SELECT team_id, COUNT(*) AS member_count
+    FROM active_users
+    GROUP BY team_id
+)
+SELECT t.name, tt.member_count
+FROM teams t
+JOIN team_totals tt ON tt.team_id = t.id
+WHERE tt.member_count > 5
+ORDER BY tt.member_count DESC
+LIMIT 20;
+
+UPDATE audit_log
+SET reviewed = TRUE
+WHERE created_at < CURRENT_DATE;
+"#
+    }
+
+    fn sql_nodes() -> Vec<ContextNodeInput> {
+        vec![
+            sample_node("file", "report.sql", 1, 20, None),
+            sample_node(
+                "statement",
+                "SELECT statement",
+                1,
+                16,
+                Some("statement:1-16"),
+            ),
+            sample_node("query", "CTE active_users", 1, 5, Some("query:1-5")),
+            sample_node("block", "WHERE", 4, 4, Some("block:4-4")),
+            sample_node("query", "CTE team_totals", 6, 10, Some("query:6-10")),
+            sample_node("block", "GROUP BY", 9, 9, Some("block:9-9")),
+            sample_node("block", "JOIN", 13, 13, Some("block:13-13")),
+            sample_node("block", "WHERE", 14, 14, Some("block:14-14")),
+            sample_node("block", "ORDER BY", 15, 15, Some("block:15-15")),
+            sample_node("block", "LIMIT", 16, 16, Some("block:16-16")),
+            sample_node(
+                "statement",
+                "UPDATE statement",
+                18,
+                20,
+                Some("statement:18-20"),
+            ),
+            sample_node("block", "WHERE", 20, 20, Some("block:20-20")),
+        ]
+    }
+
     #[test]
     fn builds_line_context_with_structure_and_variable_definitions() {
         let bundle = build_context_bundle(sample_request("line", 20, 20))
@@ -1665,6 +2191,97 @@ if __name__ == "__main__":
             .snippets
             .iter()
             .any(|snippet| snippet.kind == "entry_point" && snippet.code.contains("__main__")));
+        assert!(bundle
+            .snippets
+            .iter()
+            .all(|snippet| snippet.code != full_code));
+    }
+
+    #[test]
+    fn builds_sql_line_context_with_containing_statement_and_relations() {
+        let bundle = build_context_bundle(sql_request("line", Some(14), Some(14)))
+            .expect("SQL line context should build");
+
+        assert_eq!(bundle.strategy, "line");
+        assert!(bundle
+            .snippets
+            .iter()
+            .any(|snippet| snippet.kind == "containing_sql"
+                && snippet.code.contains("WITH active_users")));
+        assert!(bundle
+            .signals
+            .input_identifiers
+            .contains(&"teams".to_string()));
+        assert!(bundle
+            .signals
+            .input_identifiers
+            .contains(&"team_totals".to_string()));
+        assert!(bundle
+            .warnings
+            .iter()
+            .any(|warning| warning.contains("schema")));
+    }
+
+    #[test]
+    fn builds_sql_query_context_with_cte_source_and_function_call() {
+        let bundle = build_context_bundle(sql_request("query", Some(6), Some(10)))
+            .expect("SQL query context should build");
+
+        assert_eq!(bundle.strategy, "statement");
+        assert!(bundle.snippets[0].code.contains("team_totals AS"));
+        assert!(bundle
+            .signals
+            .input_identifiers
+            .contains(&"active_users".to_string()));
+        assert!(bundle
+            .signals
+            .called_functions
+            .iter()
+            .any(|name| name.eq_ignore_ascii_case("COUNT")));
+    }
+
+    #[test]
+    fn builds_sql_statement_context_with_read_and_write_data_flow() {
+        let select = build_context_bundle(sql_request("statement", Some(1), Some(16)))
+            .expect("SQL select statement context should build");
+        let update = build_context_bundle(sql_request("statement", Some(18), Some(20)))
+            .expect("SQL update statement context should build");
+
+        assert_eq!(select.strategy, "statement");
+        assert!(select
+            .signals
+            .input_identifiers
+            .contains(&"users".to_string()));
+        assert!(!select
+            .signals
+            .output_identifiers
+            .contains(&"audit_log".to_string()));
+        assert!(update
+            .signals
+            .output_identifiers
+            .contains(&"audit_log".to_string()));
+        assert!(update
+            .snippets
+            .iter()
+            .any(|snippet| snippet.kind == "sql_write"));
+    }
+
+    #[test]
+    fn builds_sql_file_context_without_full_script_leakage() {
+        let full_code = sql_code().to_string();
+        let bundle = build_context_bundle(sql_request("file", None, None))
+            .expect("SQL file context should build");
+
+        assert_eq!(bundle.strategy, "file");
+        assert!(bundle.snippets[0].is_summary);
+        assert!(bundle.snippets[0]
+            .code
+            .contains("statement SELECT statement"));
+        assert!(bundle.snippets[0].code.contains("query CTE active_users"));
+        assert!(bundle
+            .snippets
+            .iter()
+            .any(|snippet| snippet.kind == "sql_statement"));
         assert!(bundle
             .snippets
             .iter()

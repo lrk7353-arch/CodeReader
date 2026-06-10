@@ -140,6 +140,15 @@ MVP 要验证的核心闭环是：
 3. 第二扩展语言：SQL，必须在 Python 独立验收后另建分支推进，并明确方言边界、语句结构、数据流语义和上下文预算；
 4. 每种新增语言都必须独立测试、桌面验收和 Git 提交，不能只做到“能打开”或“有语法高亮”。
 
+当前扩展实现收束：
+
+- Python 已作为第一扩展语言完成完整解释链路验证；
+- SQL 以通用 SQL 及常见 PostgreSQL、MySQL、SQLite 语法交集为首阶段边界，不承诺覆盖全部厂商方言；
+- SQL 结构目标包括文件、顶层语句、CTE/子查询、关键数据流子句和任意单行/多行选择；
+- SQL Context Builder 必须提取读取关系、写入目标、CTE、函数调用、过滤、连接、聚合、排序和限制线索，不连接数据库时必须明确说明缺少 schema 与运行时查询计划；
+- SQL 文件级上下文只发送结构目录、语句入口和 CTE 摘要，不把大型脚本整体发送给模型；
+- Python、SQL 均复用现有结构化 JSON 协议、API Key 安全存储、SQLite 恢复、失败不覆盖和变更检测机制。
+
 ### Task 4：Tree-sitter 结构解析
 
 要求识别：
@@ -147,6 +156,7 @@ MVP 要验证的核心闭环是：
 - import/export；
 - function/class；
 - if/for/try/catch；
+- SQL statement、CTE、subquery、JOIN、WHERE、GROUP BY、ORDER BY、LIMIT 等主要结构；
 - 函数和代码块起止行；
 - 行号到函数/代码块/文件的映射。
 
