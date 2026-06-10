@@ -2,6 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 import type {
   CodeFile,
+  ContextBundle,
   Explanation,
   ExplanationFeedbackType,
   ProjectScanResult,
@@ -91,6 +92,30 @@ export async function hydrateCodeFilePersistence(
 export async function initializePersistence() {
   ensureDesktopRuntime();
   return invoke<{ databasePath: string; initialized: boolean }>("initialize_persistence");
+}
+
+export async function buildExplanationContext(
+  file: CodeFile,
+  explanation: Explanation
+): Promise<ContextBundle> {
+  ensureDesktopRuntime();
+  return invoke<ContextBundle>("build_explanation_context", {
+    request: {
+      file: {
+        path: file.path,
+        language: file.language,
+        code: file.code,
+        codeNodes: file.codeNodes ?? []
+      },
+      target: {
+        targetType: explanation.targetType,
+        targetName: explanation.targetName,
+        startLine: explanation.startLine,
+        endLine: explanation.endLine,
+        symbolId: explanation.symbolId
+      }
+    }
+  });
 }
 
 export async function persistReadingState(

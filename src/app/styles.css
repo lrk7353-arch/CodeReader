@@ -377,7 +377,8 @@ button {
   background: #fffef9;
 }
 
-.detail-drawer summary {
+.detail-drawer summary,
+.context-preview summary {
   display: flex;
   align-items: center;
   gap: 7px;
@@ -395,6 +396,140 @@ button {
   color: #4f5a5f;
   font-size: 13px;
   line-height: 1.55;
+}
+
+.context-preview {
+  margin: 0 12px 12px;
+  border-top: 1px solid #d7d3ca;
+  border-bottom: 1px solid #d7d3ca;
+}
+
+.context-preview summary {
+  min-height: 38px;
+  padding: 0;
+}
+
+.context-summary-count {
+  display: inline-grid;
+  min-width: 20px;
+  height: 20px;
+  margin-left: auto;
+  place-items: center;
+  border: 1px solid #bdc7c1;
+  border-radius: 999px;
+  color: #4f5b57;
+  font-size: 11px;
+}
+
+.context-empty,
+.context-state,
+.context-warning {
+  margin: 0;
+  padding: 0 0 12px;
+  color: #657075;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.context-state {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.context-error,
+.context-warning {
+  color: #8a4d32;
+}
+
+.context-content {
+  padding-bottom: 12px;
+}
+
+.context-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+  padding-bottom: 9px;
+  color: #657075;
+  font-size: 11px;
+}
+
+.context-signals {
+  display: grid;
+  gap: 5px;
+  padding-bottom: 10px;
+}
+
+.context-signal-row {
+  display: grid;
+  grid-template-columns: 38px minmax(0, 1fr);
+  gap: 7px;
+  color: #596469;
+  font-size: 11px;
+}
+
+.context-signal-row code {
+  overflow-wrap: anywhere;
+  color: #274d43;
+}
+
+.context-snippet-list {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.context-snippet-list li {
+  min-width: 0;
+  border-left: 2px solid #9db8ae;
+  padding-left: 9px;
+}
+
+.context-snippet-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  color: #303a3e;
+  font-size: 11px;
+}
+
+.context-snippet-header strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.context-snippet-header span {
+  flex: 0 0 auto;
+  color: #70797d;
+}
+
+.context-snippet-list p {
+  margin: 4px 0 6px;
+  color: #657075;
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.context-snippet-list pre {
+  max-height: 150px;
+  margin: 0;
+  overflow: auto;
+  border: 1px solid #ddd9d0;
+  border-radius: 4px;
+  background: #f1f0eb;
+  padding: 7px;
+  color: #30383c;
+  font-family: "Cascadia Code", "SFMono-Regular", Consolas, monospace;
+  font-size: 10px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 
 .reading-state-block,

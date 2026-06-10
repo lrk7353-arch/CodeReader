@@ -3,6 +3,7 @@ import { FilePlus2, FolderOpen } from "lucide-react";
 import { sampleFiles } from "../data/sampleProject";
 import type {
   CodeFile,
+  ContextBundle,
   Explanation,
   ExplanationFeedbackType,
   ProjectScanResult,
@@ -11,12 +12,14 @@ import type {
 import { FileExplorer } from "../features/file-explorer/FileExplorer";
 import { MonacoCodeViewer, type CodeSelection } from "../features/code-viewer/MonacoCodeViewer";
 import { ExplanationPanel } from "../features/explanation-panel/ExplanationPanel";
+import type { ContextPreviewStatus } from "../features/context-preview/ContextPreview";
 import {
   buildRangeExplanation,
   buildSelectableExplanations,
   findExplanationForSelection
 } from "../features/explanations/selectableExplanations";
 import {
+  buildExplanationContext,
   isDesktopRuntime,
   hydrateCodeFilePersistence,
   initializePersistence,
@@ -45,6 +48,11 @@ export function App() {
   );
   const [isWorkspaceBusy, setIsWorkspaceBusy] = useState(false);
   const [loadingFileId, setLoadingFileId] = useState<string | null>(null);
+  const [contextBundle, setContextBundle] = useState<ContextBundle>();
+  const [contextError, setContextError] = useState("");
+  const [contextStatus, setContextStatus] = useState<ContextPreviewStatus>(
+    isDesktopRuntime() ? "loading" : "unavailable"
+  );
 
   const selectedFile = useMemo(
     () => files.find((file) => file.id === selectedFileId) ?? files[0] ?? sampleFiles[0],
@@ -137,6 +145,40 @@ export function App() {
       cancelled = true;
     };
   }, []);
+
+  useEffect(() => {
+    if (!isDesktopRuntime() || !selectedExplanation || !selectedFile.code) {
+      setContextBundle(undefined);
+      setContextError("");
+      setContextStatus("unavailable");
+      return;
+    }
+
+    let cancelled = false;
+    setContextBundle(undefined);
+    setContextError("");
+    setContextStatus("loading");
+    void buildExplanationContext(selectedFile, selectedExplanation)
+      .then((bundle) => {
+        if (cancelled) {
+          return;
+        }
+        setContextBundle(bundle);
+        setContextStatus("ready");
+      })
+      .catch((error) => {
+        if (cancelled) {
+          return;
+        }
+        setContextBundle(undefined);
+        setContextError(errorMessage(error));
+        setContextStatus("error");
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedExplanation, selectedFile]);
 
   const selectExplanation = useCallback(
     (explanationId: string) => {
@@ -391,6 +433,9 @@ export function App() {
           onSelectionChange={updateSelection}
         />
         <ExplanationPanel
+          contextBundle={contextBundle}
+          contextError={contextError}
+          contextStatus={contextStatus}
           explanation={selectedExplanation}
           onFeedback={saveFeedback}
           onReadingStateChange={updateReadingState}

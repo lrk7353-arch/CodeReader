@@ -93,3 +93,64 @@ export interface ProjectScanResult {
   rootPath: string;
   files: ProjectFileEntry[];
 }
+
+export type ContextStrategy = "line" | "range" | "function" | "file";
+
+export interface ContextTargetSummary {
+  targetType: ExplanationTargetType;
+  targetName: string;
+  filePath: string;
+  startLine: number;
+  endLine: number;
+  symbolId?: string;
+}
+
+export interface ContextSnippet {
+  sourceId: string;
+  kind: string;
+  label: string;
+  filePath: string;
+  startLine: number;
+  endLine: number;
+  code: string;
+  reason: string;
+  isSummary: boolean;
+}
+
+export interface ContextSignals {
+  referencedIdentifiers: string[];
+  definedIdentifiers: string[];
+  inputIdentifiers: string[];
+  outputIdentifiers: string[];
+  calledFunctions: string[];
+}
+
+export interface ContextSource {
+  sourceId: string;
+  filePath: string;
+  startLine: number;
+  endLine: number;
+  nodeId?: string;
+  reason: string;
+}
+
+export interface ContextBudgetResult {
+  requestedMaxChars: number;
+  effectiveMaxChars: number;
+  usedChars: number;
+  maxSnippets: number;
+  omittedSnippets: number;
+  expandedForTarget: boolean;
+  truncated: boolean;
+}
+
+export interface ContextBundle {
+  contextId: string;
+  strategy: ContextStrategy;
+  target: ContextTargetSummary;
+  snippets: ContextSnippet[];
+  signals: ContextSignals;
+  sources: ContextSource[];
+  budget: ContextBudgetResult;
+  warnings: string[];
+}

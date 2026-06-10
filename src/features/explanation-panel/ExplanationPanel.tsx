@@ -1,14 +1,30 @@
 import { AlertTriangle, Check, CircleHelp, RefreshCw } from "lucide-react";
-import type { Explanation, ExplanationFeedbackType, ReadingState } from "../../types/explanation";
+import type {
+  ContextBundle,
+  Explanation,
+  ExplanationFeedbackType,
+  ReadingState
+} from "../../types/explanation";
+import { ContextPreview, type ContextPreviewStatus } from "../context-preview/ContextPreview";
 import { ReadingStateControls } from "../reading-state/ReadingStateControls";
 
 interface ExplanationPanelProps {
+  contextBundle?: ContextBundle;
+  contextError?: string;
+  contextStatus: ContextPreviewStatus;
   explanation?: Explanation;
   onFeedback: (feedbackType: ExplanationFeedbackType) => void;
   onReadingStateChange: (state: ReadingState) => void;
 }
 
-export function ExplanationPanel({ explanation, onFeedback, onReadingStateChange }: ExplanationPanelProps) {
+export function ExplanationPanel({
+  contextBundle,
+  contextError,
+  contextStatus,
+  explanation,
+  onFeedback,
+  onReadingStateChange
+}: ExplanationPanelProps) {
   if (!explanation) {
     return (
       <aside className="explanation-panel">
@@ -56,6 +72,8 @@ export function ExplanationPanel({ explanation, onFeedback, onReadingStateChange
           ))}
         </ul>
       </details>
+
+      <ContextPreview bundle={contextBundle} error={contextError} status={contextStatus} />
 
       <ReadingStateControls currentState={explanation.readingState} onChange={onReadingStateChange} />
 

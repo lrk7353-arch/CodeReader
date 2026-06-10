@@ -1,4 +1,5 @@
 mod code_service;
+mod context_builder;
 mod persistence_service;
 mod utils;
 
@@ -11,6 +12,7 @@ pub fn run() {
             code_service::load_code_file,
             code_service::load_project_code_file,
             code_service::scan_project,
+            context_builder::build_explanation_context,
             persistence_service::hydrate_code_file_persistence,
             persistence_service::initialize_persistence,
             persistence_service::save_explanation_feedback,
