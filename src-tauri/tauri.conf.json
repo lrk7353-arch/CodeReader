@@ -1,7 +1,7 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "CodeReader",
-  "version": "0.1.0",
+  "version": "0.10.0",
   "identifier": "com.codereader.app",
   "build": {
     "beforeDevCommand": "npm run dev",
@@ -12,6 +12,7 @@
   "app": {
     "windows": [
       {
+        "label": "main",
         "title": "CodeReader",
         "width": 1280,
         "height": 820,
@@ -21,6 +22,49 @@
     ],
     "security": {
       "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": [
+      "nsis",
+      "msi"
+    ],
+    "useLocalToolsDir": true,
+    "publisher": "CodeReader Project",
+    "category": "DeveloperTool",
+    "copyright": "Copyright 2026 CodeReader contributors",
+    "shortDescription": "Independent desktop IDE for structured code reading.",
+    "longDescription": "CodeReader turns local JavaScript, TypeScript, Python, and SQL into persistent, reviewable explanation layers with reading progress and change awareness.",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.ico"
+    ],
+    "windows": {
+      "allowDowngrades": false,
+      "webviewInstallMode": {
+        "type": "embedBootstrapper",
+        "silent": true
+      },
+      "nsis": {
+        "installMode": "currentUser",
+        "languages": [
+          "SimpChinese",
+          "English"
+        ],
+        "displayLanguageSelector": false,
+        "compression": "lzma",
+        "startMenuFolder": "CodeReader",
+        "installerIcon": "icons/icon.ico",
+        "uninstallerIcon": "icons/icon.ico"
+      },
+      "wix": {
+        "version": "0.10.0",
+        "upgradeCode": "9cd436e5-1c0f-592b-bc46-2b507e245b2d",
+        "language": "zh-CN"
+      }
     }
   }
 }

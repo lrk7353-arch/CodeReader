@@ -1,6 +1,6 @@
 {
   "name": "codereader",
-  "version": "0.1.0",
+  "version": "0.10.0",
   "private": true,
   "type": "module",
   "scripts": {
@@ -13,7 +13,9 @@
     "cargo:clippy": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/cargo-clippy.ps1",
     "test": "node scripts/test.mjs",
     "doctor": "node scripts/check-environment.mjs",
-    "repair:native": "node scripts/repair-native-deps.mjs"
+    "repair:native": "node scripts/repair-native-deps.mjs",
+    "icons:generate": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/generate-icons.ps1",
+    "release:windows": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/release-windows.ps1"
   },
   "dependencies": {
     "@tauri-apps/api": "2.11.0",

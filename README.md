@@ -2,7 +2,7 @@
 
 CodeReader 是一个独立桌面端 AI 代码阅读 IDE，目标是把 AI 生成的代码从黑箱产物转化为可阅读、可解释、可审阅、可持久化、可逐步掌握的认知资产。
 
-当前仓库已进入 MVP 收束阶段。单文件解释、SQLite 持久化、Context Builder、LLM 结构化生成、变更检测、真实项目树以及 JavaScript/TypeScript、Python、SQL 结构化解释链路已经完成；当前正在完成第一公里阅读引导与最终打包验收。
+当前仓库已完成 MVP 功能收束与 Windows 桌面发行验收。单文件解释、SQLite 持久化、Context Builder、LLM 结构化生成、变更检测、真实项目树、第一公里阅读引导，以及 JavaScript/TypeScript、Python、SQL 结构化解释链路均已纳入可安装的 Windows x64 桌面应用。
 
 ## 文档入口
 
@@ -15,6 +15,7 @@ CodeReader 是一个独立桌面端 AI 代码阅读 IDE，目标是把 AI 生成
 - [MVP 实现标准](<doc for app/MVP实现标准.md>)
 - [协议与治理](<doc for app/协议与治理.md>)
 - [启动前检查报告 v0.4](<doc for app/启动前检查报告_v0.4.md>)
+- [MVP 发行与验收](<doc for app/MVP发行与验收.md>)
 
 开发辅助资料：
 
@@ -69,6 +70,22 @@ git add .
 git commit -m "feat: implement task-name"
 ```
 
+## Windows MVP 发行
+
+在 Windows PowerShell 中执行完整检查并生成 x64 安装包：
+
+```powershell
+npm run release:windows
+```
+
+正式产物输出到 `artifacts/windows-x64/`：
+
+- `CodeReader_0.10.0_x64-setup.exe`：推荐的当前用户 NSIS 安装包；
+- `CodeReader_0.10.0_x64_zh-CN.msi`：供需要 MSI 部署的环境使用；
+- `release-manifest.json` 与 `SHA256SUMS.txt`：记录架构、体积和 SHA-256。
+
+安装包包含 React、Monaco、Rust、SQLite、Tree-sitter 和 WebView2 引导程序，不依赖 Vite、Node 开发服务器或独立后端进程。当前安装包尚未进行 Authenticode 代码签名，Windows SmartScreen 可能显示未知发布者提示；详见 [MVP 发行与验收](<doc for app/MVP发行与验收.md>)。
+
 ## 当前阶段标签
 
 - `v0.1-docs-ready`：文档与启动约束准备完成；
@@ -80,5 +97,6 @@ git commit -m "feat: implement task-name"
 - `v0.8-python-support`：Python 结构化解释；
 - `v0.9-sql-support`：SQL 结构化解释；
 - `v0.10-first-mile`：推荐阅读路径、轻量项目地图、阅读进度和三文件示例。
+- `v0.10.0-mvp`：Windows x64 安装包与 MVP 总验收完成。
 
-`v0.10-first-mile` 完成后，下一阶段只做 MVP 打包、安装与总验收，不借机扩张完整知识图谱或聊天入口。
+`v0.10.0-mvp` 只代表 MVP 的桌面发行基线，不压缩完整产品目标。完整知识图谱、更广泛语言支持、协作与云同步等能力仍按 P1/P2/Future 路线演进。

@@ -6,6 +6,7 @@ dist/
 build/
 out/
 coverage/
+artifacts/
 src-tauri/target/
 
 # environment files
