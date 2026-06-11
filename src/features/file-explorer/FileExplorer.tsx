@@ -119,7 +119,7 @@ export function FileExplorer({
       }
 
       const file = fileById.get(node.id);
-      const capability = file?.capability ?? node.capability;
+      const capability = node.capability;
       const isLoading = loadingFileId === node.id;
       const isActive = selectedFileId === node.id;
       const rowClass = [
