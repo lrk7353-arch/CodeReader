@@ -15,6 +15,7 @@ import {
 import type { ProjectGuide, ProjectTreeNode, SampleFile } from "../../types/explanation";
 import { ProjectGuidePanel } from "../project-guide/ProjectGuidePanel";
 import { buildProjectTree, type ProjectTreeItem } from "./projectTree";
+import { buildFocusedTargetList, COMPACT_TARGET_LIMIT } from "./targetList";
 
 interface FileExplorerProps {
   files: SampleFile[];
@@ -23,6 +24,7 @@ interface FileExplorerProps {
   projectNodes?: ProjectTreeNode[];
   selectedFileId: string;
   selectedExplanationId?: string;
+  activeLine?: number;
   loadingFileId?: string | null;
   workspaceName: string;
   onSelectFile: (fileId: string) => void;
@@ -36,6 +38,7 @@ export function FileExplorer({
   projectNodes = [],
   selectedFileId,
   selectedExplanationId,
+  activeLine,
   loadingFileId,
   workspaceName,
   onSelectFile,
@@ -45,6 +48,8 @@ export function FileExplorer({
     projectGuide ? "guide" : "files"
   );
   const [expandedDirectoryIds, setExpandedDirectoryIds] = useState<Set<string>>(new Set());
+  const [collapsedTargetFileIds, setCollapsedTargetFileIds] = useState<Set<string>>(new Set());
+  const [expandedTargetFileIds, setExpandedTargetFileIds] = useState<Set<string>>(new Set());
   const fileById = useMemo(() => new Map(files.map((file) => [file.id, file])), [files]);
   const tree = useMemo(
     () =>
@@ -100,6 +105,30 @@ export function FileExplorer({
     });
   };
 
+  const toggleTargetList = (fileId: string) => {
+    setCollapsedTargetFileIds((current) => {
+      const next = new Set(current);
+      if (next.has(fileId)) {
+        next.delete(fileId);
+      } else {
+        next.add(fileId);
+      }
+      return next;
+    });
+  };
+
+  const toggleAllTargets = (fileId: string) => {
+    setExpandedTargetFileIds((current) => {
+      const next = new Set(current);
+      if (next.has(fileId)) {
+        next.delete(fileId);
+      } else {
+        next.add(fileId);
+      }
+      return next;
+    });
+  };
+
   const renderNodes = (nodes: ProjectTreeItem[], depth: number): ReactNode =>
     nodes.map((node) => {
       const rowStyle = { paddingLeft: `${8 + depth * 14}px` };
@@ -144,6 +173,16 @@ export function FileExplorer({
         .filter(Boolean)
         .join(" ");
 
+      const explanations = file?.explanations ?? [];
+      const targetListCollapsed = collapsedTargetFileIds.has(node.id);
+      const targetListExpanded = expandedTargetFileIds.has(node.id);
+      const focusedTargets = buildFocusedTargetList(
+        explanations,
+        selectedExplanationId,
+        activeLine
+      );
+      const visibleTargets = targetListExpanded ? explanations : focusedTargets.items;
+
       return (
         <div className="file-group" key={node.id}>
           <button
@@ -169,28 +208,77 @@ export function FileExplorer({
             ) : null}
           </button>
 
-          {isActive && file?.explanations.length ? (
-            <div className="target-list" style={{ paddingLeft: `${22 + depth * 14}px` }}>
-              {file.explanations.map((explanation) => (
+          {isActive && explanations.length ? (
+            <div
+              className="target-list-shell"
+              style={{ paddingLeft: `${22 + depth * 14}px` }}
+            >
+              <div className="target-list-header">
+                <span>
+                  结构 {explanations.length}
+                  {!targetListExpanded && focusedTargets.hiddenCount > 0
+                    ? ` · 附近 ${visibleTargets.length}`
+                    : ""}
+                </span>
                 <button
-                  className={
-                    explanation.id === selectedExplanationId ? "target-row active" : "target-row"
-                  }
+                  className="target-list-toggle"
                   type="button"
-                  key={explanation.id}
-                  onClick={() => onSelectExplanation(explanation.id)}
+                  onClick={() => toggleTargetList(node.id)}
+                  aria-expanded={!targetListCollapsed}
+                  title={targetListCollapsed ? "展开结构列表" : "收起结构列表"}
+                  aria-label={targetListCollapsed ? "展开结构列表" : "收起结构列表"}
                 >
-                  <Braces
-                    className={`target-status-icon ${explanation.status}`}
-                    size={14}
-                    aria-hidden="true"
-                  />
-                  <span>
-                    {explanation.targetName ??
-                      `${explanation.targetType}:${explanation.startLine ?? "file"}`}
-                  </span>
+                  {targetListCollapsed ? (
+                    <ChevronRight size={14} aria-hidden="true" />
+                  ) : (
+                    <ChevronDown size={14} aria-hidden="true" />
+                  )}
                 </button>
-              ))}
+              </div>
+              {!targetListCollapsed ? (
+                <>
+                  <div className="target-list">
+                    {visibleTargets.map((explanation) => (
+                      <button
+                        className={
+                          explanation.id === selectedExplanationId
+                            ? "target-row active"
+                            : "target-row"
+                        }
+                        type="button"
+                        key={explanation.id}
+                        onClick={() => onSelectExplanation(explanation.id)}
+                        title={`${explanation.targetName ?? explanation.targetType}${
+                          explanation.startLine
+                            ? ` · ${explanation.startLine}-${explanation.endLine ?? explanation.startLine}`
+                            : ""
+                        }`}
+                      >
+                        <Braces
+                          className={`target-status-icon ${explanation.status}`}
+                          size={14}
+                          aria-hidden="true"
+                        />
+                        <span>
+                          {explanation.targetName ??
+                            `${explanation.targetType}:${explanation.startLine ?? "file"}`}
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                  {explanations.length > COMPACT_TARGET_LIMIT ? (
+                    <button
+                      className="target-list-more"
+                      type="button"
+                      onClick={() => toggleAllTargets(node.id)}
+                    >
+                      {targetListExpanded
+                        ? `收起到当前位置附近 ${COMPACT_TARGET_LIMIT} 项`
+                        : `显示全部 ${explanations.length} 项`}
+                    </button>
+                  ) : null}
+                </>
+              ) : null}
             </div>
           ) : null}
         </div>
@@ -211,6 +299,7 @@ export function FileExplorer({
           role="tab"
           aria-selected={activeView === "files"}
           onClick={() => setActiveView("files")}
+          title="文件"
         >
           <Files size={14} aria-hidden="true" />
           <span>文件</span>
@@ -221,6 +310,7 @@ export function FileExplorer({
           role="tab"
           aria-selected={activeView === "guide"}
           onClick={() => setActiveView("guide")}
+          title="阅读路径"
         >
           <Route size={14} aria-hidden="true" />
           <span>阅读路径</span>

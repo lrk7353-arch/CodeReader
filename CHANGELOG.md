@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Compact long file-structure lists around the active editor line, with collapse and show-all controls.
+- Include test files in first-mile reading paths when they are meaningful project entry points.
+- Clarify the sample login flow across entry, business, and data files.
+- Prevent project navigation labels from overflowing narrow sidebars.
+
 ## v0.10.0 - 2026-06-11
 
 - Added deterministic project file classification and recommended reading paths.

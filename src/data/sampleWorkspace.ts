@@ -60,7 +60,16 @@ const loginFile: SampleFile = {
   relativePath: "login-controller.ts",
   source: "sample",
   isLoaded: true,
-  capability: codeCapability(originalSampleFiles[0].code)
+  capability: codeCapability(originalSampleFiles[0].code),
+  explanations: originalSampleFiles[0].explanations.map((item) => ({
+    ...item,
+    globalMeaning: loginFlowMeaning(item.targetType),
+    readerNotes: [
+      "先从 app.ts 看请求如何进入 loginUser，再沿本文件的查询与校验走到 user-store.ts。",
+      ...(item.readerNotes ?? [])
+    ],
+    updatedAt: "2026-06-11T00:00:00.000Z"
+  }))
 };
 
 const appFile = sampleFile(
@@ -278,6 +287,16 @@ function explanation(
     createdAt: "2026-06-11T00:00:00.000Z",
     updatedAt: "2026-06-11T00:00:00.000Z"
   };
+}
+
+function loginFlowMeaning(targetType: Explanation["targetType"]) {
+  if (targetType === "file" || targetType === "function") {
+    return "它位于 app.ts 的入口处理和 user-store.ts 的数据访问之间，是登录流程的业务编排层。";
+  }
+  if (targetType === "line") {
+    return "这一步为后续 user-store.ts 的用户查询准备稳定输入，并把入口数据转换为业务层可用格式。";
+  }
+  return "这个分支保护后续 user-store.ts 查询或校验，并把业务结果返回给 app.ts。";
 }
 
 function mapItem(file: SampleFile, role: "entry" | "business" | "data", reason: string) {

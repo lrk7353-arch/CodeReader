@@ -172,7 +172,7 @@ button {
 
 .explorer-tabs {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   min-height: 36px;
   border-bottom: 1px solid #d6d2c9;
   background: #e8e6df;
@@ -189,6 +189,15 @@ button {
   color: #687176;
   cursor: pointer;
   font-size: 12px;
+  min-width: 0;
+  padding: 0 4px;
+}
+
+.explorer-tabs button span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .explorer-tabs button:hover,
@@ -232,8 +241,64 @@ button {
   color: #737c80;
 }
 
-.target-list {
-  padding-left: 17px;
+.target-list-shell {
+  display: grid;
+  gap: 2px;
+  margin-top: 2px;
+}
+
+.target-list-header {
+  display: flex;
+  align-items: center;
+  min-height: 26px;
+  padding: 0 5px 0 6px;
+  color: #687176;
+  font-size: 11px;
+  font-weight: 650;
+}
+
+.target-list-header > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.target-list-toggle {
+  display: grid;
+  flex: 0 0 24px;
+  width: 24px;
+  height: 24px;
+  margin-left: auto;
+  place-items: center;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: #687176;
+  cursor: pointer;
+}
+
+.target-list-toggle:hover {
+  background: #dce8e0;
+  color: #17483c;
+}
+
+.target-list-more {
+  min-height: 28px;
+  margin: 2px 5px 4px;
+  border: 1px solid #cbc8bf;
+  border-radius: 5px;
+  background: #f7f6f2;
+  color: #536066;
+  cursor: pointer;
+  font-size: 11px;
+  text-align: center;
+}
+
+.target-list-more:hover {
+  border-color: #83a99b;
+  background: #e5eee9;
+  color: #17483c;
 }
 
 .target-row {

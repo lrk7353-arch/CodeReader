@@ -831,6 +831,7 @@ export function App() {
           projectNodes={projectNodes}
           selectedFileId={selectedFile.id}
           selectedExplanationId={selectedExplanation?.id}
+          activeLine={selectedCodeSelection.startLine}
           loadingFileId={loadingFileId}
           workspaceName={workspaceName}
           onSelectFile={selectFile}

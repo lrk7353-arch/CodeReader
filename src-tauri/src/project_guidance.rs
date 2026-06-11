@@ -288,6 +288,7 @@ fn build_reading_path(
         ("config", 1),
         ("business", 3),
         ("data", 2),
+        ("test", 1),
         ("style", 1),
     ] {
         for item in map_items
@@ -611,6 +612,7 @@ fn reading_reason(role: &str) -> String {
         "config" => "确认依赖、脚本和运行边界，避免误解项目环境。".to_string(),
         "business" => "阅读核心业务流程，理解输入、分支和输出。".to_string(),
         "data" => "补全数据来源、存储结构和持久化边界。".to_string(),
+        "test" => "通过测试用例确认关键行为、输入边界和预期结果。".to_string(),
         "style" => "最后查看界面样式如何承接功能结构。".to_string(),
         _ => "这是当前项目中较适合作为起点的可预览文件。".to_string(),
     }
@@ -723,8 +725,30 @@ mod tests {
             path.iter()
                 .map(|step| step.file_id.as_str())
                 .collect::<Vec<_>>(),
-            vec!["entry", "config", "business", "data", "style"]
+            vec!["entry", "config", "business", "data", "test", "style"]
         );
+    }
+
+    #[test]
+    fn uses_tests_as_a_real_reading_step_when_project_has_only_tests() {
+        let mut files = vec![
+            file("unit", "tests/login.test.ts", "typescript", true, true),
+            file(
+                "integration",
+                "tests/login.integration.test.ts",
+                "typescript",
+                true,
+                true,
+            ),
+        ];
+
+        let map = build_project_map(&mut files);
+        let path = build_reading_path(&map, &files);
+
+        assert_eq!(path.len(), 1);
+        assert_eq!(path[0].file_id, "unit");
+        assert_eq!(path[0].role, "test");
+        assert!(path[0].reason.contains("测试用例"));
     }
 
     #[test]
