@@ -4,17 +4,22 @@ import {
   ChevronDown,
   ChevronRight,
   FileCode2,
+  Files,
   FileText,
   FileWarning,
   Folder,
   FolderOpen,
-  LoaderCircle
+  LoaderCircle,
+  Route
 } from "lucide-react";
-import type { ProjectTreeNode, SampleFile } from "../../types/explanation";
+import type { ProjectGuide, ProjectTreeNode, SampleFile } from "../../types/explanation";
+import { ProjectGuidePanel } from "../project-guide/ProjectGuidePanel";
 import { buildProjectTree, type ProjectTreeItem } from "./projectTree";
 
 interface FileExplorerProps {
   files: SampleFile[];
+  guideFocusToken?: number;
+  projectGuide?: ProjectGuide;
   projectNodes?: ProjectTreeNode[];
   selectedFileId: string;
   selectedExplanationId?: string;
@@ -26,6 +31,8 @@ interface FileExplorerProps {
 
 export function FileExplorer({
   files,
+  guideFocusToken = 0,
+  projectGuide,
   projectNodes = [],
   selectedFileId,
   selectedExplanationId,
@@ -34,6 +41,9 @@ export function FileExplorer({
   onSelectFile,
   onSelectExplanation
 }: FileExplorerProps) {
+  const [activeView, setActiveView] = useState<"files" | "guide">(
+    projectGuide ? "guide" : "files"
+  );
   const [expandedDirectoryIds, setExpandedDirectoryIds] = useState<Set<string>>(new Set());
   const fileById = useMemo(() => new Map(files.map((file) => [file.id, file])), [files]);
   const tree = useMemo(
@@ -51,6 +61,10 @@ export function FileExplorer({
           })),
     [files, projectNodes]
   );
+
+  useEffect(() => {
+    setActiveView(projectGuide ? "guide" : "files");
+  }, [guideFocusToken, projectGuide?.projectId]);
 
   useEffect(() => {
     if (projectNodes.length === 0) {
@@ -190,7 +204,38 @@ export function FileExplorer({
         <span title={workspaceName}>{workspaceName}</span>
       </div>
 
-      <div className="file-list">{renderNodes(tree, 0)}</div>
+      <div className="explorer-tabs" role="tablist" aria-label="项目导航">
+        <button
+          className={activeView === "files" ? "active" : ""}
+          type="button"
+          role="tab"
+          aria-selected={activeView === "files"}
+          onClick={() => setActiveView("files")}
+        >
+          <Files size={14} aria-hidden="true" />
+          <span>文件</span>
+        </button>
+        <button
+          className={activeView === "guide" ? "active" : ""}
+          type="button"
+          role="tab"
+          aria-selected={activeView === "guide"}
+          onClick={() => setActiveView("guide")}
+        >
+          <Route size={14} aria-hidden="true" />
+          <span>阅读路径</span>
+        </button>
+      </div>
+
+      {activeView === "files" ? (
+        <div className="file-list" role="tabpanel">
+          {renderNodes(tree, 0)}
+        </div>
+      ) : (
+        <div role="tabpanel">
+          <ProjectGuidePanel guide={projectGuide} onSelectFile={onSelectFile} />
+        </div>
+      )}
     </aside>
   );
 }

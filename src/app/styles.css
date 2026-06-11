@@ -170,6 +170,34 @@ button {
   padding: 8px;
 }
 
+.explorer-tabs {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  min-height: 36px;
+  border-bottom: 1px solid #d6d2c9;
+  background: #e8e6df;
+}
+
+.explorer-tabs button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  color: #687176;
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.explorer-tabs button:hover,
+.explorer-tabs button.active {
+  border-bottom-color: #2f7b67;
+  background: #f7f6f2;
+  color: #17483c;
+}
+
 .file-group {
   margin-bottom: 4px;
 }
@@ -219,7 +247,8 @@ button {
 }
 
 .target-status-icon.stale,
-.target-status-icon.new_unexplained {
+.target-status-icon.new_unexplained,
+.target-status-icon.transient {
   color: #9a6a16;
 }
 
@@ -254,6 +283,222 @@ button {
   margin-left: auto;
   color: #6d746e;
   font-size: 11px;
+}
+
+.project-guide {
+  padding: 10px 10px 18px;
+  color: #30383c;
+}
+
+.guide-empty {
+  display: grid;
+  justify-items: center;
+  gap: 8px;
+  padding: 32px 20px;
+  color: #667075;
+  text-align: center;
+}
+
+.guide-empty p {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.guide-progress,
+.reading-path {
+  padding-bottom: 14px;
+  border-bottom: 1px solid #d6d2c9;
+  margin-bottom: 14px;
+}
+
+.guide-section-heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+  color: #3f494e;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.guide-section-heading strong {
+  color: #1f6d59;
+}
+
+.guide-section-heading small {
+  color: #737c80;
+  font-size: 10px;
+  font-weight: 500;
+}
+
+.guide-progress-track {
+  height: 6px;
+  overflow: hidden;
+  background: #cbcfc9;
+}
+
+.guide-progress-track span {
+  display: block;
+  height: 100%;
+  background: #2f7b67;
+}
+
+.guide-progress-summary {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px 8px;
+  margin-top: 8px;
+  color: #697277;
+  font-size: 10px;
+}
+
+.reading-path ol,
+.project-map ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.reading-path ol {
+  display: grid;
+  gap: 4px;
+}
+
+.reading-path li button {
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr) 18px;
+  width: 100%;
+  min-height: 66px;
+  align-items: start;
+  gap: 7px;
+  border: 0;
+  border-left: 2px solid #9db8ae;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  padding: 7px 4px 7px 8px;
+  text-align: left;
+}
+
+.reading-path li button:hover {
+  border-left-color: #2f7b67;
+  background: #dce8e0;
+}
+
+.path-position {
+  display: grid;
+  width: 22px;
+  height: 22px;
+  place-items: center;
+  border: 1px solid #aeb8b3;
+  border-radius: 50%;
+  color: #315b50;
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.path-copy {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.path-copy strong,
+.path-copy span,
+.path-copy small {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.path-copy strong {
+  color: #263035;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.path-copy span {
+  color: #2f6b5b;
+  font-size: 10px;
+}
+
+.path-copy small {
+  display: -webkit-box;
+  color: #687176;
+  font-size: 10px;
+  line-height: 1.35;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.path-state {
+  display: inline-flex;
+  justify-content: center;
+  color: #778085;
+  padding-top: 3px;
+}
+
+.path-state.read,
+.path-state.understood {
+  color: #2f7b67;
+}
+
+.path-state.questioned,
+.path-state.needs_reexplain {
+  color: #9a6a16;
+}
+
+.path-state.suspicious {
+  color: #ad4936;
+}
+
+.project-map details {
+  border-bottom: 1px solid #ddd9d0;
+}
+
+.project-map summary {
+  display: flex;
+  min-height: 34px;
+  align-items: center;
+  justify-content: space-between;
+  color: #465055;
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 650;
+}
+
+.project-map ul {
+  padding: 0 0 7px 7px;
+}
+
+.project-map li button {
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr);
+  width: 100%;
+  min-height: 27px;
+  align-items: center;
+  gap: 5px;
+  border: 0;
+  background: transparent;
+  color: #5e686d;
+  cursor: pointer;
+  font-size: 10px;
+  padding: 0 5px;
+  text-align: left;
+}
+
+.project-map li button:hover {
+  background: #dce8e0;
+  color: #17483c;
+}
+
+.project-map li button span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .spin-icon {

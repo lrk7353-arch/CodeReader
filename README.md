@@ -2,7 +2,7 @@
 
 CodeReader 是一个独立桌面端 AI 代码阅读 IDE，目标是把 AI 生成的代码从黑箱产物转化为可阅读、可解释、可审阅、可持久化、可逐步掌握的认知资产。
 
-当前仓库处于 MVP 启动前文档基线阶段，正式开发前的产品定位、需求、技术架构、协议治理、启动检查和 Git 管理规则已经整理完成。
+当前仓库已进入 MVP 收束阶段。单文件解释、SQLite 持久化、Context Builder、LLM 结构化生成、变更检测、真实项目树以及 JavaScript/TypeScript、Python、SQL 结构化解释链路已经完成；当前正在完成第一公里阅读引导与最终打包验收。
 
 ## 文档入口
 
@@ -71,12 +71,14 @@ git commit -m "feat: implement task-name"
 
 ## 当前阶段标签
 
-- `v0.1-docs-ready`：文档与启动约束准备完成。
+- `v0.1-docs-ready`：文档与启动约束准备完成；
+- `v0.2-app-shell`：Tauri + React 桌面骨架；
+- `v0.3-code-viewer`：Monaco 阅读区；
+- `v0.5-single-file-mvp`：单文件解释闭环；
+- `v0.6-change-detection`：变更检测与解释过期；
+- `v0.7-project-tree`：真实项目文件树与安全预览；
+- `v0.8-python-support`：Python 结构化解释；
+- `v0.9-sql-support`：SQL 结构化解释；
+- `v0.10-first-mile`：推荐阅读路径、轻量项目地图、阅读进度和三文件示例。
 
-后续建议标签：
-
-- `v0.2-app-shell`
-- `v0.3-code-viewer`
-- `v0.4-persistence`
-- `v0.5-single-file-mvp`
-- `v0.6-change-detection`
+`v0.10-first-mile` 完成后，下一阶段只做 MVP 打包、安装与总验收，不借机扩张完整知识图谱或聊天入口。

@@ -3,6 +3,7 @@ mod code_service;
 mod context_builder;
 mod explanation_service;
 mod persistence_service;
+mod project_guidance;
 mod utils;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -22,7 +23,9 @@ pub fn run() {
             persistence_service::hydrate_code_file_persistence,
             persistence_service::initialize_persistence,
             persistence_service::save_explanation_feedback,
-            persistence_service::save_reading_state
+            persistence_service::save_reading_state,
+            project_guidance::generate_project_guide,
+            project_guidance::load_project_guide
         ])
         .run(tauri::generate_context!())
         .expect("error while running CodeReader");

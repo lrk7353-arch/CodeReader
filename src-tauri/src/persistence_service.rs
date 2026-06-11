@@ -1410,7 +1410,7 @@ fn load_change_summary(
     }
 }
 
-fn open_database(path: &Path) -> Result<Connection, String> {
+pub(crate) fn open_database(path: &Path) -> Result<Connection, String> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)
             .map_err(|error| format!("Failed to create database directory: {error}"))?;
@@ -1558,6 +1558,34 @@ fn initialize_schema(conn: &Connection) -> Result<(), String> {
           UNIQUE(project_id, explanation_id)
         );
 
+        CREATE TABLE IF NOT EXISTS project_guides (
+          project_id TEXT PRIMARY KEY,
+          root_path TEXT NOT NULL,
+          source_fingerprint TEXT NOT NULL,
+          generated_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS project_map_items (
+          id TEXT PRIMARY KEY,
+          project_id TEXT NOT NULL,
+          file_id TEXT NOT NULL,
+          relative_path TEXT NOT NULL,
+          role TEXT NOT NULL,
+          reason TEXT NOT NULL,
+          sort_order INTEGER NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS reading_paths (
+          id TEXT PRIMARY KEY,
+          project_id TEXT NOT NULL,
+          position INTEGER NOT NULL,
+          file_id TEXT NOT NULL,
+          relative_path TEXT NOT NULL,
+          role TEXT NOT NULL,
+          reason TEXT NOT NULL
+        );
+
         CREATE TABLE IF NOT EXISTS change_records (
           id TEXT PRIMARY KEY,
           project_id TEXT NOT NULL,
@@ -1591,6 +1619,10 @@ fn initialize_schema(conn: &Connection) -> Result<(), String> {
           ON explanation_targets(project_id, explanation_id);
         CREATE INDEX IF NOT EXISTS idx_reading_states_explanation
           ON user_reading_states(project_id, explanation_id);
+        CREATE INDEX IF NOT EXISTS idx_project_map_project
+          ON project_map_items(project_id, sort_order);
+        CREATE INDEX IF NOT EXISTS idx_reading_paths_project
+          ON reading_paths(project_id, position);
         CREATE INDEX IF NOT EXISTS idx_snapshot_nodes_snapshot
           ON code_snapshot_nodes(project_id, file_id, snapshot_id);
         CREATE INDEX IF NOT EXISTS idx_change_records_file

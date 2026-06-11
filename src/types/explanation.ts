@@ -163,6 +163,53 @@ export interface ProjectScanResult {
   skippedEntries: number;
 }
 
+export type ProjectFileRole =
+  | "documentation"
+  | "entry"
+  | "config"
+  | "business"
+  | "data"
+  | "style"
+  | "test"
+  | "other";
+
+export interface ProjectMapItem {
+  id: string;
+  fileId: string;
+  relativePath: string;
+  role: ProjectFileRole;
+  reason: string;
+}
+
+export interface ReadingPathStep {
+  id: string;
+  position: number;
+  fileId: string;
+  relativePath: string;
+  role: ProjectFileRole;
+  reason: string;
+  readingState: ReadingState;
+}
+
+export interface ReadingProgress {
+  total: number;
+  unread: number;
+  read: number;
+  understood: number;
+  questioned: number;
+  suspicious: number;
+  needsReexplain: number;
+}
+
+export interface ProjectGuide {
+  projectId: string;
+  rootPath: string;
+  generatedAt: string;
+  mapItems: ProjectMapItem[];
+  readingPath: ReadingPathStep[];
+  progress: ReadingProgress;
+}
+
 export type ContextStrategy = "line" | "range" | "function" | "statement" | "file";
 
 export interface ContextTargetSummary {

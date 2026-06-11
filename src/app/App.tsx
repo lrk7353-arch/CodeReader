@@ -1,12 +1,18 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { FilePlus2, FolderOpen, Settings2 } from "lucide-react";
-import { sampleFiles } from "../data/sampleProject";
+import { BookOpen, FilePlus2, FolderOpen, Settings2 } from "lucide-react";
+import {
+  sampleFiles,
+  sampleProjectGuide,
+  sampleProjectId,
+  sampleProjectNodes
+} from "../data/sampleWorkspace";
 import type {
   CodeFile,
   ContextBundle,
   Explanation,
   ExplanationFeedbackType,
   ModelConfig,
+  ProjectGuide,
   ProjectScanResult,
   ProjectTreeNode,
   ReadingState,
@@ -18,6 +24,7 @@ import { ExplanationPanel } from "../features/explanation-panel/ExplanationPanel
 import type { ContextPreviewStatus } from "../features/context-preview/ContextPreview";
 import { GenerationConfirmDialog } from "../features/explanation-generation/GenerationConfirmDialog";
 import { ModelSettingsDialog } from "../features/model-settings/ModelSettingsDialog";
+import { deriveGuideProgress } from "../features/project-guide/projectGuide";
 import {
   buildRangeExplanation,
   buildSelectableExplanations,
@@ -25,11 +32,13 @@ import {
 } from "../features/explanations/selectableExplanations";
 import {
   buildExplanationContext,
+  generateProjectGuide,
   generateExplanation,
   getModelConfig,
   isDesktopRuntime,
   hydrateCodeFilePersistence,
   initializePersistence,
+  loadProjectGuide,
   loadCodeFile,
   pickAndLoadCodeFile,
   pickAndScanProject,
@@ -44,15 +53,19 @@ type GenerationStatus = "idle" | "generating" | "error";
 
 export function App() {
   const [files, setFiles] = useState<CodeFile[]>(sampleFiles);
-  const [projectNodes, setProjectNodes] = useState<ProjectTreeNode[]>([]);
+  const [projectNodes, setProjectNodes] = useState<ProjectTreeNode[]>(sampleProjectNodes);
+  const [projectGuide, setProjectGuide] = useState<ProjectGuide | undefined>(sampleProjectGuide);
+  const [guideFocusToken, setGuideFocusToken] = useState(0);
   const [selectedFileId, setSelectedFileId] = useState(files[0]?.id ?? "");
-  const [selectedExplanationId, setSelectedExplanationId] = useState("exp-file-login-controller");
+  const [selectedExplanationId, setSelectedExplanationId] = useState(
+    files[0]?.explanations[0]?.id ?? ""
+  );
   const [selectedCodeSelection, setSelectedCodeSelection] = useState<CodeSelection>({
     startLine: 1,
     endLine: 1
   });
   const [readingStates, setReadingStates] = useState<Record<string, ReadingState>>({});
-  const [workspaceStatus, setWorkspaceStatus] = useState("示例工作区");
+  const [workspaceStatus, setWorkspaceStatus] = useState("示例项目：无需 API Key");
   const [databasePath, setDatabasePath] = useState("");
   const [persistenceStatus, setPersistenceStatus] = useState<PersistenceStatus>(
     isDesktopRuntime() ? "initializing" : "preview"
@@ -138,6 +151,13 @@ export function App() {
     [files, selectedFile.id, selectedFileForViewer]
   );
 
+  const displayedProjectGuide = useMemo(() => {
+    if (!projectGuide || projectGuide.projectId !== sampleProjectId) {
+      return projectGuide;
+    }
+    return deriveGuideProgress(projectGuide, filesForExplorer, readingStates);
+  }, [filesForExplorer, projectGuide, readingStates]);
+
   const workspaceName = useMemo(() => {
     const localRoot = files.find((file) => file.projectRoot)?.projectRoot;
     if (localRoot) {
@@ -153,7 +173,7 @@ export function App() {
   useEffect(() => {
     if (!isDesktopRuntime()) {
       setWorkspaceStatus((current) =>
-        current === "示例工作区" ? "浏览器预览：解释层仅保存在内存中" : current
+        current.startsWith("示例项目") ? "示例项目：浏览器预览仅保存在内存中" : current
       );
       return;
     }
@@ -170,9 +190,12 @@ export function App() {
           return;
         }
         setFiles(hydratedSamples);
+        setProjectGuide(deriveGuideProgress(sampleProjectGuide, hydratedSamples));
         setDatabasePath(status.databasePath);
         setPersistenceStatus(status.initialized ? "ready" : "error");
-        setWorkspaceStatus((current) => (current === "示例工作区" ? "本地库已就绪" : current));
+        setWorkspaceStatus((current) =>
+          current.startsWith("示例项目") ? "示例项目：本地阅读状态已恢复" : current
+        );
       })
       .catch((error) => {
         if (cancelled) {
@@ -302,6 +325,16 @@ export function App() {
     return hydratedFile;
   }, []);
 
+  const refreshPersistedProjectGuide = useCallback(async (projectId: string) => {
+    if (!isDesktopRuntime() || projectId === sampleProjectId) {
+      return;
+    }
+    const guide = await loadProjectGuide(projectId);
+    if (guide) {
+      setProjectGuide(guide);
+    }
+  }, []);
+
   const upsertFile = useCallback((file: CodeFile) => {
     setFiles((current) => {
       const existingIndex = current.findIndex((item) => item.id === file.id || item.path === file.path);
@@ -342,6 +375,9 @@ export function App() {
         });
         upsertFile(hydrated);
         setSelectedFileId(hydrated.id);
+        if (hydrated.projectId) {
+          await refreshPersistedProjectGuide(hydrated.projectId);
+        }
         const explanations = buildSelectableExplanations(hydrated);
         const retained =
           explanations.find((item) => item.id === selectedExplanationId) ??
@@ -371,7 +407,7 @@ export function App() {
         }
       }
     },
-    [hydrateLoadedFile, selectedExplanationId, upsertFile]
+    [hydrateLoadedFile, refreshPersistedProjectGuide, selectedExplanationId, upsertFile]
   );
 
   useEffect(() => {
@@ -404,6 +440,9 @@ export function App() {
         });
         upsertFile(file);
         setActiveLoadedFile(file);
+        if (file.projectId) {
+          await refreshPersistedProjectGuide(file.projectId);
+        }
         setWorkspaceStatus(`已加载 ${file.relativePath ?? file.path}`);
       } catch (error) {
         setWorkspaceStatus(errorMessage(error));
@@ -412,7 +451,7 @@ export function App() {
         setLoadingFileId(null);
       }
     },
-    [hydrateLoadedFile, setActiveLoadedFile, upsertFile]
+    [hydrateLoadedFile, refreshPersistedProjectGuide, setActiveLoadedFile, upsertFile]
   );
 
   const selectFile = useCallback(
@@ -446,6 +485,20 @@ export function App() {
       ...current,
       [selectedExplanation.id]: state
     }));
+    setFiles((current) =>
+      current.map((file) =>
+        file.id === selectedFile.id
+          ? {
+            ...file,
+            explanations: file.explanations.map((explanation) =>
+              explanation.id === selectedExplanation.id
+                ? { ...explanation, readingState: state }
+                : explanation
+            )
+          }
+          : file
+      )
+    );
 
     if (isTransientExplanation(selectedExplanation)) {
       setWorkspaceStatus("临时多行选择状态已更新，仅保存在当前界面。");
@@ -459,6 +512,7 @@ export function App() {
 
     try {
       await persistReadingState(selectedFile.projectId, selectedExplanation.id, state);
+      await refreshPersistedProjectGuide(selectedFile.projectId);
       setWorkspaceStatus(`阅读状态已保存：${selectedExplanation.targetName ?? selectedExplanation.targetType}`);
     } catch (error) {
       setWorkspaceStatus(errorMessage(error));
@@ -487,6 +541,7 @@ export function App() {
           ...current,
           [selectedExplanation.id]: "needs_reexplain"
         }));
+        await refreshPersistedProjectGuide(selectedFile.projectId);
       }
     } catch (error) {
       setWorkspaceStatus(errorMessage(error));
@@ -593,6 +648,27 @@ export function App() {
     setModelSettingsOpen(true);
   }
 
+  async function openSampleProject() {
+    setIsWorkspaceBusy(true);
+    setWorkspaceStatus("正在恢复无 API Key 示例项目");
+    try {
+      const hydratedSamples = await Promise.all(
+        sampleFiles.map((file) => hydrateLoadedFile(file))
+      );
+      setReadingStates({});
+      setProjectNodes(sampleProjectNodes);
+      setProjectGuide(deriveGuideProgress(sampleProjectGuide, hydratedSamples));
+      setGuideFocusToken((current) => current + 1);
+      setFiles(hydratedSamples);
+      setActiveLoadedFile(hydratedSamples[0] ?? sampleFiles[0]);
+      setWorkspaceStatus("示例项目已就绪：按推荐路径阅读入口、登录业务和用户数据");
+    } catch (error) {
+      setWorkspaceStatus(errorMessage(error));
+    } finally {
+      setIsWorkspaceBusy(false);
+    }
+  }
+
   async function openFile() {
     if (!isDesktopRuntime()) {
       setWorkspaceStatus("本地文件打开需要在 Tauri 桌面端运行。");
@@ -607,6 +683,8 @@ export function App() {
       }
       const hydratedFile = await hydrateLoadedFile(file);
       setProjectNodes([]);
+      setProjectGuide(undefined);
+      setReadingStates({});
       setFiles([hydratedFile]);
       setActiveLoadedFile(hydratedFile);
       setWorkspaceStatus(`已加载 ${hydratedFile.path}`);
@@ -630,10 +708,22 @@ export function App() {
         return;
       }
       setProjectNodes(project.nodes);
+      setReadingStates({});
       if (project.files.length === 0) {
+        setProjectGuide(undefined);
         setWorkspaceStatus("项目中没有可显示的文件");
         return;
       }
+
+      let guide: ProjectGuide | undefined;
+      let guideError = "";
+      try {
+        guide = await generateProjectGuide(project);
+      } catch (error) {
+        guideError = errorMessage(error);
+      }
+      setProjectGuide(guide);
+      setGuideFocusToken((current) => current + 1);
 
       const placeholders: CodeFile[] = project.files.map((file) => ({
         ...file,
@@ -650,19 +740,40 @@ export function App() {
         setSelectedFileId(placeholders[0]?.id ?? "");
         setSelectedExplanationId("");
         setSelectedCodeSelection({ startLine: 1, endLine: 1 });
-        setWorkspaceStatus(`项目包含 ${project.files.length} 个文件，但没有可安全预览的文本文件。`);
+        setWorkspaceStatus(
+          `项目包含 ${project.files.length} 个文件，但没有可安全预览的文本文件。${guideError ? ` 阅读路径生成失败：${guideError}` : ""}`
+        );
         return;
       }
-      const activeFirstFile = await hydrateLoadedFile(await loadFirstAvailableProjectFile(project));
+      let activeFirstFile: CodeFile;
+      try {
+        activeFirstFile = await hydrateLoadedFile(
+          await loadFirstAvailableProjectFile(project, guide?.readingPath[0]?.fileId)
+        );
+      } catch (error) {
+        const fallbackFileId =
+          guide?.readingPath[0]?.fileId ?? previewableFiles[0]?.id ?? placeholders[0]?.id ?? "";
+        setFiles(placeholders);
+        setSelectedFileId(fallbackFileId);
+        setSelectedExplanationId("");
+        setSelectedCodeSelection({ startLine: 1, endLine: 1 });
+        setWorkspaceStatus(
+          `项目结构已打开，但初始文件读取失败。可从文件树尝试其他文件：${errorMessage(error)}`
+        );
+        return;
+      }
       setFiles(placeholders.map((file) => (file.id === activeFirstFile.id ? activeFirstFile : file)));
       setActiveLoadedFile(activeFirstFile);
+      if (guide && activeFirstFile.projectId) {
+        await refreshPersistedProjectGuide(activeFirstFile.projectId);
+      }
       const scanNote = project.truncated
         ? "，扫描已达到安全预算"
         : project.skippedEntries > 0
           ? `，跳过 ${project.skippedEntries} 个不可读取项`
           : "";
       setWorkspaceStatus(
-        `${project.files.length} 个文件，${previewableFiles.length} 个可预览：${project.rootPath}${scanNote}`
+        `${project.files.length} 个文件，${previewableFiles.length} 个可预览：${project.rootPath}${scanNote}${guideError ? `；阅读路径生成失败：${guideError}` : ""}`
       );
     } catch (error) {
       setWorkspaceStatus(errorMessage(error));
@@ -680,10 +791,19 @@ export function App() {
           </span>
           <div>
             <h1>CodeReader</h1>
-            <p>单文件阅读闭环骨架</p>
+            <p>独立桌面代码阅读 IDE</p>
           </div>
         </div>
         <div className="topbar-actions" aria-label="Workspace actions">
+          <button
+            type="button"
+            onClick={() => void openSampleProject()}
+            disabled={isWorkspaceBusy}
+            title="体验无需 API Key 的三文件示例项目"
+          >
+            <BookOpen size={16} aria-hidden="true" />
+            <span>体验示例</span>
+          </button>
           <button type="button" onClick={openFile} disabled={isWorkspaceBusy} title="打开单个代码文件">
             <FilePlus2 size={16} aria-hidden="true" />
             <span>打开文件</span>
@@ -699,13 +819,15 @@ export function App() {
         </div>
         <div className="topbar-status">
           <span>{workspaceStatus}</span>
-          <span>Sprint 1</span>
+          <span>MVP · First Mile</span>
         </div>
       </header>
 
       <section className="workspace" aria-label="CodeReader workspace">
         <FileExplorer
           files={filesForExplorer}
+          guideFocusToken={guideFocusToken}
+          projectGuide={displayedProjectGuide}
           projectNodes={projectNodes}
           selectedFileId={selectedFile.id}
           selectedExplanationId={selectedExplanation?.id}
@@ -809,9 +931,19 @@ function errorMessage(error: unknown) {
   return String(error);
 }
 
-async function loadFirstAvailableProjectFile(project: ProjectScanResult): Promise<CodeFile> {
+async function loadFirstAvailableProjectFile(
+  project: ProjectScanResult,
+  preferredFileId?: string
+): Promise<CodeFile> {
   const failures: string[] = [];
-  for (const file of project.files.filter((item) => item.capability.canPreview)) {
+  const previewableFiles = project.files.filter((item) => item.capability.canPreview);
+  const orderedFiles = preferredFileId
+    ? [
+      ...previewableFiles.filter((file) => file.id === preferredFileId),
+      ...previewableFiles.filter((file) => file.id !== preferredFileId)
+    ]
+    : previewableFiles;
+  for (const file of orderedFiles) {
     try {
       const loadedFile = await loadCodeFile(file.path, project.rootPath);
       return {

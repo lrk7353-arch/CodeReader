@@ -8,6 +8,7 @@ import type {
   ExplanationFeedbackType,
   GenerateExplanationResult,
   ModelConfig,
+  ProjectGuide,
   ProjectScanResult,
   ReadingState,
   SaveModelConfigInput
@@ -95,6 +96,31 @@ export async function hydrateCodeFilePersistence(
 export async function initializePersistence() {
   ensureDesktopRuntime();
   return invoke<{ databasePath: string; initialized: boolean }>("initialize_persistence");
+}
+
+export async function generateProjectGuide(project: ProjectScanResult): Promise<ProjectGuide> {
+  ensureDesktopRuntime();
+  return invoke<ProjectGuide>("generate_project_guide", {
+    request: {
+      rootPath: project.rootPath,
+      files: project.files.map((file) => ({
+        id: file.id,
+        relativePath: file.relativePath,
+        language: file.language,
+        canPreview: file.capability.canPreview,
+        canExplain: file.capability.canExplain
+      }))
+    }
+  });
+}
+
+export async function loadProjectGuide(projectId: string): Promise<ProjectGuide | null> {
+  ensureDesktopRuntime();
+  return invoke<ProjectGuide | null>("load_project_guide", {
+    request: {
+      projectId
+    }
+  });
 }
 
 export async function buildExplanationContext(
