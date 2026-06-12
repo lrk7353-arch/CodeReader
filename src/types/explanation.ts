@@ -12,9 +12,21 @@ export type ExplanationTargetType =
   | "module"
   | "project";
 
-export type ExplanationStatus = "valid" | "stale" | "invalid" | "new_unexplained" | "deleted" | "transient";
+export type ExplanationStatus =
+  | "valid"
+  | "stale"
+  | "invalid"
+  | "new_unexplained"
+  | "deleted"
+  | "transient";
 
-export type ReadingState = "unread" | "read" | "understood" | "questioned" | "suspicious" | "needs_reexplain";
+export type ReadingState =
+  | "unread"
+  | "read"
+  | "understood"
+  | "questioned"
+  | "suspicious"
+  | "needs_reexplain";
 
 export type ExplanationFeedbackType =
   | "helpful"

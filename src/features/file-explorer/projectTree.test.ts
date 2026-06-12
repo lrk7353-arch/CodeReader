@@ -22,9 +22,7 @@ describe("buildProjectTree", () => {
   });
 
   it("keeps nodes with missing parents visible at the root", () => {
-    const tree = buildProjectTree([
-      file("orphan", "orphan.ts", "orphan.ts", "missing-directory")
-    ]);
+    const tree = buildProjectTree([file("orphan", "orphan.ts", "orphan.ts", "missing-directory")]);
 
     expect(tree).toHaveLength(1);
     expect(tree[0].id).toBe("orphan");
@@ -42,12 +40,7 @@ function directory(id: string, relativePath: string, parentId?: string): Project
   };
 }
 
-function file(
-  id: string,
-  name: string,
-  relativePath: string,
-  parentId?: string
-): ProjectTreeNode {
+function file(id: string, name: string, relativePath: string, parentId?: string): ProjectTreeNode {
   return {
     id,
     parentId,

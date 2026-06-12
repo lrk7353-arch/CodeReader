@@ -39,7 +39,8 @@ function runSync(label, command, commandArgs) {
   }
 }
 
-const wslRoot = process.env.CODEREADER_WSL_ROOT ?? (process.platform === "win32" ? toWslPath(root) : null);
+const wslRoot =
+  process.env.CODEREADER_WSL_ROOT ?? (process.platform === "win32" ? toWslPath(root) : null);
 const windowsRoot = process.platform === "win32" ? process.env.CODEREADER_WINDOWS_ROOT : null;
 
 if (windowsRoot) {
@@ -52,8 +53,8 @@ if (windowsRoot) {
   ]);
 
   const command = [
-    "[ -f \"$HOME/.profile\" ] && . \"$HOME/.profile\"",
-    "export PATH=\"$HOME/.local/bin:$PATH\"",
+    '[ -f "$HOME/.profile" ] && . "$HOME/.profile"',
+    'export PATH="$HOME/.local/bin:$PATH"',
     "export npm_config_script_shell=/bin/bash",
     `cd ${shellQuote(wslRoot)}`,
     `node scripts/dev.mjs ${args.map(shellQuote).join(" ")}`

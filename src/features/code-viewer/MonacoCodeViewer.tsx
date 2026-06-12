@@ -6,7 +6,10 @@ import "monaco-editor/esm/vs/basic-languages/monaco.contribution";
 import editorWorker from "monaco-editor/esm/vs/editor/editor.worker?worker";
 import tsWorker from "monaco-editor/esm/vs/language/typescript/ts.worker?worker";
 import type { Explanation, SampleFile } from "../../types/explanation";
-import { findExplanationForSelection, rangeExplanationId } from "../explanations/selectableExplanations";
+import {
+  findExplanationForSelection,
+  rangeExplanationId
+} from "../explanations/selectableExplanations";
 
 interface MonacoCodeViewerProps {
   file: SampleFile;
@@ -140,7 +143,7 @@ export function MonacoCodeViewer({
       const fallbackId =
         selection.startLine !== selection.endLine
           ? rangeExplanationId(currentFile.id, selection)
-          : currentFile.explanations[0]?.id ?? "";
+          : (currentFile.explanations[0]?.id ?? "");
       onSelectExplanationRef.current(explanation?.id ?? fallbackId);
     });
 

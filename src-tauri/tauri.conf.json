@@ -21,7 +21,24 @@
       }
     ],
     "security": {
-      "csp": null
+      "csp": {
+        "default-src": "'self' customprotocol: asset:",
+        "connect-src": "ipc: http://ipc.localhost",
+        "font-src": "'self' data:",
+        "img-src": "'self' asset: http://asset.localhost blob: data:",
+        "script-src": "'self'",
+        "style-src": "'self' 'unsafe-inline'",
+        "worker-src": "'self' blob:"
+      },
+      "devCsp": {
+        "default-src": "'self' http://127.0.0.1:1420",
+        "connect-src": "ipc: http://ipc.localhost http://127.0.0.1:1420 ws://127.0.0.1:1420",
+        "font-src": "'self' data: http://127.0.0.1:1420",
+        "img-src": "'self' asset: http://asset.localhost blob: data: http://127.0.0.1:1420",
+        "script-src": "'self' http://127.0.0.1:1420",
+        "style-src": "'self' 'unsafe-inline' http://127.0.0.1:1420",
+        "worker-src": "'self' blob: http://127.0.0.1:1420"
+      }
     }
   },
   "bundle": {

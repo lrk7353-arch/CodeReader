@@ -1,10 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { CodeFile, ProjectGuide, ReadingState } from "../../types/explanation";
-import {
-  aggregateReadingStates,
-  deriveGuideProgress,
-  progressPercent
-} from "./projectGuide";
+import { aggregateReadingStates, deriveGuideProgress, progressPercent } from "./projectGuide";
 
 describe("project guide progress", () => {
   it("uses risk and question states before completion states", () => {
@@ -22,10 +18,7 @@ describe("project guide progress", () => {
       {}
     );
 
-    expect(result.readingPath.map((step) => step.readingState)).toEqual([
-      "understood",
-      "read"
-    ]);
+    expect(result.readingPath.map((step) => step.readingState)).toEqual(["understood", "read"]);
     expect(result.progress.understood).toBe(1);
     expect(result.progress.read).toBe(1);
     expect(progressPercent(result.progress)).toBe(100);

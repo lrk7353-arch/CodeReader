@@ -36,14 +36,7 @@ function windowsRustPath() {
     return [
       "C:\\ProgramData\\mingw64\\mingw64\\bin",
       rustBin,
-      join(
-        rustToolchain,
-        "lib",
-        "rustlib",
-        "x86_64-pc-windows-gnu",
-        "bin",
-        "self-contained"
-      )
+      join(rustToolchain, "lib", "rustlib", "x86_64-pc-windows-gnu", "bin", "self-contained")
     ].join(";");
   } catch {
     return "C:\\ProgramData\\mingw64\\mingw64\\bin";
@@ -70,11 +63,11 @@ if (isWindowsWslUncPath(root)) {
       `pushd ${cmdQuote(root)}`,
       "if errorlevel 1 exit /b %errorlevel%",
       wslRoot ? `set "CODEREADER_WSL_ROOT=${wslRoot}"` : "",
-      "set \"CODEREADER_WINDOWS_ROOT=%CD%\"",
+      'set "CODEREADER_WINDOWS_ROOT=%CD%"',
       `set "PATH=${windowsRustPath()};%PATH%"`,
-      "if not defined CODEREADER_CARGO_TARGET_DIR if exist D:\\CodeReaderCache set \"CODEREADER_CARGO_TARGET_DIR=D:\\CodeReaderCache\\cargo-target\"",
-      "if not defined CODEREADER_CARGO_TARGET_DIR set \"CODEREADER_CARGO_TARGET_DIR=%SystemDrive%\\cr-target\"",
-      "set \"CARGO_TARGET_DIR=%CODEREADER_CARGO_TARGET_DIR%\"",
+      'if not defined CODEREADER_CARGO_TARGET_DIR if exist D:\\CodeReaderCache set "CODEREADER_CARGO_TARGET_DIR=D:\\CodeReaderCache\\cargo-target"',
+      'if not defined CODEREADER_CARGO_TARGET_DIR set "CODEREADER_CARGO_TARGET_DIR=%SystemDrive%\\cr-target"',
+      'set "CARGO_TARGET_DIR=%CODEREADER_CARGO_TARGET_DIR%"',
       command,
       "set EXIT_CODE=%ERRORLEVEL%",
       "popd",

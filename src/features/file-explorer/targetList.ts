@@ -43,7 +43,11 @@ function nearestTargetIndex(explanations: Explanation[], activeLine?: number) {
     const startLine = explanation.startLine ?? 1;
     const endLine = explanation.endLine ?? startLine;
     const distance =
-      activeLine < startLine ? startLine - activeLine : activeLine > endLine ? activeLine - endLine : 0;
+      activeLine < startLine
+        ? startLine - activeLine
+        : activeLine > endLine
+          ? activeLine - endLine
+          : 0;
     if (distance < nearestDistance) {
       nearestDistance = distance;
       nearestIndex = index;

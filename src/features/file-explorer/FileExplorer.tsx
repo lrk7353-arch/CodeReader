@@ -44,12 +44,11 @@ export function FileExplorer({
   onSelectFile,
   onSelectExplanation
 }: FileExplorerProps) {
-  const [activeView, setActiveView] = useState<"files" | "guide">(
-    projectGuide ? "guide" : "files"
-  );
+  const [activeView, setActiveView] = useState<"files" | "guide">(projectGuide ? "guide" : "files");
   const [expandedDirectoryIds, setExpandedDirectoryIds] = useState<Set<string>>(new Set());
   const [collapsedTargetFileIds, setCollapsedTargetFileIds] = useState<Set<string>>(new Set());
   const [expandedTargetFileIds, setExpandedTargetFileIds] = useState<Set<string>>(new Set());
+  const projectGuideId = projectGuide?.projectId;
   const fileById = useMemo(() => new Map(files.map((file) => [file.id, file])), [files]);
   const tree = useMemo(
     () =>
@@ -68,8 +67,8 @@ export function FileExplorer({
   );
 
   useEffect(() => {
-    setActiveView(projectGuide ? "guide" : "files");
-  }, [guideFocusToken, projectGuide?.projectId]);
+    setActiveView(projectGuideId ? "guide" : "files");
+  }, [guideFocusToken, projectGuideId]);
 
   useEffect(() => {
     if (projectNodes.length === 0) {
@@ -209,10 +208,7 @@ export function FileExplorer({
           </button>
 
           {isActive && explanations.length ? (
-            <div
-              className="target-list-shell"
-              style={{ paddingLeft: `${22 + depth * 14}px` }}
-            >
+            <div className="target-list-shell" style={{ paddingLeft: `${22 + depth * 14}px` }}>
               <div className="target-list-header">
                 <span>
                   结构 {explanations.length}

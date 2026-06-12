@@ -3,6 +3,12 @@ import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+const mode = process.argv[2];
+
+if (mode !== "--write" && mode !== "--check") {
+  console.error("Usage: node scripts/format.mjs --write|--check");
+  process.exit(1);
+}
 
 function toWslPath(value) {
   const normalized = value.replaceAll("/", "\\");
@@ -40,7 +46,7 @@ if (wslRoot) {
     '[ -f "$HOME/.profile" ] && . "$HOME/.profile"',
     'export PATH="$HOME/.local/bin:$PATH"',
     `cd ${shellQuote(wslRoot)}`,
-    "node scripts/test.mjs"
+    `node scripts/format.mjs ${mode}`
   ].join("; ");
   const result = spawnSync("wsl", ["bash", "-lc", command], {
     stdio: "inherit",
@@ -49,4 +55,11 @@ if (wslRoot) {
   process.exit(result.status ?? 1);
 }
 
-run("Vitest", process.execPath, [resolve(root, "node_modules/vitest/vitest.mjs"), "run"]);
+run("Prettier", process.execPath, [
+  resolve(root, "node_modules/prettier/bin/prettier.cjs"),
+  mode,
+  "src/**/*.{ts,tsx}",
+  "scripts/*.mjs",
+  "*.{json,mjs,ts}",
+  ".github/workflows/*.yml"
+]);

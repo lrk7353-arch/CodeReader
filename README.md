@@ -12,6 +12,8 @@ CodeReader 是一个独立桌面端 AI 代码阅读 IDE，目标是把 AI 生成
 - [内测质量基线](<内测阶段文档/内测质量基线.md>)
 - [架构入口](<内测阶段文档/架构入口.md>)
 - [内测迭代路线图](<内测阶段文档/迭代路线图.md>)
+- [Opus 4.8 审查处置](<内测阶段文档/Opus-4.8审查处置.md>)
+- [发布签名与安全门禁](<内测阶段文档/发布签名与安全门禁.md>)
 - [项目文档包](<doc for app/README.md>)
 - [产品设计文档](<doc for app/产品设计文档.md>)
 - [需求文档](<doc for app/需求文档.md>)
@@ -56,6 +58,8 @@ CodeReader 是一个独立桌面端 AI 代码阅读 IDE，目标是把 AI 生成
 ```bash
 npm ci
 npm test
+npm run lint
+npm run format:check
 npm run build
 npm run cargo:test
 npm run cargo:clippy
@@ -110,7 +114,7 @@ npm run release:windows
 - `CodeReader_0.10.0_x64_zh-CN.msi`：供需要 MSI 部署的环境使用；
 - `release-manifest.json` 与 `SHA256SUMS.txt`：记录架构、体积和 SHA-256。
 
-安装包包含 React、Monaco、Rust、SQLite、Tree-sitter 和 WebView2 引导程序，不依赖 Vite、Node 开发服务器或独立后端进程。内测版本在完成新的安装/升级验收前，不替代该发行基线。当前安装包尚未进行 Authenticode 代码签名，Windows SmartScreen 可能显示未知发布者提示；详见 [MVP 发行与验收](<doc for app/MVP发行与验收.md>)。
+安装包包含 React、Monaco、Rust、SQLite、Tree-sitter 和 WebView2 引导程序，不依赖 Vite、Node 开发服务器或独立后端进程。内测版本在完成新的安装/升级验收前，不替代该发行基线。当前安装包尚未进行 Authenticode 代码签名，Windows SmartScreen 可能显示未知发布者提示；公开分发前必须通过[发布签名与安全门禁](<内测阶段文档/发布签名与安全门禁.md>)。
 
 ## 当前阶段标签
 

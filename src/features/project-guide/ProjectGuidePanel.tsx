@@ -8,16 +8,8 @@ import {
   RefreshCw,
   Route
 } from "lucide-react";
-import type {
-  ProjectFileRole,
-  ProjectGuide,
-  ReadingState
-} from "../../types/explanation";
-import {
-  progressPercent,
-  projectRoleLabels,
-  projectRoleOrder
-} from "./projectGuide";
+import type { ProjectFileRole, ProjectGuide, ReadingState } from "../../types/explanation";
+import { progressPercent, projectRoleLabels, projectRoleOrder } from "./projectGuide";
 
 interface ProjectGuidePanelProps {
   guide?: ProjectGuide;
@@ -124,7 +116,11 @@ export function ProjectGuidePanel({ guide, onSelectFile }: ProjectGuidePanelProp
             <ul>
               {items.slice(0, 6).map((item) => (
                 <li key={item.id}>
-                  <button type="button" onClick={() => onSelectFile(item.fileId)} title={item.reason}>
+                  <button
+                    type="button"
+                    onClick={() => onSelectFile(item.fileId)}
+                    title={item.reason}
+                  >
                     <FileText size={14} aria-hidden="true" />
                     <span>{item.relativePath}</span>
                   </button>
@@ -139,10 +135,7 @@ export function ProjectGuidePanel({ guide, onSelectFile }: ProjectGuidePanelProp
 }
 
 function ReadingStateIcon({ state }: { state: ReadingState }) {
-  const details: Record<
-    ReadingState,
-    { label: string; icon: typeof Circle }
-  > = {
+  const details: Record<ReadingState, { label: string; icon: typeof Circle }> = {
     unread: { label: "未读", icon: Circle },
     read: { label: "已读", icon: CheckCircle2 },
     understood: { label: "已理解", icon: CheckCircle2 },

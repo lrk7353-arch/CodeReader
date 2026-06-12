@@ -40,7 +40,7 @@ if (wslRoot) {
     '[ -f "$HOME/.profile" ] && . "$HOME/.profile"',
     'export PATH="$HOME/.local/bin:$PATH"',
     `cd ${shellQuote(wslRoot)}`,
-    "node scripts/test.mjs"
+    "node scripts/lint.mjs"
   ].join("; ");
   const result = spawnSync("wsl", ["bash", "-lc", command], {
     stdio: "inherit",
@@ -49,4 +49,11 @@ if (wslRoot) {
   process.exit(result.status ?? 1);
 }
 
-run("Vitest", process.execPath, [resolve(root, "node_modules/vitest/vitest.mjs"), "run"]);
+run("ESLint", process.execPath, [
+  resolve(root, "node_modules/eslint/bin/eslint.js"),
+  "src",
+  "scripts/*.mjs",
+  "vite.config.ts",
+  "eslint.config.mjs",
+  "prettier.config.mjs"
+]);

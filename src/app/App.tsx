@@ -73,7 +73,10 @@ export function App() {
     [files, selectedFileId]
   );
 
-  const selectableExplanations = useMemo(() => buildSelectableExplanations(selectedFile), [selectedFile]);
+  const selectableExplanations = useMemo(
+    () => buildSelectableExplanations(selectedFile),
+    [selectedFile]
+  );
 
   const transientRangeExplanation = useMemo(() => {
     if (selectedFile.capability?.canExplain === false) {
@@ -88,22 +91,20 @@ export function App() {
     return buildRangeExplanation(selectedFile, selectedCodeSelection);
   }, [selectableExplanations, selectedCodeSelection, selectedFile]);
 
-  const hydratedExplanations = useMemo(
-    () => {
-      const explanations = transientRangeExplanation
-        ? [...selectableExplanations, transientRangeExplanation]
-        : selectableExplanations;
-      return explanations.map((explanation) => ({
-        ...explanation,
-        readingState: readingStates[explanation.id] ?? explanation.readingState
-      }));
-    },
-    [readingStates, selectableExplanations, transientRangeExplanation]
-  );
+  const hydratedExplanations = useMemo(() => {
+    const explanations = transientRangeExplanation
+      ? [...selectableExplanations, transientRangeExplanation]
+      : selectableExplanations;
+    return explanations.map((explanation) => ({
+      ...explanation,
+      readingState: readingStates[explanation.id] ?? explanation.readingState
+    }));
+  }, [readingStates, selectableExplanations, transientRangeExplanation]);
 
   const selectedExplanation = useMemo<Explanation | undefined>(() => {
     return (
-      hydratedExplanations.find((item) => item.id === selectedExplanationId) ?? hydratedExplanations[0]
+      hydratedExplanations.find((item) => item.id === selectedExplanationId) ??
+      hydratedExplanations[0]
     );
   }, [hydratedExplanations, selectedExplanationId]);
 
@@ -114,9 +115,9 @@ export function App() {
         current.map((file) =>
           file.id === selectedFile.id
             ? {
-              ...file,
-              explanations: upsertExplanation(file.explanations, result.explanation)
-            }
+                ...file,
+                explanations: upsertExplanation(file.explanations, result.explanation)
+              }
             : file
         )
       );
@@ -229,13 +230,15 @@ export function App() {
       const rangeSelection = parseRangeSelection(explanationId);
       const nextSelection = explanation?.startLine
         ? {
-          startLine: explanation.startLine,
-          endLine: explanation.endLine ?? explanation.startLine
-        }
+            startLine: explanation.startLine,
+            endLine: explanation.endLine ?? explanation.startLine
+          }
         : rangeSelection
           ? rangeSelection
-        : { startLine: 1, endLine: 1 };
-      setSelectedCodeSelection((current) => (sameSelection(current, nextSelection) ? current : nextSelection));
+          : { startLine: 1, endLine: 1 };
+      setSelectedCodeSelection((current) =>
+        sameSelection(current, nextSelection) ? current : nextSelection
+      );
     },
     [hydratedExplanations]
   );
@@ -283,7 +286,9 @@ export function App() {
 
   const upsertFile = useCallback((file: CodeFile) => {
     setFiles((current) => {
-      const existingIndex = current.findIndex((item) => item.id === file.id || item.path === file.path);
+      const existingIndex = current.findIndex(
+        (item) => item.id === file.id || item.path === file.path
+      );
       if (existingIndex === -1) {
         return [file, ...current];
       }
@@ -435,13 +440,13 @@ export function App() {
       current.map((file) =>
         file.id === selectedFile.id
           ? {
-            ...file,
-            explanations: file.explanations.map((explanation) =>
-              explanation.id === selectedExplanation.id
-                ? { ...explanation, readingState: state }
-                : explanation
-            )
-          }
+              ...file,
+              explanations: file.explanations.map((explanation) =>
+                explanation.id === selectedExplanation.id
+                  ? { ...explanation, readingState: state }
+                  : explanation
+              )
+            }
           : file
       )
     );
@@ -459,7 +464,9 @@ export function App() {
     try {
       await persistReadingState(selectedFile.projectId, selectedExplanation.id, state);
       await refreshPersistedProjectGuide(selectedFile.projectId);
-      setWorkspaceStatus(`阅读状态已保存：${selectedExplanation.targetName ?? selectedExplanation.targetType}`);
+      setWorkspaceStatus(
+        `阅读状态已保存：${selectedExplanation.targetName ?? selectedExplanation.targetType}`
+      );
     } catch (error) {
       setWorkspaceStatus(errorMessage(error));
     }
@@ -479,10 +486,18 @@ export function App() {
     }
 
     try {
-      await persistExplanationFeedback(selectedFile.projectId, selectedExplanation.id, feedbackType);
+      await persistExplanationFeedback(
+        selectedFile.projectId,
+        selectedExplanation.id,
+        feedbackType
+      );
       setWorkspaceStatus(`解释反馈已保存：${feedbackType}`);
       if (feedbackType === "regenerate_requested") {
-        await persistReadingState(selectedFile.projectId, selectedExplanation.id, "needs_reexplain");
+        await persistReadingState(
+          selectedFile.projectId,
+          selectedExplanation.id,
+          "needs_reexplain"
+        );
         setReadingStates((current) => ({
           ...current,
           [selectedExplanation.id]: "needs_reexplain"
@@ -498,9 +513,7 @@ export function App() {
     setIsWorkspaceBusy(true);
     setWorkspaceStatus("正在恢复无 API Key 示例项目");
     try {
-      const hydratedSamples = await Promise.all(
-        sampleFiles.map((file) => hydrateLoadedFile(file))
-      );
+      const hydratedSamples = await Promise.all(sampleFiles.map((file) => hydrateLoadedFile(file)));
       setReadingStates({});
       setProjectNodes(sampleProjectNodes);
       setProjectGuide(deriveGuideProgress(sampleProjectGuide, hydratedSamples));
@@ -608,7 +621,9 @@ export function App() {
         );
         return;
       }
-      setFiles(placeholders.map((file) => (file.id === activeFirstFile.id ? activeFirstFile : file)));
+      setFiles(
+        placeholders.map((file) => (file.id === activeFirstFile.id ? activeFirstFile : file))
+      );
       setActiveLoadedFile(activeFirstFile);
       if (guide && activeFirstFile.projectId) {
         await refreshPersistedProjectGuide(activeFirstFile.projectId);
@@ -650,11 +665,21 @@ export function App() {
             <BookOpen size={16} aria-hidden="true" />
             <span>体验示例</span>
           </button>
-          <button type="button" onClick={openFile} disabled={isWorkspaceBusy} title="打开单个代码文件">
+          <button
+            type="button"
+            onClick={openFile}
+            disabled={isWorkspaceBusy}
+            title="打开单个代码文件"
+          >
             <FilePlus2 size={16} aria-hidden="true" />
             <span>打开文件</span>
           </button>
-          <button type="button" onClick={openProject} disabled={isWorkspaceBusy} title="打开本地项目文件夹">
+          <button
+            type="button"
+            onClick={openProject}
+            disabled={isWorkspaceBusy}
+            title="打开本地项目文件夹"
+          >
             <FolderOpen size={16} aria-hidden="true" />
             <span>打开项目</span>
           </button>
@@ -775,9 +800,9 @@ async function loadFirstAvailableProjectFile(
   const previewableFiles = project.files.filter((item) => item.capability.canPreview);
   const orderedFiles = preferredFileId
     ? [
-      ...previewableFiles.filter((file) => file.id === preferredFileId),
-      ...previewableFiles.filter((file) => file.id !== preferredFileId)
-    ]
+        ...previewableFiles.filter((file) => file.id === preferredFileId),
+        ...previewableFiles.filter((file) => file.id !== preferredFileId)
+      ]
     : previewableFiles;
   for (const file of orderedFiles) {
     try {
@@ -792,7 +817,9 @@ async function loadFirstAvailableProjectFile(
     }
   }
 
-  throw new Error(`已扫描到 ${project.files.length} 个文件，但没有可预览文件能被读取。${failures[0] ?? ""}`);
+  throw new Error(
+    `已扫描到 ${project.files.length} 个文件，但没有可预览文件能被读取。${failures[0] ?? ""}`
+  );
 }
 
 function sameSelection(left: CodeSelection, right: CodeSelection) {

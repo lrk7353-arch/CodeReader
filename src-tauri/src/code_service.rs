@@ -1,6 +1,7 @@
 #![cfg_attr(test, allow(dead_code))]
 
 use serde::Serialize;
+use std::io::Read;
 use std::path::{Path, PathBuf};
 use tree_sitter::{Language, Node, Parser};
 use walkdir::{DirEntry, WalkDir};
@@ -314,13 +315,7 @@ fn load_file_payload(
             .clone()
             .unwrap_or_else(|| "This file cannot be previewed.".to_string()));
     }
-    let code = std::fs::read_to_string(&path).map_err(|error| {
-        if error.kind() == std::io::ErrorKind::InvalidData {
-            "This file is not valid UTF-8 text and cannot be previewed safely.".to_string()
-        } else {
-            format!("Failed to read file: {error}")
-        }
-    })?;
+    let code = read_utf8_preview(&path)?;
 
     let code_language = language_for_path(&path);
     Ok(file_payload(
@@ -330,6 +325,31 @@ fn load_file_payload(
         capability,
         code,
     ))
+}
+
+fn read_utf8_preview(path: &Path) -> Result<String, String> {
+    let file =
+        std::fs::File::open(path).map_err(|error| format!("Failed to read file: {error}"))?;
+    read_utf8_preview_from(file)
+}
+
+fn read_utf8_preview_from(reader: impl Read) -> Result<String, String> {
+    let mut bytes = Vec::with_capacity(64 * 1024);
+    reader
+        .take(MAX_PREVIEW_BYTES + 1)
+        .read_to_end(&mut bytes)
+        .map_err(|error| format!("Failed to read file: {error}"))?;
+
+    if bytes.len() as u64 > MAX_PREVIEW_BYTES {
+        return Err(format!(
+            "The file is too large to preview safely (limit: {} MB).",
+            MAX_PREVIEW_BYTES / 1024 / 1024
+        ));
+    }
+
+    String::from_utf8(bytes).map_err(|_| {
+        "This file is not valid UTF-8 text and cannot be previewed safely.".to_string()
+    })
 }
 
 fn file_payload(
@@ -1054,6 +1074,23 @@ mod tests {
             .code_nodes
             .iter()
             .any(|node| node.node_type == "block"));
+    }
+
+    #[test]
+    fn bounds_preview_reads_when_file_grows_after_metadata_check() {
+        let oversized = vec![b'a'; (MAX_PREVIEW_BYTES + 1) as usize];
+        let error = read_utf8_preview_from(std::io::Cursor::new(oversized))
+            .expect_err("oversized reads should be rejected");
+
+        assert!(error.contains("too large"));
+    }
+
+    #[test]
+    fn rejects_invalid_utf8_during_bounded_preview_read() {
+        let error = read_utf8_preview_from(std::io::Cursor::new(vec![0xff]))
+            .expect_err("invalid UTF-8 should be rejected");
+
+        assert!(error.contains("valid UTF-8"));
     }
 
     #[test]

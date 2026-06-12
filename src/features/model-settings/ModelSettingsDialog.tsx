@@ -134,7 +134,12 @@ export function ModelSettingsDialog({
 
           <footer className="dialog-actions">
             {config?.updatedAt || config?.hasApiKey ? (
-              <button className="danger-button" type="button" onClick={onResetConfig} disabled={busy}>
+              <button
+                className="danger-button"
+                type="button"
+                onClick={onResetConfig}
+                disabled={busy}
+              >
                 <Trash2 size={15} aria-hidden="true" />
                 <span>清除配置</span>
               </button>

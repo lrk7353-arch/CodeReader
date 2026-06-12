@@ -67,7 +67,9 @@ for (const result of results) {
   console.log(`${result.name.padEnd(8)} ${status.padEnd(8)} ${result.value}`);
 }
 
-const missingRust = results.some((result) => !result.ok && (result.name === "rustc" || result.name === "cargo"));
+const missingRust = results.some(
+  (result) => !result.ok && (result.name === "rustc" || result.name === "cargo")
+);
 if (missingRust) {
   console.log("\nTauri desktop commands require Rust. The Vite frontend can still run without it.");
 }

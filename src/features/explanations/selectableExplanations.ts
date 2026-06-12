@@ -1,4 +1,9 @@
-import type { CodeFile, CodeNode, Explanation, ExplanationTargetType } from "../../types/explanation";
+import type {
+  CodeFile,
+  CodeNode,
+  Explanation,
+  ExplanationTargetType
+} from "../../types/explanation";
 
 interface LineSelection {
   startLine: number;
@@ -13,7 +18,8 @@ export function buildSelectableExplanations(file: CodeFile): Explanation[] {
     return file.explanations;
   }
 
-  const nodes = file.codeNodes && file.codeNodes.length > 0 ? file.codeNodes : [fallbackFileNode(file)];
+  const nodes =
+    file.codeNodes && file.codeNodes.length > 0 ? file.codeNodes : [fallbackFileNode(file)];
   return nodes.map((node) => explanationFromNode(file, node));
 }
 
@@ -59,7 +65,8 @@ export function findExplanationForSelection(
   const candidates = explanations.filter(
     (explanation) => explanation.targetType !== "file" && explanation.startLine !== undefined
   );
-  const span = (candidate: Explanation) => (candidate.endLine ?? candidate.startLine ?? 0) - (candidate.startLine ?? 0);
+  const span = (candidate: Explanation) =>
+    (candidate.endLine ?? candidate.startLine ?? 0) - (candidate.startLine ?? 0);
 
   const exact = candidates.find((explanation) => {
     const start = explanation.startLine ?? 0;
@@ -93,7 +100,9 @@ export function findExplanationForSelection(
 function explanationFromNode(file: CodeFile, node: CodeNode): Explanation {
   const targetLabel = targetTypeLabel(node.nodeType);
   const lineLabel =
-    node.startLine === node.endLine ? `line ${node.startLine}` : `lines ${node.startLine}-${node.endLine}`;
+    node.startLine === node.endLine
+      ? `line ${node.startLine}`
+      : `lines ${node.startLine}-${node.endLine}`;
   const createdAt = new Date().toISOString();
 
   return {
@@ -153,10 +162,12 @@ function targetTypeLabel(targetType: ExplanationTargetType) {
 }
 
 function firstNonEmptyLine(code: string) {
-  return code
-    .split(/\r\n|\r|\n/)
-    .map((line) => line.trim())
-    .find(Boolean) ?? "";
+  return (
+    code
+      .split(/\r\n|\r|\n/)
+      .map((line) => line.trim())
+      .find(Boolean) ?? ""
+  );
 }
 
 function selectedCodeLines(code: string, startLine: number, endLine: number) {

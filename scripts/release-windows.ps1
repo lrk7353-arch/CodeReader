@@ -54,6 +54,8 @@ try {
     if (-not $SkipChecks) {
         Invoke-Checked "Environment check" { & node scripts/check-environment.mjs }
         Invoke-Checked "Frontend tests" { & node scripts/test.mjs --run }
+        Invoke-Checked "Frontend lint" { & npm run lint }
+        Invoke-Checked "Frontend format" { & npm run format:check }
         Invoke-Checked "TypeScript check" { & node node_modules/typescript/bin/tsc --noEmit }
         Invoke-Checked "Rust tests" {
             & powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/cargo-test.ps1

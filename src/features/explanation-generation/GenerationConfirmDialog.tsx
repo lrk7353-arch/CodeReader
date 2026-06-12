@@ -107,7 +107,8 @@ export function GenerationConfirmDialog({
             </div>
           </dl>
           <p>
-            仅发送“上下文预览”中的片段和结构信号。完整项目、API Key、SQLite 数据和用户阅读状态不会发送。
+            仅发送“上下文预览”中的片段和结构信号。完整项目、API Key、SQLite
+            数据和用户阅读状态不会发送。
           </p>
           {busy ? (
             <div className="generation-progress" role="status" aria-live="polite">
@@ -115,7 +116,8 @@ export function GenerationConfirmDialog({
               <div>
                 <strong>正在等待模型返回</strong>
                 <span>
-                  已用时 {elapsedSeconds} 秒，最长等待 {config.timeoutSeconds} 秒；返回后会自动校验结构，必要时修复一次。
+                  已用时 {elapsedSeconds} 秒，最长等待 {config.timeoutSeconds}{" "}
+                  秒；返回后会自动校验结构，必要时修复一次。
                 </span>
               </div>
             </div>

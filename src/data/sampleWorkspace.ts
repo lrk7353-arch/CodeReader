@@ -78,7 +78,7 @@ const appFile = sampleFile(
   appCode,
   [
     node("sample-app-file", "app.ts", "file", "app.ts", 1, 16),
-    node("sample-app-import", "app.ts", "import", 'import { loginUser }', 1, 1),
+    node("sample-app-import", "app.ts", "import", "import { loginUser }", 1, 1),
     node("sample-app-function", "app.ts", "function", "handleLoginForm", 8, 16),
     node("sample-app-block", "app.ts", "block", "if", 11, 13)
   ],

@@ -77,7 +77,9 @@ export function ExplanationPanel({
           <span className="target-type">{explanation.targetType}</span>
           <h2>{explanation.targetName ?? explanation.anchorText ?? explanation.filePath}</h2>
         </div>
-        <span className={`status-pill ${explanation.status}`}>{statusLabel(explanation.status)}</span>
+        <span className={`status-pill ${explanation.status}`}>
+          {statusLabel(explanation.status)}
+        </span>
       </div>
 
       {changeSummary ? (
@@ -137,7 +139,10 @@ export function ExplanationPanel({
 
       {generationError ? <p className="generation-error">{generationError}</p> : null}
 
-      <ReadingStateControls currentState={explanation.readingState} onChange={onReadingStateChange} />
+      <ReadingStateControls
+        currentState={explanation.readingState}
+        onChange={onReadingStateChange}
+      />
 
       <div className="action-row" aria-label="Explanation actions">
         <button type="button" onClick={() => onFeedback("helpful")} title="这条解释有帮助">
@@ -169,10 +174,10 @@ export function ExplanationPanel({
               : explanation.status === "deleted"
                 ? "代码已删除"
                 : explanation.status === "new_unexplained" || explanation.status === "transient"
-                ? "生成解释"
-                : explanation.status === "stale" || explanation.status === "invalid"
-                  ? "更新解释"
-                  : "重新解释"}
+                  ? "生成解释"
+                  : explanation.status === "stale" || explanation.status === "invalid"
+                    ? "更新解释"
+                    : "重新解释"}
           </span>
         </button>
       </div>
@@ -188,7 +193,9 @@ function StatusNotice({ explanation }: { explanation: Explanation }) {
     deleted: "原目标代码已经删除，这条解释作为历史记录保留。"
   };
   const notice = notices[explanation.status];
-  return notice ? <p className={`explanation-status-notice ${explanation.status}`}>{notice}</p> : null;
+  return notice ? (
+    <p className={`explanation-status-notice ${explanation.status}`}>{notice}</p>
+  ) : null;
 }
 
 function RelatedLines({ label, lines }: { label: string; lines?: number[] }) {

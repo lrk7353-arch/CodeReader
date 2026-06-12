@@ -59,6 +59,12 @@ jobs:
       - name: Frontend tests
         run: npm test
 
+      - name: Frontend lint
+        run: npm run lint
+
+      - name: Frontend format
+        run: npm run format:check
+
       - name: Frontend production build
         run: npm run build
 

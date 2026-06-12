@@ -50,7 +50,9 @@ export async function loadCodeFile(path: string, projectRoot?: string): Promise<
   const explanations = Array.isArray(file.explanations) ? file.explanations : [];
   const codeNodes = Array.isArray(file.codeNodes) ? file.codeNodes : [];
   if (import.meta.env.DEV && file.capability?.canExplain !== false && codeNodes.length === 0) {
-    console.warn(`[CodeReader] codeNodes empty for ${path} - parse may have failed or payload changed.`);
+    console.warn(
+      `[CodeReader] codeNodes empty for ${path} - parse may have failed or payload changed.`
+    );
   }
   return {
     ...file,
@@ -72,18 +74,15 @@ export async function hydrateCodeFilePersistence(
     databasePath: string;
     projectId: string;
     changeSummary?: ChangeSummary;
-  }>(
-    "hydrate_code_file_persistence",
-    {
-      request: {
-        file: {
-          ...file,
-          codeNodes: file.codeNodes ?? []
-        },
-        seedExplanations
-      }
+  }>("hydrate_code_file_persistence", {
+    request: {
+      file: {
+        ...file,
+        codeNodes: file.codeNodes ?? []
+      },
+      seedExplanations
     }
-  );
+  });
   return {
     ...file,
     databasePath: persisted.databasePath,
@@ -206,13 +205,16 @@ export async function persistReadingState(
   state: ReadingState
 ) {
   ensureDesktopRuntime();
-  return invoke<{ explanationId: string; state: ReadingState; updatedAt: string }>("save_reading_state", {
-    request: {
-      projectId,
-      explanationId,
-      state
+  return invoke<{ explanationId: string; state: ReadingState; updatedAt: string }>(
+    "save_reading_state",
+    {
+      request: {
+        projectId,
+        explanationId,
+        state
+      }
     }
-  });
+  );
 }
 
 export async function persistExplanationFeedback(
@@ -221,16 +223,18 @@ export async function persistExplanationFeedback(
   feedbackType: ExplanationFeedbackType
 ) {
   ensureDesktopRuntime();
-  return invoke<{ id: string; explanationId: string; feedbackType: ExplanationFeedbackType; createdAt: string }>(
-    "save_explanation_feedback",
-    {
-      request: {
-        projectId,
-        explanationId,
-        feedbackType
-      }
+  return invoke<{
+    id: string;
+    explanationId: string;
+    feedbackType: ExplanationFeedbackType;
+    createdAt: string;
+  }>("save_explanation_feedback", {
+    request: {
+      projectId,
+      explanationId,
+      feedbackType
     }
-  );
+  });
 }
 
 async function scanProject(path: string): Promise<ProjectScanResult> {
