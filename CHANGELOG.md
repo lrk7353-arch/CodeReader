@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Start the `0.11.0-beta.1` internal beta phase with explicit quality, architecture, and iteration standards.
+- Add transactional SQLite migrations driven by `PRAGMA user_version`, including legacy and future-schema tests.
+- Add an `LlmProvider` boundary with stable provider error categories.
+- Extract explanation-context and model-generation lifecycles from the main React container.
+- Add cross-platform Cargo script entry points and a GitHub Actions quality workflow.
+- Add application smoke and serialized-error tests.
 - Compact long file-structure lists around the active editor line, with collapse and show-all controls.
 - Include test files in first-mile reading paths when they are meaningful project entry points.
 - Clarify the sample login flow across entry, business, and data files.

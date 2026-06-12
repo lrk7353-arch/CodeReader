@@ -13,8 +13,11 @@ use crate::change_detection::{
 };
 use crate::utils::sha256_hex;
 
+#[path = "persistence/schema.rs"]
+mod schema;
+
 const DATABASE_FILE_NAME: &str = "codereader.sqlite";
-const SCHEMA_VERSION: &str = "mvp-0.1";
+const EXPLANATION_SCHEMA_VERSION: &str = "mvp-0.1";
 const PROMPT_VERSION: &str = "mock-structure-target-v0.1";
 
 #[derive(Deserialize)]
@@ -499,7 +502,7 @@ fn hydrate_code_file_at_path(
                 risk_summary,
                 learning_note,
                 explanation.status,
-                SCHEMA_VERSION,
+                EXPLANATION_SCHEMA_VERSION,
                 PROMPT_VERSION,
                 explanation.created_at,
                 explanation.updated_at
@@ -857,7 +860,7 @@ pub(crate) fn save_generated_explanation(
             depends_on_lines,
             affects_lines,
             input.display_mode,
-            SCHEMA_VERSION,
+            EXPLANATION_SCHEMA_VERSION,
             input.prompt_version,
             input.model_info,
             input.context_id,
@@ -1416,231 +1419,8 @@ pub(crate) fn open_database(path: &Path) -> Result<Connection, String> {
             .map_err(|error| format!("Failed to create database directory: {error}"))?;
     }
     let conn = Connection::open(path).map_err(database_error)?;
-    initialize_schema(&conn)?;
+    schema::migrate(&conn)?;
     Ok(conn)
-}
-
-fn initialize_schema(conn: &Connection) -> Result<(), String> {
-    conn.execute_batch(
-        "
-        PRAGMA foreign_keys = ON;
-
-        CREATE TABLE IF NOT EXISTS projects (
-          id TEXT PRIMARY KEY,
-          root_path TEXT NOT NULL,
-          created_at TEXT NOT NULL,
-          updated_at TEXT NOT NULL
-        );
-
-        CREATE TABLE IF NOT EXISTS files (
-          id TEXT PRIMARY KEY,
-          project_id TEXT NOT NULL,
-          path TEXT NOT NULL,
-          language TEXT,
-          content_hash TEXT NOT NULL,
-          last_analyzed_hash TEXT,
-          status TEXT NOT NULL,
-          updated_at TEXT NOT NULL
-        );
-
-        CREATE TABLE IF NOT EXISTS code_snapshots (
-          id TEXT PRIMARY KEY,
-          project_id TEXT NOT NULL,
-          file_id TEXT NOT NULL,
-          content_hash TEXT NOT NULL,
-          line_count INTEGER NOT NULL,
-          source_content TEXT,
-          line_fingerprints TEXT,
-          snapshot_reason TEXT NOT NULL,
-          created_at TEXT NOT NULL
-        );
-
-        CREATE TABLE IF NOT EXISTS code_nodes (
-          id TEXT PRIMARY KEY,
-          project_id TEXT NOT NULL,
-          file_id TEXT NOT NULL,
-          node_type TEXT NOT NULL,
-          symbol_name TEXT,
-          start_line INTEGER NOT NULL,
-          end_line INTEGER NOT NULL,
-          ast_hash TEXT,
-          code_hash TEXT,
-          parent_node_id TEXT
-        );
-
-        CREATE TABLE IF NOT EXISTS code_snapshot_nodes (
-          id TEXT PRIMARY KEY,
-          project_id TEXT NOT NULL,
-          file_id TEXT NOT NULL,
-          snapshot_id TEXT NOT NULL,
-          code_node_id TEXT NOT NULL,
-          node_type TEXT NOT NULL,
-          symbol_name TEXT,
-          start_line INTEGER NOT NULL,
-          end_line INTEGER NOT NULL,
-          code_hash TEXT NOT NULL,
-          anchor_text TEXT
-        );
-
-        CREATE TABLE IF NOT EXISTS explanation_nodes (
-          id TEXT PRIMARY KEY,
-          project_id TEXT NOT NULL,
-          file_id TEXT NOT NULL,
-          snapshot_id TEXT NOT NULL,
-          code_node_id TEXT,
-          explanation_type TEXT NOT NULL,
-          start_line INTEGER,
-          end_line INTEGER,
-          code_level_meaning TEXT,
-          local_composition_meaning TEXT,
-          project_role_meaning TEXT,
-          surface_meaning TEXT,
-          actual_meaning TEXT,
-          relational_meaning TEXT,
-          global_role TEXT,
-          prior_knowledge TEXT,
-          risk_summary TEXT,
-          learning_note TEXT,
-          review_suggestion TEXT,
-          trust_label TEXT,
-          trust_reason TEXT,
-          raw_confidence REAL,
-          depends_on_lines TEXT,
-          affects_lines TEXT,
-          display_mode TEXT,
-          status TEXT NOT NULL,
-          schema_version TEXT NOT NULL,
-          prompt_version TEXT NOT NULL,
-          model_info TEXT,
-          context_id TEXT,
-          context_sources TEXT,
-          created_at TEXT NOT NULL,
-          updated_at TEXT NOT NULL
-        );
-
-        CREATE TABLE IF NOT EXISTS explanation_targets (
-          id TEXT PRIMARY KEY,
-          project_id TEXT NOT NULL,
-          explanation_id TEXT NOT NULL,
-          target_type TEXT NOT NULL,
-          file_id TEXT,
-          file_path TEXT,
-          file_hash TEXT,
-          snapshot_id TEXT,
-          code_node_id TEXT,
-          symbol_id TEXT,
-          start_line INTEGER,
-          end_line INTEGER,
-          code_hash TEXT,
-          ast_hash TEXT,
-          anchor_text TEXT,
-          status TEXT NOT NULL,
-          created_at TEXT NOT NULL,
-          updated_at TEXT NOT NULL
-        );
-
-        CREATE TABLE IF NOT EXISTS explanation_feedback (
-          id TEXT PRIMARY KEY,
-          project_id TEXT NOT NULL,
-          explanation_id TEXT NOT NULL,
-          feedback_type TEXT NOT NULL,
-          user_note TEXT,
-          created_at TEXT NOT NULL
-        );
-
-        CREATE TABLE IF NOT EXISTS user_reading_states (
-          id TEXT PRIMARY KEY,
-          project_id TEXT NOT NULL,
-          explanation_id TEXT NOT NULL,
-          state TEXT NOT NULL,
-          note TEXT,
-          updated_at TEXT NOT NULL,
-          UNIQUE(project_id, explanation_id)
-        );
-
-        CREATE TABLE IF NOT EXISTS project_guides (
-          project_id TEXT PRIMARY KEY,
-          root_path TEXT NOT NULL,
-          source_fingerprint TEXT NOT NULL,
-          generated_at TEXT NOT NULL,
-          updated_at TEXT NOT NULL
-        );
-
-        CREATE TABLE IF NOT EXISTS project_map_items (
-          id TEXT PRIMARY KEY,
-          project_id TEXT NOT NULL,
-          file_id TEXT NOT NULL,
-          relative_path TEXT NOT NULL,
-          role TEXT NOT NULL,
-          reason TEXT NOT NULL,
-          sort_order INTEGER NOT NULL
-        );
-
-        CREATE TABLE IF NOT EXISTS reading_paths (
-          id TEXT PRIMARY KEY,
-          project_id TEXT NOT NULL,
-          position INTEGER NOT NULL,
-          file_id TEXT NOT NULL,
-          relative_path TEXT NOT NULL,
-          role TEXT NOT NULL,
-          reason TEXT NOT NULL
-        );
-
-        CREATE TABLE IF NOT EXISTS change_records (
-          id TEXT PRIMARY KEY,
-          project_id TEXT NOT NULL,
-          file_id TEXT NOT NULL,
-          before_snapshot_id TEXT,
-          after_snapshot_id TEXT NOT NULL,
-          added_lines INTEGER,
-          modified_lines INTEGER,
-          deleted_lines INTEGER,
-          added_nodes INTEGER,
-          modified_nodes INTEGER,
-          deleted_nodes INTEGER,
-          before_hash TEXT,
-          after_hash TEXT,
-          affected_explanations TEXT,
-          summary TEXT,
-          created_at TEXT NOT NULL
-        );
-
-        CREATE TABLE IF NOT EXISTS model_provider_settings (
-          id TEXT PRIMARY KEY,
-          endpoint TEXT NOT NULL,
-          model TEXT NOT NULL,
-          timeout_seconds INTEGER NOT NULL,
-          updated_at TEXT NOT NULL
-        );
-
-        CREATE INDEX IF NOT EXISTS idx_explanation_nodes_file
-          ON explanation_nodes(project_id, file_id, snapshot_id);
-        CREATE INDEX IF NOT EXISTS idx_explanation_targets_explanation
-          ON explanation_targets(project_id, explanation_id);
-        CREATE INDEX IF NOT EXISTS idx_reading_states_explanation
-          ON user_reading_states(project_id, explanation_id);
-        CREATE INDEX IF NOT EXISTS idx_project_map_project
-          ON project_map_items(project_id, sort_order);
-        CREATE INDEX IF NOT EXISTS idx_reading_paths_project
-          ON reading_paths(project_id, position);
-        CREATE INDEX IF NOT EXISTS idx_snapshot_nodes_snapshot
-          ON code_snapshot_nodes(project_id, file_id, snapshot_id);
-        CREATE INDEX IF NOT EXISTS idx_change_records_file
-          ON change_records(project_id, file_id, after_snapshot_id);
-        ",
-    )
-    .map_err(database_error)?;
-
-    ensure_column(conn, "explanation_nodes", "depends_on_lines", "TEXT")?;
-    ensure_column(conn, "explanation_nodes", "affects_lines", "TEXT")?;
-    ensure_column(conn, "explanation_nodes", "context_id", "TEXT")?;
-    ensure_column(conn, "explanation_nodes", "context_sources", "TEXT")?;
-    ensure_column(conn, "code_snapshots", "source_content", "TEXT")?;
-    ensure_column(conn, "code_snapshots", "line_fingerprints", "TEXT")?;
-    ensure_column(conn, "change_records", "before_hash", "TEXT")?;
-    ensure_column(conn, "change_records", "after_hash", "TEXT")?;
-    ensure_column(conn, "change_records", "affected_explanations", "TEXT")?;
-    Ok(())
 }
 
 #[cfg(not(test))]
@@ -1650,31 +1430,6 @@ pub(crate) fn database_path(app: &AppHandle) -> Result<PathBuf, String> {
         .app_data_dir()
         .map_err(|error| format!("Failed to resolve CodeReader data directory: {error}"))?;
     Ok(app_data_dir.join(DATABASE_FILE_NAME))
-}
-
-fn ensure_column(
-    conn: &Connection,
-    table: &str,
-    column: &str,
-    definition: &str,
-) -> Result<(), String> {
-    let mut statement = conn
-        .prepare(&format!("PRAGMA table_info({table})"))
-        .map_err(database_error)?;
-    let columns = statement
-        .query_map([], |row| row.get::<_, String>(1))
-        .map_err(database_error)?;
-    for existing in columns {
-        if existing.map_err(database_error)? == column {
-            return Ok(());
-        }
-    }
-    conn.execute(
-        &format!("ALTER TABLE {table} ADD COLUMN {column} {definition}"),
-        [],
-    )
-    .map_err(database_error)?;
-    Ok(())
 }
 
 fn stable_project_id(file: &PersistenceCodeFile) -> String {

@@ -2,6 +2,7 @@ mod change_detection;
 mod code_service;
 mod context_builder;
 mod explanation_service;
+mod llm_provider;
 mod persistence_service;
 mod project_guidance;
 mod utils;

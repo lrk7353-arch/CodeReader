@@ -1,7 +1,7 @@
-import { spawn } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import { writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const args = process.argv.slice(2);
@@ -22,6 +22,32 @@ function toWslPath(value) {
 
 function cmdQuote(value) {
   return `"${String(value).replaceAll('"', '""')}"`;
+}
+
+function windowsRustPath() {
+  try {
+    const rustc = execFileSync(
+      "rustup",
+      ["which", "rustc", "--toolchain", "stable-x86_64-pc-windows-gnu"],
+      { encoding: "utf8" }
+    ).trim();
+    const rustBin = dirname(rustc);
+    const rustToolchain = resolve(rustBin, "..");
+    return [
+      "C:\\ProgramData\\mingw64\\mingw64\\bin",
+      rustBin,
+      join(
+        rustToolchain,
+        "lib",
+        "rustlib",
+        "x86_64-pc-windows-gnu",
+        "bin",
+        "self-contained"
+      )
+    ].join(";");
+  } catch {
+    return "C:\\ProgramData\\mingw64\\mingw64\\bin";
+  }
 }
 
 function run(command, commandArgs, options = {}) {
@@ -45,7 +71,7 @@ if (isWindowsWslUncPath(root)) {
       "if errorlevel 1 exit /b %errorlevel%",
       wslRoot ? `set "CODEREADER_WSL_ROOT=${wslRoot}"` : "",
       "set \"CODEREADER_WINDOWS_ROOT=%CD%\"",
-      "set \"PATH=C:\\ProgramData\\mingw64\\mingw64\\bin;%USERPROFILE%\\.rustup\\toolchains\\stable-x86_64-pc-windows-gnu\\bin;%USERPROFILE%\\.rustup\\toolchains\\stable-x86_64-pc-windows-gnu\\lib\\rustlib\\x86_64-pc-windows-gnu\\bin\\self-contained;%PATH%\"",
+      `set "PATH=${windowsRustPath()};%PATH%"`,
       "if not defined CODEREADER_CARGO_TARGET_DIR if exist D:\\CodeReaderCache set \"CODEREADER_CARGO_TARGET_DIR=D:\\CodeReaderCache\\cargo-target\"",
       "if not defined CODEREADER_CARGO_TARGET_DIR set \"CODEREADER_CARGO_TARGET_DIR=%SystemDrive%\\cr-target\"",
       "set \"CARGO_TARGET_DIR=%CODEREADER_CARGO_TARGET_DIR%\"",

@@ -6,11 +6,7 @@ param(
 $ErrorActionPreference = "Stop"
 
 $repoRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot ".."))
-$rustToolchain = Join-Path $env:USERPROFILE ".rustup\toolchains\stable-x86_64-pc-windows-gnu"
-$rustBin = Join-Path $rustToolchain "bin"
-$rustSelfContained = Join-Path $rustToolchain "lib\rustlib\x86_64-pc-windows-gnu\bin\self-contained"
-$rustTarget = "x86_64-pc-windows-gnu"
-$mingw = "C:\ProgramData\mingw64\mingw64\bin"
+. (Join-Path $PSScriptRoot "configure-windows-rust.ps1")
 $cargoTarget = if ($env:CODEREADER_CARGO_TARGET_DIR) {
     $env:CODEREADER_CARGO_TARGET_DIR
 } elseif (Test-Path -LiteralPath "D:\CodeReaderCache") {
@@ -32,7 +28,6 @@ New-Item -ItemType Directory -Force -Path $cargoTarget | Out-Null
 New-Item -ItemType Directory -Force -Path $releaseTemp | Out-Null
 New-Item -ItemType Directory -Force -Path $releaseLocalAppData | Out-Null
 
-$env:Path = "$mingw;$rustBin;$rustSelfContained;$env:Path"
 $env:CARGO_TARGET_DIR = $cargoTarget
 $env:CODEREADER_CARGO_TARGET_DIR = $cargoTarget
 $env:CODEREADER_RELEASE_CACHE_DIR = $releaseCacheRoot

@@ -1,7 +1,7 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "CodeReader",
-  "version": "0.10.0",
+  "version": "0.11.0-beta.1",
   "identifier": "com.codereader.app",
   "build": {
     "beforeDevCommand": "npm run dev",
@@ -61,7 +61,7 @@
         "uninstallerIcon": "icons/icon.ico"
       },
       "wix": {
-        "version": "0.10.0",
+        "version": "0.11.0",
         "upgradeCode": "9cd436e5-1c0f-592b-bc46-2b507e245b2d",
         "language": "zh-CN"
       }

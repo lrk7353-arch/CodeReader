@@ -1,6 +1,6 @@
 [package]
 name = "codereader"
-version = "0.10.0"
+version = "0.11.0-beta.1"
 description = "Independent desktop IDE for persistent, structured code reading"
 authors = ["CodeReader contributors"]
 edition = "2021"

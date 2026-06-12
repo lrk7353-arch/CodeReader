@@ -1,10 +1,9 @@
 #![cfg_attr(test, allow(dead_code))]
 
 use keyring::{Entry, Error as KeyringError};
-use reqwest::{Client, StatusCode, Url};
+use reqwest::Url;
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
-use std::time::Duration;
+use serde_json::json;
 #[cfg(not(test))]
 use tauri::AppHandle;
 
@@ -12,6 +11,9 @@ use tauri::AppHandle;
 use crate::context_builder::ContextNodeInput;
 use crate::context_builder::{
     build_context_bundle, BuildContextRequest, ContextFileInput, ContextTargetInput,
+};
+use crate::llm_provider::{
+    CompletionRequest, LlmProvider, OpenAiCompatibleProvider, ProviderMessage,
 };
 #[cfg(not(test))]
 use crate::persistence_service::{self, GeneratedExplanationInput};
@@ -23,7 +25,6 @@ const DEFAULT_TIMEOUT_SECONDS: u64 = 60;
 const KEYRING_SERVICE: &str = "com.codereader.app";
 const KEYRING_USER: &str = "default-llm-api-key";
 const PROMPT_VERSION: &str = "code-explanation-v0.1";
-const MAX_PROVIDER_ERROR_CHARS: usize = 320;
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -135,32 +136,11 @@ struct StructuredRisk {
     description: String,
 }
 
-#[derive(Serialize)]
-struct ChatCompletionRequest<'a> {
-    model: &'a str,
-    messages: Vec<ChatMessage>,
-    temperature: f32,
-}
-
-#[derive(Clone, Serialize)]
-struct ChatMessage {
-    role: &'static str,
-    content: String,
-}
-
-#[derive(Deserialize)]
-struct ChatCompletionResponse {
-    choices: Vec<ChatChoice>,
-}
-
-#[derive(Deserialize)]
-struct ChatChoice {
-    message: ChatResponseMessage,
-}
-
-#[derive(Deserialize)]
-struct ChatResponseMessage {
-    content: Option<String>,
+struct ExplanationValidationContext<'a> {
+    target_start: usize,
+    target_end: usize,
+    file_line_count: usize,
+    expected_display_mode: &'a str,
 }
 
 #[cfg(not(test))]
@@ -428,48 +408,67 @@ async fn request_structured_explanation(
     file_line_count: usize,
     expected_display_mode: &str,
 ) -> Result<(StructuredExplanation, usize), String> {
-    let client = Client::builder()
-        .timeout(Duration::from_secs(config.timeout_seconds))
-        .build()
-        .map_err(|error| format!("无法创建模型请求客户端：{error}"))?;
-    let mut messages = vec![
-        ChatMessage {
-            role: "system",
-            content: system_prompt().to_string(),
-        },
-        ChatMessage {
-            role: "user",
-            content: prompt,
-        },
-    ];
-
-    let first = send_completion(&client, config, api_key, messages.clone()).await?;
-    match parse_and_validate_structured_explanation(
-        &first,
+    let provider =
+        OpenAiCompatibleProvider::new(config.timeout_seconds).map_err(|error| error.to_string())?;
+    let validation = ExplanationValidationContext {
         target_start,
         target_end,
         file_line_count,
         expected_display_mode,
+    };
+    request_structured_explanation_with_provider(&provider, config, api_key, prompt, &validation)
+        .await
+}
+
+async fn request_structured_explanation_with_provider<P: LlmProvider>(
+    provider: &P,
+    config: &StoredModelConfig,
+    api_key: Option<&str>,
+    prompt: String,
+    validation: &ExplanationValidationContext<'_>,
+) -> Result<(StructuredExplanation, usize), String> {
+    let mut messages = vec![
+        ProviderMessage::system(system_prompt()),
+        ProviderMessage::user(prompt),
+    ];
+
+    let first = provider
+        .complete(CompletionRequest {
+            endpoint: &config.endpoint,
+            model: &config.model,
+            api_key,
+            messages: messages.clone(),
+        })
+        .await
+        .map_err(|error| error.to_string())?;
+    match parse_and_validate_structured_explanation(
+        &first,
+        validation.target_start,
+        validation.target_end,
+        validation.file_line_count,
+        validation.expected_display_mode,
     ) {
         Ok(structured) => Ok((structured, 1)),
         Err(first_error) => {
-            messages.push(ChatMessage {
-                role: "assistant",
-                content: first,
-            });
-            messages.push(ChatMessage {
-                role: "user",
-                content: format!(
+            messages.push(ProviderMessage::assistant(first));
+            messages.push(ProviderMessage::user(format!(
                     "上一次输出无法通过结构校验：{first_error}。只修复 JSON 格式和字段，不要添加代码围栏或额外说明。"
-                ),
-            });
-            let repaired = send_completion(&client, config, api_key, messages).await?;
+                )));
+            let repaired = provider
+                .complete(CompletionRequest {
+                    endpoint: &config.endpoint,
+                    model: &config.model,
+                    api_key,
+                    messages,
+                })
+                .await
+                .map_err(|error| error.to_string())?;
             parse_and_validate_structured_explanation(
                 &repaired,
-                target_start,
-                target_end,
-                file_line_count,
-                expected_display_mode,
+                validation.target_start,
+                validation.target_end,
+                validation.file_line_count,
+                validation.expected_display_mode,
             )
             .map(|structured| (structured, 2))
             .map_err(|error| {
@@ -477,88 +476,6 @@ async fn request_structured_explanation(
             })
         }
     }
-}
-
-async fn send_completion(
-    client: &Client,
-    config: &StoredModelConfig,
-    api_key: Option<&str>,
-    messages: Vec<ChatMessage>,
-) -> Result<String, String> {
-    let request = ChatCompletionRequest {
-        model: &config.model,
-        messages,
-        temperature: 0.1,
-    };
-    let mut last_error = String::new();
-
-    for attempt in 0..2 {
-        let mut builder = client.post(&config.endpoint).json(&request);
-        if let Some(api_key) = api_key {
-            builder = builder.bearer_auth(api_key);
-        }
-        match builder.send().await {
-            Ok(response) if response.status().is_success() => {
-                let payload = response
-                    .json::<ChatCompletionResponse>()
-                    .await
-                    .map_err(|error| {
-                        format!("模型响应不是有效的 Chat Completions JSON：{error}")
-                    })?;
-                return payload
-                    .choices
-                    .into_iter()
-                    .find_map(|choice| choice.message.content)
-                    .filter(|content| !content.trim().is_empty())
-                    .ok_or_else(|| "模型响应中没有可用的 message.content。".to_string());
-            }
-            Ok(response) => {
-                let status = response.status();
-                let detail = provider_error_detail(response).await;
-                last_error = format!("模型请求失败（HTTP {status}）：{detail}");
-                if attempt == 0 && retryable_status(status) {
-                    continue;
-                }
-                return Err(last_error);
-            }
-            Err(error) => {
-                last_error = if error.is_timeout() {
-                    "模型请求超时，现有解释未被覆盖。".to_string()
-                } else if error.is_connect() {
-                    "无法连接模型端点，请检查 URL、网络或本地模型服务是否已启动。".to_string()
-                } else {
-                    format!("无法连接模型端点：{error}")
-                };
-                if attempt == 0 {
-                    continue;
-                }
-            }
-        }
-    }
-    Err(last_error)
-}
-
-async fn provider_error_detail(response: reqwest::Response) -> String {
-    let body = response.text().await.unwrap_or_default();
-    let message = serde_json::from_str::<Value>(&body)
-        .ok()
-        .and_then(|value| {
-            value
-                .pointer("/error/message")
-                .and_then(Value::as_str)
-                .map(str::to_string)
-        })
-        .unwrap_or_else(|| body.trim().to_string());
-    let message = if message.is_empty() {
-        "服务未返回错误详情。".to_string()
-    } else {
-        message
-    };
-    message.chars().take(MAX_PROVIDER_ERROR_CHARS).collect()
-}
-
-fn retryable_status(status: StatusCode) -> bool {
-    status == StatusCode::TOO_MANY_REQUESTS || status.is_server_error()
 }
 
 fn parse_structured_explanation(content: &str) -> Result<StructuredExplanation, String> {

@@ -1,9 +1,6 @@
 $ErrorActionPreference = "Stop"
 
-$mingw = "C:\ProgramData\mingw64\mingw64\bin"
-$rustToolchain = Join-Path $env:USERPROFILE ".rustup\toolchains\stable-x86_64-pc-windows-gnu"
-$rustBin = Join-Path $rustToolchain "bin"
-$rustSelfContained = Join-Path $rustToolchain "lib\rustlib\x86_64-pc-windows-gnu\bin\self-contained"
+. (Join-Path $PSScriptRoot "configure-windows-rust.ps1")
 $cargoTarget = if ($env:CODEREADER_CARGO_TARGET_DIR) {
     $env:CODEREADER_CARGO_TARGET_DIR
 } elseif (Test-Path -LiteralPath "D:\CodeReaderCache") {
@@ -14,7 +11,6 @@ $cargoTarget = if ($env:CODEREADER_CARGO_TARGET_DIR) {
 
 New-Item -ItemType Directory -Force -Path $cargoTarget | Out-Null
 
-$env:Path = "$mingw;$rustBin;$rustSelfContained;$env:Path"
 $env:CARGO_TARGET_DIR = $cargoTarget
 
 cargo test --manifest-path src-tauri/Cargo.toml --lib

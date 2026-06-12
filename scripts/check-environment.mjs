@@ -1,15 +1,23 @@
-import { execSync } from "node:child_process";
-import { delimiter, join } from "node:path";
+import { execFileSync, execSync } from "node:child_process";
+import { delimiter, dirname, join, resolve } from "node:path";
 
-const windowsRustToolchain =
-  process.platform === "win32" && process.env.USERPROFILE
-    ? join(
-        process.env.USERPROFILE,
-        ".rustup",
-        "toolchains",
-        "stable-x86_64-pc-windows-gnu"
-      )
-    : null;
+function resolveWindowsRustToolchain() {
+  if (process.platform !== "win32") {
+    return null;
+  }
+  try {
+    const rustc = execFileSync(
+      "rustup",
+      ["which", "rustc", "--toolchain", "stable-x86_64-pc-windows-gnu"],
+      { encoding: "utf8" }
+    ).trim();
+    return resolve(dirname(rustc), "..");
+  } catch {
+    return null;
+  }
+}
+
+const windowsRustToolchain = resolveWindowsRustToolchain();
 const commandEnv = windowsRustToolchain
   ? {
       ...process.env,

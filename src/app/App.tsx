@@ -8,20 +8,17 @@ import {
 } from "../data/sampleWorkspace";
 import type {
   CodeFile,
-  ContextBundle,
   Explanation,
   ExplanationFeedbackType,
-  ModelConfig,
+  GenerateExplanationResult,
   ProjectGuide,
   ProjectScanResult,
   ProjectTreeNode,
-  ReadingState,
-  SaveModelConfigInput
+  ReadingState
 } from "../types/explanation";
 import { FileExplorer } from "../features/file-explorer/FileExplorer";
 import { MonacoCodeViewer, type CodeSelection } from "../features/code-viewer/MonacoCodeViewer";
 import { ExplanationPanel } from "../features/explanation-panel/ExplanationPanel";
-import type { ContextPreviewStatus } from "../features/context-preview/ContextPreview";
 import { GenerationConfirmDialog } from "../features/explanation-generation/GenerationConfirmDialog";
 import { ModelSettingsDialog } from "../features/model-settings/ModelSettingsDialog";
 import { deriveGuideProgress } from "../features/project-guide/projectGuide";
@@ -31,10 +28,7 @@ import {
   findExplanationForSelection
 } from "../features/explanations/selectableExplanations";
 import {
-  buildExplanationContext,
   generateProjectGuide,
-  generateExplanation,
-  getModelConfig,
   isDesktopRuntime,
   hydrateCodeFilePersistence,
   initializePersistence,
@@ -43,13 +37,13 @@ import {
   pickAndLoadCodeFile,
   pickAndScanProject,
   persistExplanationFeedback,
-  persistReadingState,
-  resetModelConfig,
-  saveModelConfig
+  persistReadingState
 } from "../services/desktopWorkspace";
+import { errorMessage } from "./appError";
+import { useExplanationContext } from "./hooks/useExplanationContext";
+import { useModelWorkflow } from "./hooks/useModelWorkflow";
 
 type PersistenceStatus = "preview" | "initializing" | "ready" | "error";
-type GenerationStatus = "idle" | "generating" | "error";
 
 export function App() {
   const [files, setFiles] = useState<CodeFile[]>(sampleFiles);
@@ -72,18 +66,6 @@ export function App() {
   );
   const [isWorkspaceBusy, setIsWorkspaceBusy] = useState(false);
   const [loadingFileId, setLoadingFileId] = useState<string | null>(null);
-  const [contextBundle, setContextBundle] = useState<ContextBundle>();
-  const [contextError, setContextError] = useState("");
-  const [contextStatus, setContextStatus] = useState<ContextPreviewStatus>(
-    isDesktopRuntime() ? "loading" : "unavailable"
-  );
-  const [modelConfig, setModelConfig] = useState<ModelConfig>();
-  const [modelSettingsOpen, setModelSettingsOpen] = useState(false);
-  const [modelSettingsBusy, setModelSettingsBusy] = useState(false);
-  const [modelSettingsError, setModelSettingsError] = useState("");
-  const [generationConfirmOpen, setGenerationConfirmOpen] = useState(false);
-  const [generationStatus, setGenerationStatus] = useState<GenerationStatus>("idle");
-  const [generationError, setGenerationError] = useState("");
   const refreshInFlightRef = useRef(false);
 
   const selectedFile = useMemo(
@@ -124,6 +106,36 @@ export function App() {
       hydratedExplanations.find((item) => item.id === selectedExplanationId) ?? hydratedExplanations[0]
     );
   }, [hydratedExplanations, selectedExplanationId]);
+
+  const explanationContext = useExplanationContext(selectedFile, selectedExplanation);
+  const handleExplanationGenerated = useCallback(
+    (result: GenerateExplanationResult) => {
+      setFiles((current) =>
+        current.map((file) =>
+          file.id === selectedFile.id
+            ? {
+              ...file,
+              explanations: upsertExplanation(file.explanations, result.explanation)
+            }
+            : file
+        )
+      );
+      setSelectedExplanationId(result.explanation.id);
+      setReadingStates((current) => ({
+        ...current,
+        [result.explanation.id]: result.explanation.readingState
+      }));
+    },
+    [selectedFile.id]
+  );
+  const modelWorkflow = useModelWorkflow({
+    file: selectedFile,
+    explanation: selectedExplanation,
+    contextBundle: explanationContext.bundle,
+    contextStatus: explanationContext.status,
+    onGenerated: handleExplanationGenerated,
+    onWorkspaceStatus: setWorkspaceStatus
+  });
 
   const fileStatus = useMemo(() => {
     if (selectedFile.capability?.canPreview === false) {
@@ -209,72 +221,6 @@ export function App() {
       cancelled = true;
     };
   }, []);
-
-  useEffect(() => {
-    if (!isDesktopRuntime()) {
-      return;
-    }
-    let cancelled = false;
-    void getModelConfig()
-      .then((config) => {
-        if (!cancelled) {
-          setModelConfig(config);
-        }
-      })
-      .catch((error) => {
-        if (!cancelled) {
-          setWorkspaceStatus(`模型配置读取失败：${errorMessage(error)}`);
-        }
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  useEffect(() => {
-    setGenerationConfirmOpen(false);
-    setGenerationStatus("idle");
-    setGenerationError("");
-  }, [selectedExplanationId, selectedFileId]);
-
-  useEffect(() => {
-    if (
-      !isDesktopRuntime() ||
-      !selectedExplanation ||
-      !selectedFile.code ||
-      selectedFile.capability?.canExplain === false
-    ) {
-      setContextBundle(undefined);
-      setContextError("");
-      setContextStatus("unavailable");
-      return;
-    }
-
-    let cancelled = false;
-    setContextBundle(undefined);
-    setContextError("");
-    setContextStatus("loading");
-    void buildExplanationContext(selectedFile, selectedExplanation)
-      .then((bundle) => {
-        if (cancelled) {
-          return;
-        }
-        setContextBundle(bundle);
-        setContextStatus("ready");
-      })
-      .catch((error) => {
-        if (cancelled) {
-          return;
-        }
-        setContextBundle(undefined);
-        setContextError(errorMessage(error));
-        setContextStatus("error");
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [selectedExplanation, selectedFile]);
 
   const selectExplanation = useCallback(
     (explanationId: string) => {
@@ -548,106 +494,6 @@ export function App() {
     }
   }
 
-  function requestExplanationGeneration() {
-    if (!isDesktopRuntime()) {
-      setWorkspaceStatus("真实解释生成需要在 Tauri 桌面端运行。");
-      return;
-    }
-    if (!selectedExplanation || !contextBundle || contextStatus !== "ready") {
-      setGenerationStatus("error");
-      setGenerationError("上下文尚未准备完成，请稍后重试。");
-      return;
-    }
-    if (!modelConfig?.configured) {
-      setModelSettingsError("");
-      setModelSettingsOpen(true);
-      setWorkspaceStatus("请先配置模型端点、模型名称和 API Key。");
-      return;
-    }
-    setGenerationError("");
-    setGenerationStatus("idle");
-    setGenerationConfirmOpen(true);
-  }
-
-  async function confirmExplanationGeneration() {
-    if (!selectedExplanation || !contextBundle || !modelConfig) {
-      return;
-    }
-    setGenerationStatus("generating");
-    setGenerationError("");
-    try {
-      const result = await generateExplanation(selectedFile, selectedExplanation);
-      setFiles((current) =>
-        current.map((file) =>
-          file.id === selectedFile.id
-            ? {
-              ...file,
-              explanations: upsertExplanation(file.explanations, result.explanation)
-            }
-            : file
-        )
-      );
-      setSelectedExplanationId(result.explanation.id);
-      setReadingStates((current) => ({
-        ...current,
-        [result.explanation.id]: result.explanation.readingState
-      }));
-      setGenerationConfirmOpen(false);
-      setGenerationStatus("idle");
-      setWorkspaceStatus(
-        `解释已生成并保存：${result.model}${result.attempts > 1 ? "（结构修复后通过）" : ""}`
-      );
-    } catch (error) {
-      const message = errorMessage(error);
-      setGenerationStatus("error");
-      setGenerationError(message);
-      setWorkspaceStatus(message);
-    }
-  }
-
-  async function persistModelConfig(input: SaveModelConfigInput) {
-    setModelSettingsBusy(true);
-    setModelSettingsError("");
-    try {
-      const config = await saveModelConfig(input);
-      setModelConfig(config);
-      if (config.configured) {
-        setModelSettingsOpen(false);
-        setWorkspaceStatus(`模型配置已保存：${config.model}`);
-      } else {
-        setModelSettingsError("端点和模型已保存；远程端点还需要填写 API Key。");
-      }
-    } catch (error) {
-      setModelSettingsError(errorMessage(error));
-    } finally {
-      setModelSettingsBusy(false);
-    }
-  }
-
-  async function clearModelConfig() {
-    setModelSettingsBusy(true);
-    setModelSettingsError("");
-    try {
-      const config = await resetModelConfig();
-      setModelConfig(config);
-      setModelSettingsOpen(false);
-      setWorkspaceStatus("模型配置和 API Key 已清除。");
-    } catch (error) {
-      setModelSettingsError(errorMessage(error));
-    } finally {
-      setModelSettingsBusy(false);
-    }
-  }
-
-  function openModelSettings() {
-    if (!isDesktopRuntime()) {
-      setWorkspaceStatus("模型配置需要在 Tauri 桌面端运行。");
-      return;
-    }
-    setModelSettingsError("");
-    setModelSettingsOpen(true);
-  }
-
   async function openSampleProject() {
     setIsWorkspaceBusy(true);
     setWorkspaceStatus("正在恢复无 API Key 示例项目");
@@ -812,14 +658,14 @@ export function App() {
             <FolderOpen size={16} aria-hidden="true" />
             <span>打开项目</span>
           </button>
-          <button type="button" onClick={openModelSettings} title="配置 LLM">
+          <button type="button" onClick={modelWorkflow.settings.openDialog} title="配置 LLM">
             <Settings2 size={16} aria-hidden="true" />
             <span>模型</span>
           </button>
         </div>
         <div className="topbar-status">
           <span>{workspaceStatus}</span>
-          <span>MVP · First Mile</span>
+          <span>内测 · Beta 1</span>
         </div>
       </header>
 
@@ -852,14 +698,14 @@ export function App() {
         <ExplanationPanel
           file={selectedFile}
           changeSummary={selectedFile.changeSummary}
-          contextBundle={contextBundle}
-          contextError={contextError}
-          contextStatus={contextStatus}
+          contextBundle={explanationContext.bundle}
+          contextError={explanationContext.error}
+          contextStatus={explanationContext.status}
           explanation={selectedExplanation}
-          generationError={generationError}
-          generationStatus={generationStatus}
+          generationError={modelWorkflow.generation.error}
+          generationStatus={modelWorkflow.generation.status}
           onFeedback={saveFeedback}
-          onGenerate={requestExplanationGeneration}
+          onGenerate={modelWorkflow.generation.request}
           onSelectAffected={() => {
             const affected =
               selectedFile.changeSummary?.affectedExplanationIds
@@ -891,45 +737,34 @@ export function App() {
         >
           {persistenceLabel(persistenceStatus)}
         </span>
-        <span className={modelConfig?.configured ? "model-ready" : "model-unconfigured"}>
-          {modelConfig?.configured ? modelConfig.model : "模型未配置"}
+        <span className={modelWorkflow.config?.configured ? "model-ready" : "model-unconfigured"}>
+          {modelWorkflow.config?.configured ? modelWorkflow.config.model : "模型未配置"}
         </span>
       </footer>
 
       <ModelSettingsDialog
-        busy={modelSettingsBusy}
-        config={modelConfig}
-        error={modelSettingsError}
-        open={modelSettingsOpen}
-        onClose={() => setModelSettingsOpen(false)}
-        onResetConfig={clearModelConfig}
-        onSave={persistModelConfig}
+        busy={modelWorkflow.settings.busy}
+        config={modelWorkflow.config}
+        error={modelWorkflow.settings.error}
+        open={modelWorkflow.settings.open}
+        onClose={modelWorkflow.settings.close}
+        onResetConfig={modelWorkflow.settings.clear}
+        onSave={modelWorkflow.settings.save}
       />
-      {modelConfig && contextBundle && selectedExplanation ? (
+      {modelWorkflow.config && explanationContext.bundle && selectedExplanation ? (
         <GenerationConfirmDialog
-          busy={generationStatus === "generating"}
-          config={modelConfig}
-          contextBundle={contextBundle}
-          error={generationError}
+          busy={modelWorkflow.generation.status === "generating"}
+          config={modelWorkflow.config}
+          contextBundle={explanationContext.bundle}
+          error={modelWorkflow.generation.error}
           explanation={selectedExplanation}
-          open={generationConfirmOpen}
-          onCancel={() => {
-            setGenerationConfirmOpen(false);
-            setGenerationStatus("idle");
-            setGenerationError("");
-          }}
-          onConfirm={confirmExplanationGeneration}
+          open={modelWorkflow.generation.confirmOpen}
+          onCancel={modelWorkflow.generation.cancel}
+          onConfirm={modelWorkflow.generation.confirm}
         />
       ) : null}
     </main>
   );
-}
-
-function errorMessage(error: unknown) {
-  if (error instanceof Error) {
-    return error.message;
-  }
-  return String(error);
 }
 
 async function loadFirstAvailableProjectFile(

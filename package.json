@@ -1,6 +1,6 @@
 {
   "name": "codereader",
-  "version": "0.10.0",
+  "version": "0.11.0-beta.1",
   "private": true,
   "type": "module",
   "scripts": {
@@ -8,9 +8,9 @@
     "build": "node scripts/build.mjs",
     "preview": "node ./node_modules/vite/bin/vite.js preview --host 127.0.0.1 --port 4173",
     "tauri": "node scripts/tauri.mjs",
-    "cargo:check": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/cargo-check.ps1",
-    "cargo:test": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/cargo-test.ps1",
-    "cargo:clippy": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/cargo-clippy.ps1",
+    "cargo:check": "node scripts/cargo.mjs check",
+    "cargo:test": "node scripts/cargo.mjs test",
+    "cargo:clippy": "node scripts/cargo.mjs clippy",
     "test": "node scripts/test.mjs",
     "doctor": "node scripts/check-environment.mjs",
     "repair:native": "node scripts/repair-native-deps.mjs",
