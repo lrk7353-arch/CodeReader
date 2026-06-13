@@ -140,6 +140,12 @@ button {
   background: #f0eee8;
 }
 
+.file-explorer {
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr);
+  overflow: hidden;
+}
+
 .code-viewer {
   display: grid;
   grid-template-rows: 42px minmax(0, 1fr);
@@ -164,6 +170,12 @@ button {
   color: #424b50;
   font-size: 13px;
   font-weight: 650;
+}
+
+.explorer-content {
+  min-height: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
 }
 
 .file-list {
@@ -245,6 +257,12 @@ button {
   display: grid;
   gap: 2px;
   margin-top: 2px;
+  border-radius: 6px;
+  transition: background-color 140ms ease;
+}
+
+.target-list-shell.expanded {
+  background: #e8e6df;
 }
 
 .target-list-header {
@@ -301,10 +319,27 @@ button {
   color: #17483c;
 }
 
+.target-list {
+  scrollbar-gutter: stable;
+}
+
+.target-list-shell.expanded .target-list {
+  max-height: min(320px, 42vh);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding-right: 2px;
+  border-block: 1px solid #d6d2c9;
+  background: #f0eee8;
+}
+
 .target-row {
   padding: 0 6px;
   color: #566166;
   font-size: 12px;
+}
+
+.target-list-shell.expanded .target-row {
+  border-radius: 4px;
 }
 
 .target-status-icon.valid {

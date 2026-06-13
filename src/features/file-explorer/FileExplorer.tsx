@@ -181,6 +181,10 @@ export function FileExplorer({
         activeLine
       );
       const visibleTargets = targetListExpanded ? explanations : focusedTargets.items;
+      const targetListClass =
+        targetListExpanded && !targetListCollapsed
+          ? "target-list-shell expanded"
+          : "target-list-shell compact";
 
       return (
         <div className="file-group" key={node.id}>
@@ -208,13 +212,17 @@ export function FileExplorer({
           </button>
 
           {isActive && explanations.length ? (
-            <div className="target-list-shell" style={{ paddingLeft: `${22 + depth * 14}px` }}>
+            <div className={targetListClass} style={{ paddingLeft: `${22 + depth * 14}px` }}>
               <div className="target-list-header">
                 <span>
                   结构 {explanations.length}
-                  {!targetListExpanded && focusedTargets.hiddenCount > 0
-                    ? ` · 附近 ${visibleTargets.length}`
-                    : ""}
+                  {targetListCollapsed
+                    ? ""
+                    : targetListExpanded
+                      ? " · 全部可滚动"
+                      : focusedTargets.hiddenCount > 0
+                        ? ` · 当前位置附近 ${visibleTargets.length}`
+                        : ""}
                 </span>
                 <button
                   className="target-list-toggle"
@@ -233,7 +241,15 @@ export function FileExplorer({
               </div>
               {!targetListCollapsed ? (
                 <>
-                  <div className="target-list">
+                  <div
+                    className="target-list"
+                    role="group"
+                    aria-label={
+                      targetListExpanded
+                        ? `${node.name} 的全部代码结构`
+                        : `${node.name} 当前位置附近的代码结构`
+                    }
+                  >
                     {visibleTargets.map((explanation) => (
                       <button
                         className={
@@ -243,6 +259,9 @@ export function FileExplorer({
                         }
                         type="button"
                         key={explanation.id}
+                        aria-current={
+                          explanation.id === selectedExplanationId ? "location" : undefined
+                        }
                         onClick={() => onSelectExplanation(explanation.id)}
                         title={`${explanation.targetName ?? explanation.targetType}${
                           explanation.startLine
@@ -267,10 +286,15 @@ export function FileExplorer({
                       className="target-list-more"
                       type="button"
                       onClick={() => toggleAllTargets(node.id)}
+                      title={
+                        targetListExpanded
+                          ? `只显示当前位置附近 ${COMPACT_TARGET_LIMIT} 项`
+                          : `在固定高度区域内浏览全部 ${explanations.length} 项`
+                      }
                     >
                       {targetListExpanded
-                        ? `收起到当前位置附近 ${COMPACT_TARGET_LIMIT} 项`
-                        : `显示全部 ${explanations.length} 项`}
+                        ? `回到当前位置附近 ${COMPACT_TARGET_LIMIT} 项`
+                        : `浏览全部 ${explanations.length} 项`}
                     </button>
                   ) : null}
                 </>
@@ -314,11 +338,11 @@ export function FileExplorer({
       </div>
 
       {activeView === "files" ? (
-        <div className="file-list" role="tabpanel">
+        <div className="explorer-content file-list" role="tabpanel">
           {renderNodes(tree, 0)}
         </div>
       ) : (
-        <div role="tabpanel">
+        <div className="explorer-content" role="tabpanel">
           <ProjectGuidePanel guide={projectGuide} onSelectFile={onSelectFile} />
         </div>
       )}

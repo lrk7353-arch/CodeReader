@@ -9,6 +9,7 @@
 - Add cross-platform Cargo script entry points and a GitHub Actions quality workflow.
 - Add application smoke and serialized-error tests.
 - Compact long file-structure lists around the active editor line, with collapse and show-all controls.
+- Keep expanded file structures inside a bounded scroll area so long files do not hide the project tree.
 - Include test files in first-mile reading paths when they are meaningful project entry points.
 - Clarify the sample login flow across entry, business, and data files.
 - Prevent project navigation labels from overflowing narrow sidebars.

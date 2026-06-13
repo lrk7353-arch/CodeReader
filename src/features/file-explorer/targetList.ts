@@ -1,6 +1,6 @@
 import type { Explanation } from "../../types/explanation";
 
-export const COMPACT_TARGET_LIMIT = 12;
+export const COMPACT_TARGET_LIMIT = 8;
 
 export interface FocusedTargetList {
   items: Explanation[];
