@@ -17,16 +17,12 @@ import type {
   ReadingState
 } from "../types/explanation";
 import { FileExplorer } from "../features/file-explorer/FileExplorer";
-import { MonacoCodeViewer, type CodeSelection } from "../features/code-viewer/MonacoCodeViewer";
+import { MonacoCodeViewer } from "../features/code-viewer/MonacoCodeViewer";
 import { ExplanationPanel } from "../features/explanation-panel/ExplanationPanel";
 import { GenerationConfirmDialog } from "../features/explanation-generation/GenerationConfirmDialog";
 import { ModelSettingsDialog } from "../features/model-settings/ModelSettingsDialog";
 import { deriveGuideProgress } from "../features/project-guide/projectGuide";
-import {
-  buildRangeExplanation,
-  buildSelectableExplanations,
-  findExplanationForSelection
-} from "../features/explanations/selectableExplanations";
+import { buildSelectableExplanations } from "../features/explanations/selectableExplanations";
 import {
   generateProjectGuide,
   isDesktopRuntime,
@@ -42,6 +38,7 @@ import {
 import { errorMessage } from "./appError";
 import { useExplanationContext } from "./hooks/useExplanationContext";
 import { useModelWorkflow } from "./hooks/useModelWorkflow";
+import { useWorkspaceSelection } from "./hooks/useWorkspaceSelection";
 
 type PersistenceStatus = "preview" | "initializing" | "ready" | "error";
 
@@ -50,14 +47,6 @@ export function App() {
   const [projectNodes, setProjectNodes] = useState<ProjectTreeNode[]>(sampleProjectNodes);
   const [projectGuide, setProjectGuide] = useState<ProjectGuide | undefined>(sampleProjectGuide);
   const [guideFocusToken, setGuideFocusToken] = useState(0);
-  const [selectedFileId, setSelectedFileId] = useState(files[0]?.id ?? "");
-  const [selectedExplanationId, setSelectedExplanationId] = useState(
-    files[0]?.explanations[0]?.id ?? ""
-  );
-  const [selectedCodeSelection, setSelectedCodeSelection] = useState<CodeSelection>({
-    startLine: 1,
-    endLine: 1
-  });
   const [readingStates, setReadingStates] = useState<Record<string, ReadingState>>({});
   const [workspaceStatus, setWorkspaceStatus] = useState("示例项目：无需 API Key");
   const [databasePath, setDatabasePath] = useState("");
@@ -67,46 +56,21 @@ export function App() {
   const [isWorkspaceBusy, setIsWorkspaceBusy] = useState(false);
   const [loadingFileId, setLoadingFileId] = useState<string | null>(null);
   const refreshInFlightRef = useRef(false);
-
-  const selectedFile = useMemo(
-    () => files.find((file) => file.id === selectedFileId) ?? files[0] ?? sampleFiles[0],
-    [files, selectedFileId]
-  );
-
-  const selectableExplanations = useMemo(
-    () => buildSelectableExplanations(selectedFile),
-    [selectedFile]
-  );
-
-  const transientRangeExplanation = useMemo(() => {
-    if (selectedFile.capability?.canExplain === false) {
-      return undefined;
-    }
-    if (selectedCodeSelection.startLine === selectedCodeSelection.endLine) {
-      return undefined;
-    }
-    if (findExplanationForSelection(selectableExplanations, selectedCodeSelection)) {
-      return undefined;
-    }
-    return buildRangeExplanation(selectedFile, selectedCodeSelection);
-  }, [selectableExplanations, selectedCodeSelection, selectedFile]);
-
-  const hydratedExplanations = useMemo(() => {
-    const explanations = transientRangeExplanation
-      ? [...selectableExplanations, transientRangeExplanation]
-      : selectableExplanations;
-    return explanations.map((explanation) => ({
-      ...explanation,
-      readingState: readingStates[explanation.id] ?? explanation.readingState
-    }));
-  }, [readingStates, selectableExplanations, transientRangeExplanation]);
-
-  const selectedExplanation = useMemo<Explanation | undefined>(() => {
-    return (
-      hydratedExplanations.find((item) => item.id === selectedExplanationId) ??
-      hydratedExplanations[0]
-    );
-  }, [hydratedExplanations, selectedExplanationId]);
+  const {
+    filesForExplorer,
+    hydratedExplanations,
+    selectedCodeSelection,
+    selectedExplanation,
+    selectedExplanationId,
+    selectedFile,
+    selectedFileForViewer,
+    selectExplanation,
+    setActiveLoadedFile,
+    setSelectedCodeSelection,
+    setSelectedExplanationId,
+    setSelectedFileId,
+    updateSelection
+  } = useWorkspaceSelection({ files, readingStates });
 
   const explanationContext = useExplanationContext(selectedFile, selectedExplanation);
   const handleExplanationGenerated = useCallback(
@@ -127,7 +91,7 @@ export function App() {
         [result.explanation.id]: result.explanation.readingState
       }));
     },
-    [selectedFile.id]
+    [selectedFile.id, setSelectedExplanationId]
   );
   const modelWorkflow = useModelWorkflow({
     file: selectedFile,
@@ -150,19 +114,6 @@ export function App() {
       reading: selectedExplanation?.readingState ?? "unread"
     };
   }, [selectedExplanation, selectedFile.capability]);
-
-  const selectedFileForViewer = useMemo<CodeFile>(
-    () => ({
-      ...selectedFile,
-      explanations: hydratedExplanations
-    }),
-    [hydratedExplanations, selectedFile]
-  );
-
-  const filesForExplorer = useMemo(
-    () => files.map((file) => (file.id === selectedFile.id ? selectedFileForViewer : file)),
-    [files, selectedFile.id, selectedFileForViewer]
-  );
 
   const displayedProjectGuide = useMemo(() => {
     if (!projectGuide || projectGuide.projectId !== sampleProjectId) {
@@ -221,33 +172,6 @@ export function App() {
     return () => {
       cancelled = true;
     };
-  }, []);
-
-  const selectExplanation = useCallback(
-    (explanationId: string) => {
-      const explanation = hydratedExplanations.find((item) => item.id === explanationId);
-      setSelectedExplanationId((current) => (current === explanationId ? current : explanationId));
-      const rangeSelection = parseRangeSelection(explanationId);
-      const nextSelection = explanation?.startLine
-        ? {
-            startLine: explanation.startLine,
-            endLine: explanation.endLine ?? explanation.startLine
-          }
-        : rangeSelection
-          ? rangeSelection
-          : { startLine: 1, endLine: 1 };
-      setSelectedCodeSelection((current) =>
-        sameSelection(current, nextSelection) ? current : nextSelection
-      );
-    },
-    [hydratedExplanations]
-  );
-
-  const setActiveLoadedFile = useCallback((file: CodeFile) => {
-    setSelectedFileId(file.id);
-    const explanations = buildSelectableExplanations(file);
-    setSelectedExplanationId(explanations[0]?.id ?? "");
-    setSelectedCodeSelection({ startLine: 1, endLine: 1 });
   }, []);
 
   const hydrateLoadedFile = useCallback(async (file: CodeFile) => {
@@ -358,7 +282,15 @@ export function App() {
         }
       }
     },
-    [hydrateLoadedFile, refreshPersistedProjectGuide, selectedExplanationId, upsertFile]
+    [
+      hydrateLoadedFile,
+      refreshPersistedProjectGuide,
+      selectedExplanationId,
+      setSelectedCodeSelection,
+      setSelectedExplanationId,
+      setSelectedFileId,
+      upsertFile
+    ]
   );
 
   useEffect(() => {
@@ -421,12 +353,15 @@ export function App() {
       }
       setActiveLoadedFile(file);
     },
-    [files, loadAndSelectFile, setActiveLoadedFile]
+    [
+      files,
+      loadAndSelectFile,
+      setActiveLoadedFile,
+      setSelectedCodeSelection,
+      setSelectedExplanationId,
+      setSelectedFileId
+    ]
   );
-
-  const updateSelection = useCallback((selection: CodeSelection) => {
-    setSelectedCodeSelection(selection);
-  }, []);
 
   async function updateReadingState(state: ReadingState) {
     if (!selectedExplanation) {
@@ -820,21 +755,6 @@ async function loadFirstAvailableProjectFile(
   throw new Error(
     `已扫描到 ${project.files.length} 个文件，但没有可预览文件能被读取。${failures[0] ?? ""}`
   );
-}
-
-function sameSelection(left: CodeSelection, right: CodeSelection) {
-  return left.startLine === right.startLine && left.endLine === right.endLine;
-}
-
-function parseRangeSelection(explanationId: string): CodeSelection | undefined {
-  const match = explanationId.match(/^range:.+:(\d+)-(\d+)$/);
-  if (!match) {
-    return undefined;
-  }
-  return {
-    startLine: Number(match[1]),
-    endLine: Number(match[2])
-  };
 }
 
 function isTransientExplanation(explanation: Explanation) {
