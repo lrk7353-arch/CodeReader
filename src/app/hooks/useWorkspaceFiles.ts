@@ -41,6 +41,7 @@ export function useWorkspaceFiles() {
   );
   const [isWorkspaceBusy, setIsWorkspaceBusy] = useState(false);
   const [loadingFileId, setLoadingFileId] = useState<string | null>(null);
+  const workspaceTouchedRef = useRef(false);
   const refreshInFlightRef = useRef(false);
 
   const selection = useWorkspaceSelection({ files, readingStates });
@@ -62,15 +63,7 @@ export function useWorkspaceFiles() {
   }, [filesForExplorer, projectGuide, readingStates]);
 
   const workspaceName = useMemo(() => {
-    const localRoot = files.find((file) => file.projectRoot)?.projectRoot;
-    if (localRoot) {
-      return baseName(localRoot);
-    }
-    const localFile = files.find((file) => file.source === "local");
-    if (localFile) {
-      return baseName(parentPath(localFile.path)) || localFile.name;
-    }
-    return "examples";
+    return resolveWorkspaceName(files);
   }, [files]);
 
   useEffect(() => {
@@ -89,13 +82,13 @@ export function useWorkspaceFiles() {
             hydrateCodeFilePersistence(file, buildSelectableExplanations(file))
           )
         );
-        if (cancelled) {
+        setDatabasePath(status.databasePath);
+        setPersistenceStatus(status.initialized ? "ready" : "error");
+        if (!shouldApplyInitialWorkspaceHydration(cancelled, workspaceTouchedRef.current)) {
           return;
         }
         setFiles(hydratedSamples);
         setProjectGuide(deriveGuideProgress(sampleProjectGuide, hydratedSamples));
-        setDatabasePath(status.databasePath);
-        setPersistenceStatus(status.initialized ? "ready" : "error");
         setWorkspaceStatus((current) =>
           current.startsWith("示例项目") ? "示例项目：本地阅读状态已恢复" : current
         );
@@ -280,6 +273,7 @@ export function useWorkspaceFiles() {
     (fileId: string) => {
       const file = files.find((item) => item.id === fileId) ?? files[0] ?? sampleFiles[0];
       if (file.capability?.canPreview === false) {
+        workspaceTouchedRef.current = true;
         setSelectedFileId(file.id);
         setSelectedExplanationId("");
         setSelectedCodeSelection({ startLine: 1, endLine: 1 });
@@ -287,6 +281,7 @@ export function useWorkspaceFiles() {
         return;
       }
       if (file.source === "local" && !file.isLoaded) {
+        workspaceTouchedRef.current = true;
         void loadAndSelectFile(file.path, file.relativePath, file.id, file.projectRoot);
         return;
       }
@@ -303,6 +298,7 @@ export function useWorkspaceFiles() {
   );
 
   async function openSampleProject() {
+    workspaceTouchedRef.current = true;
     setIsWorkspaceBusy(true);
     setWorkspaceStatus("正在恢复无 API Key 示例项目");
     try {
@@ -326,6 +322,7 @@ export function useWorkspaceFiles() {
       setWorkspaceStatus("本地文件打开需要在 Tauri 桌面端运行。");
       return;
     }
+    workspaceTouchedRef.current = true;
     setIsWorkspaceBusy(true);
     try {
       const file = await pickAndLoadCodeFile();
@@ -352,6 +349,7 @@ export function useWorkspaceFiles() {
       setWorkspaceStatus("本地项目打开需要在 Tauri 桌面端运行。");
       return;
     }
+    workspaceTouchedRef.current = true;
     setIsWorkspaceBusy(true);
     try {
       const project = await pickAndScanProject();
@@ -494,6 +492,25 @@ async function loadFirstAvailableProjectFile(
 function baseName(path: string) {
   const normalized = path.replace(/\\/g, "/").replace(/\/+$/, "");
   return normalized.split("/").filter(Boolean).pop() ?? path;
+}
+
+export function shouldApplyInitialWorkspaceHydration(
+  cancelled: boolean,
+  workspaceTouched: boolean
+) {
+  return !cancelled && !workspaceTouched;
+}
+
+export function resolveWorkspaceName(files: CodeFile[]) {
+  const localRoot = files.find((file) => file.projectRoot)?.projectRoot;
+  if (localRoot) {
+    return baseName(localRoot);
+  }
+  const localFile = files.find((file) => file.source === "local");
+  if (localFile) {
+    return baseName(parentPath(localFile.path)) || localFile.name;
+  }
+  return "examples";
 }
 
 function parentPath(path: string) {
