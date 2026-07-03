@@ -26,6 +26,7 @@ import type {
 import { errorMessage } from "../appError";
 import { useWorkspaceSelection } from "./useWorkspaceSelection";
 import { codeSelectionForExplanation, pickRetainedExplanation } from "./retainExplanation";
+import { seedBrowserHydratedFile, stripUnexplainableFile } from "./hydrateLoadedFile";
 import { upsertFileInList } from "./workspaceFileList";
 import { buildProjectFilePlaceholders, buildProjectScanNote } from "./projectOpenHelpers";
 import { resolveWorkspaceName } from "../utils/workspacePaths";
@@ -112,19 +113,11 @@ export function useWorkspaceFiles() {
 
   const hydrateLoadedFile = useCallback(async (file: CodeFile) => {
     if (file.capability?.canExplain === false) {
-      return {
-        ...file,
-        codeNodes: [],
-        explanations: []
-      };
+      return stripUnexplainableFile(file);
     }
     const seedExplanations = buildSelectableExplanations(file);
     if (!isDesktopRuntime()) {
-      return {
-        ...file,
-        databasePath: "",
-        explanations: seedExplanations
-      };
+      return seedBrowserHydratedFile(file, seedExplanations);
     }
     const hydratedFile = await hydrateCodeFilePersistence(file, seedExplanations);
     if (hydratedFile.databasePath) {
