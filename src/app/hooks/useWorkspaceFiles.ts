@@ -25,6 +25,7 @@ import type {
 } from "../../types/explanation";
 import { errorMessage } from "../appError";
 import { useWorkspaceSelection } from "./useWorkspaceSelection";
+import { codeSelectionForExplanation, pickRetainedExplanation } from "./retainExplanation";
 import { upsertFileInList } from "./workspaceFileList";
 import { resolveWorkspaceName } from "../utils/workspacePaths";
 
@@ -180,21 +181,15 @@ export function useWorkspaceFiles() {
           await refreshPersistedProjectGuide(hydrated.projectId);
         }
         const explanations = buildSelectableExplanations(hydrated);
-        const retained =
-          explanations.find((item) => item.id === selectedExplanationId) ??
-          explanations.find((item) =>
-            hydrated.changeSummary?.affectedExplanationIds.includes(item.id)
-          ) ??
-          explanations.find((item) => item.status !== "valid") ??
-          explanations[0];
+        const retained = pickRetainedExplanation(
+          explanations,
+          selectedExplanationId,
+          hydrated.changeSummary?.affectedExplanationIds ?? []
+        );
         setSelectedExplanationId(retained?.id ?? "");
-        if (retained?.targetType === "file") {
-          setSelectedCodeSelection({ startLine: 1, endLine: 1 });
-        } else if (retained?.startLine) {
-          setSelectedCodeSelection({
-            startLine: retained.startLine,
-            endLine: retained.endLine ?? retained.startLine
-          });
+        const retainedSelection = retained ? codeSelectionForExplanation(retained) : undefined;
+        if (retainedSelection) {
+          setSelectedCodeSelection(retainedSelection);
         }
         setWorkspaceStatus(
           hydrated.changeSummary?.summary ?? `已重新读取 ${hydrated.relativePath ?? hydrated.path}`
