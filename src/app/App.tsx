@@ -1,6 +1,6 @@
-import { useCallback, useMemo } from "react";
+import { useMemo } from "react";
 import { BookOpen, FilePlus2, FolderOpen, Settings2 } from "lucide-react";
-import type { Explanation, GenerateExplanationResult } from "../types/explanation";
+import type { Explanation } from "../types/explanation";
 import { FileExplorer } from "../features/file-explorer/FileExplorer";
 import { MonacoCodeViewer } from "../features/code-viewer/MonacoCodeViewer";
 import { ExplanationPanel } from "../features/explanation-panel/ExplanationPanel";
@@ -8,6 +8,7 @@ import { GenerationConfirmDialog } from "../features/explanation-generation/Gene
 import { ModelSettingsDialog } from "../features/model-settings/ModelSettingsDialog";
 import { useExplanationContext } from "./hooks/useExplanationContext";
 import { useExplanationFeedback } from "./hooks/useExplanationFeedback";
+import { useExplanationWriteback } from "./hooks/useExplanationWriteback";
 import { useWorkspaceFiles, type PersistenceStatus } from "./hooks/useWorkspaceFiles";
 import { useModelWorkflow } from "./hooks/useModelWorkflow";
 
@@ -43,32 +44,18 @@ export function App() {
   } = useWorkspaceFiles();
 
   const explanationContext = useExplanationContext(selectedFile, selectedExplanation);
-  const handleExplanationGenerated = useCallback(
-    (result: GenerateExplanationResult) => {
-      setFiles((current) =>
-        current.map((file) =>
-          file.id === selectedFile.id
-            ? {
-                ...file,
-                explanations: upsertExplanation(file.explanations, result.explanation)
-              }
-            : file
-        )
-      );
-      setSelectedExplanationId(result.explanation.id);
-      setReadingStates((current) => ({
-        ...current,
-        [result.explanation.id]: result.explanation.readingState
-      }));
-    },
-    [selectedFile.id, setFiles, setReadingStates, setSelectedExplanationId]
-  );
+  const writeback = useExplanationWriteback({
+    file: selectedFile,
+    setFiles,
+    setReadingStates,
+    setSelectedExplanationId
+  });
   const modelWorkflow = useModelWorkflow({
     file: selectedFile,
     explanation: selectedExplanation,
     contextBundle: explanationContext.bundle,
     contextStatus: explanationContext.status,
-    onGenerated: handleExplanationGenerated,
+    onGenerated: writeback.onGenerated,
     onWorkspaceStatus: setWorkspaceStatus
   });
 
@@ -259,14 +246,6 @@ function persistenceTooltip(status: PersistenceStatus) {
     error: "CodeReader SQLite 数据库初始化或写入失败"
   };
   return tooltips[status];
-}
-
-function upsertExplanation(explanations: Explanation[], next: Explanation) {
-  const existingIndex = explanations.findIndex((explanation) => explanation.id === next.id);
-  if (existingIndex === -1) {
-    return [...explanations, next];
-  }
-  return explanations.map((explanation, index) => (index === existingIndex ? next : explanation));
 }
 
 function explanationStatusLabel(status: Explanation["status"]) {
