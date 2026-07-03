@@ -27,6 +27,7 @@ import { errorMessage } from "../appError";
 import { useWorkspaceSelection } from "./useWorkspaceSelection";
 import { codeSelectionForExplanation, pickRetainedExplanation } from "./retainExplanation";
 import { upsertFileInList } from "./workspaceFileList";
+import { buildProjectFilePlaceholders, buildProjectScanNote } from "./projectOpenHelpers";
 import { resolveWorkspaceName } from "../utils/workspacePaths";
 
 export type PersistenceStatus = "preview" | "initializing" | "ready" | "error";
@@ -364,15 +365,7 @@ export function useWorkspaceFiles() {
       setProjectGuide(guide);
       setGuideFocusToken((current) => current + 1);
 
-      const placeholders: CodeFile[] = project.files.map((file) => ({
-        ...file,
-        projectRoot: project.rootPath,
-        code: "",
-        explanations: [],
-        codeNodes: [],
-        source: "local",
-        isLoaded: false
-      }));
+      const placeholders = buildProjectFilePlaceholders(project);
       const previewableFiles = project.files.filter((file) => file.capability.canPreview);
       if (previewableFiles.length === 0) {
         setFiles(placeholders);
@@ -408,11 +401,7 @@ export function useWorkspaceFiles() {
       if (guide && activeFirstFile.projectId) {
         await refreshPersistedProjectGuide(activeFirstFile.projectId);
       }
-      const scanNote = project.truncated
-        ? "，扫描已达到安全预算"
-        : project.skippedEntries > 0
-          ? `，跳过 ${project.skippedEntries} 个不可读取项`
-          : "";
+      const scanNote = buildProjectScanNote(project);
       setWorkspaceStatus(
         `${project.files.length} 个文件，${previewableFiles.length} 个可预览：${project.rootPath}${scanNote}${guideError ? `；阅读路径生成失败：${guideError}` : ""}`
       );
