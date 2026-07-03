@@ -1,23 +1,13 @@
 import { useCallback, useMemo } from "react";
 import { BookOpen, FilePlus2, FolderOpen, Settings2 } from "lucide-react";
-import type {
-  Explanation,
-  ExplanationFeedbackType,
-  GenerateExplanationResult,
-  ReadingState
-} from "../types/explanation";
+import type { Explanation, GenerateExplanationResult } from "../types/explanation";
 import { FileExplorer } from "../features/file-explorer/FileExplorer";
 import { MonacoCodeViewer } from "../features/code-viewer/MonacoCodeViewer";
 import { ExplanationPanel } from "../features/explanation-panel/ExplanationPanel";
 import { GenerationConfirmDialog } from "../features/explanation-generation/GenerationConfirmDialog";
 import { ModelSettingsDialog } from "../features/model-settings/ModelSettingsDialog";
-import {
-  isDesktopRuntime,
-  persistExplanationFeedback,
-  persistReadingState
-} from "../services/desktopWorkspace";
-import { errorMessage } from "./appError";
 import { useExplanationContext } from "./hooks/useExplanationContext";
+import { useExplanationFeedback } from "./hooks/useExplanationFeedback";
 import { useWorkspaceFiles, type PersistenceStatus } from "./hooks/useWorkspaceFiles";
 import { useModelWorkflow } from "./hooks/useModelWorkflow";
 
@@ -82,6 +72,15 @@ export function App() {
     onWorkspaceStatus: setWorkspaceStatus
   });
 
+  const feedback = useExplanationFeedback({
+    file: selectedFile,
+    explanation: selectedExplanation,
+    setFiles,
+    setReadingStates,
+    setWorkspaceStatus,
+    refreshPersistedProjectGuide
+  });
+
   const fileStatus = useMemo(() => {
     if (selectedFile.capability?.canPreview === false) {
       return { explanation: "不可预览", reading: "—" };
@@ -94,86 +93,6 @@ export function App() {
       reading: selectedExplanation?.readingState ?? "unread"
     };
   }, [selectedExplanation, selectedFile.capability]);
-  async function updateReadingState(state: ReadingState) {
-    if (!selectedExplanation) {
-      return;
-    }
-    setReadingStates((current) => ({
-      ...current,
-      [selectedExplanation.id]: state
-    }));
-    setFiles((current) =>
-      current.map((file) =>
-        file.id === selectedFile.id
-          ? {
-              ...file,
-              explanations: file.explanations.map((explanation) =>
-                explanation.id === selectedExplanation.id
-                  ? { ...explanation, readingState: state }
-                  : explanation
-              )
-            }
-          : file
-      )
-    );
-
-    if (isTransientExplanation(selectedExplanation)) {
-      setWorkspaceStatus("临时多行选择状态已更新，仅保存在当前界面。");
-      return;
-    }
-
-    if (!isDesktopRuntime() || !selectedFile.projectId) {
-      setWorkspaceStatus("阅读状态已更新，浏览器预览不写入本地库。");
-      return;
-    }
-
-    try {
-      await persistReadingState(selectedFile.projectId, selectedExplanation.id, state);
-      await refreshPersistedProjectGuide(selectedFile.projectId);
-      setWorkspaceStatus(
-        `阅读状态已保存：${selectedExplanation.targetName ?? selectedExplanation.targetType}`
-      );
-    } catch (error) {
-      setWorkspaceStatus(errorMessage(error));
-    }
-  }
-
-  async function saveFeedback(feedbackType: ExplanationFeedbackType) {
-    if (!selectedExplanation) {
-      return;
-    }
-    if (isTransientExplanation(selectedExplanation)) {
-      setWorkspaceStatus("临时多行选择反馈已记录在当前界面，暂不写入 SQLite。");
-      return;
-    }
-    if (!isDesktopRuntime() || !selectedFile.projectId) {
-      setWorkspaceStatus("解释反馈已记录在当前预览，桌面端会写入本地库。");
-      return;
-    }
-
-    try {
-      await persistExplanationFeedback(
-        selectedFile.projectId,
-        selectedExplanation.id,
-        feedbackType
-      );
-      setWorkspaceStatus(`解释反馈已保存：${feedbackType}`);
-      if (feedbackType === "regenerate_requested") {
-        await persistReadingState(
-          selectedFile.projectId,
-          selectedExplanation.id,
-          "needs_reexplain"
-        );
-        setReadingStates((current) => ({
-          ...current,
-          [selectedExplanation.id]: "needs_reexplain"
-        }));
-        await refreshPersistedProjectGuide(selectedFile.projectId);
-      }
-    } catch (error) {
-      setWorkspaceStatus(errorMessage(error));
-    }
-  }
   return (
     <main className="app-shell">
       <header className="topbar">
@@ -260,7 +179,7 @@ export function App() {
           explanation={selectedExplanation}
           generationError={modelWorkflow.generation.error}
           generationStatus={modelWorkflow.generation.status}
-          onFeedback={saveFeedback}
+          onFeedback={feedback.onFeedback}
           onGenerate={modelWorkflow.generation.request}
           onSelectAffected={() => {
             const affected =
@@ -274,7 +193,7 @@ export function App() {
               selectExplanation(affected.id);
             }
           }}
-          onReadingStateChange={updateReadingState}
+          onReadingStateChange={feedback.onReadingStateChange}
         />
       </section>
 
@@ -321,9 +240,6 @@ export function App() {
       ) : null}
     </main>
   );
-}
-function isTransientExplanation(explanation: Explanation) {
-  return explanation.status === "transient" || explanation.id.startsWith("range:");
 }
 function persistenceLabel(status: PersistenceStatus) {
   const labels: Record<PersistenceStatus, string> = {
