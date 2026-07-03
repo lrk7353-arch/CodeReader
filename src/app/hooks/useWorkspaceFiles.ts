@@ -25,6 +25,8 @@ import type {
 } from "../../types/explanation";
 import { errorMessage } from "../appError";
 import { useWorkspaceSelection } from "./useWorkspaceSelection";
+import { upsertFileInList } from "./workspaceFileList";
+import { resolveWorkspaceName } from "../utils/workspacePaths";
 
 export type PersistenceStatus = "preview" | "initializing" | "ready" | "error";
 
@@ -141,15 +143,7 @@ export function useWorkspaceFiles() {
   }, []);
 
   const upsertFile = useCallback((file: CodeFile) => {
-    setFiles((current) => {
-      const existingIndex = current.findIndex(
-        (item) => item.id === file.id || item.path === file.path
-      );
-      if (existingIndex === -1) {
-        return [file, ...current];
-      }
-      return current.map((item, index) => (index === existingIndex ? file : item));
-    });
+    setFiles((current) => upsertFileInList(current, file));
   }, []);
 
   const refreshLoadedFile = useCallback(
@@ -489,11 +483,6 @@ async function loadFirstAvailableProjectFile(
   );
 }
 
-function baseName(path: string) {
-  const normalized = path.replace(/\\/g, "/").replace(/\/+$/, "");
-  return normalized.split("/").filter(Boolean).pop() ?? path;
-}
-
 export function shouldApplyInitialWorkspaceHydration(
   cancelled: boolean,
   workspaceTouched: boolean
@@ -501,21 +490,4 @@ export function shouldApplyInitialWorkspaceHydration(
   return !cancelled && !workspaceTouched;
 }
 
-export function resolveWorkspaceName(files: CodeFile[]) {
-  const localRoot = files.find((file) => file.projectRoot)?.projectRoot;
-  if (localRoot) {
-    return baseName(localRoot);
-  }
-  const localFile = files.find((file) => file.source === "local");
-  if (localFile) {
-    return baseName(parentPath(localFile.path)) || localFile.name;
-  }
-  return "examples";
-}
-
-function parentPath(path: string) {
-  const normalized = path.replace(/\\/g, "/");
-  const parts = normalized.split("/").filter(Boolean);
-  parts.pop();
-  return parts.join("/");
-}
+export { resolveWorkspaceName };
