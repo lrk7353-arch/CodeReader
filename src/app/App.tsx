@@ -1,18 +1,19 @@
 import { useMemo } from "react";
 import { BookOpen, FilePlus2, FolderOpen, Settings2 } from "lucide-react";
-import type { Explanation } from "../types/explanation";
 import { FileExplorer } from "../features/file-explorer/FileExplorer";
 import { MonacoCodeViewer } from "../features/code-viewer/MonacoCodeViewer";
 import { ExplanationPanel } from "../features/explanation-panel/ExplanationPanel";
 import { GenerationConfirmDialog } from "../features/explanation-generation/GenerationConfirmDialog";
 import { ModelSettingsDialog } from "../features/model-settings/ModelSettingsDialog";
+import { getAppCopy } from "./copy";
 import { useExplanationContext } from "./hooks/useExplanationContext";
 import { useExplanationFeedback } from "./hooks/useExplanationFeedback";
 import { useExplanationWriteback } from "./hooks/useExplanationWriteback";
-import { useWorkspaceFiles, type PersistenceStatus } from "./hooks/useWorkspaceFiles";
+import { useWorkspaceFiles } from "./hooks/useWorkspaceFiles";
 import { useModelWorkflow } from "./hooks/useModelWorkflow";
 
 export function App() {
+  const copy = getAppCopy();
   const {
     databasePath,
     displayedProjectGuide,
@@ -70,16 +71,19 @@ export function App() {
 
   const fileStatus = useMemo(() => {
     if (selectedFile.capability?.canPreview === false) {
-      return { explanation: "不可预览", reading: "—" };
+      return { explanation: copy.fileStatus.unpreviewable, reading: copy.fileStatus.dash };
     }
     if (selectedFile.capability?.canExplain === false) {
-      return { explanation: "只读预览", reading: "—" };
+      return {
+        explanation: copy.fileStatus.readonlyPreview,
+        reading: copy.fileStatus.dash
+      };
     }
     return {
-      explanation: explanationStatusLabel(selectedExplanation?.status ?? "valid"),
+      explanation: copy.explanationStatus[selectedExplanation?.status ?? "valid"],
       reading: selectedExplanation?.readingState ?? "unread"
     };
-  }, [selectedExplanation, selectedFile.capability]);
+  }, [copy, selectedExplanation, selectedFile.capability]);
   return (
     <main className="app-shell">
       <header className="topbar">
@@ -88,8 +92,8 @@ export function App() {
             CR
           </span>
           <div>
-            <h1>CodeReader</h1>
-            <p>独立桌面代码阅读 IDE</p>
+            <h1>{copy.brand.title}</h1>
+            <p>{copy.brand.tagline}</p>
           </div>
         </div>
         <div className="topbar-actions" aria-label="Workspace actions">
@@ -97,37 +101,41 @@ export function App() {
             type="button"
             onClick={() => void openSampleProject()}
             disabled={isWorkspaceBusy}
-            title="体验无需 API Key 的三文件示例项目"
+            title={copy.actionTitles.sample}
           >
             <BookOpen size={16} aria-hidden="true" />
-            <span>体验示例</span>
+            <span>{copy.actions.sample}</span>
           </button>
           <button
             type="button"
             onClick={openFile}
             disabled={isWorkspaceBusy}
-            title="打开单个代码文件"
+            title={copy.actionTitles.openFile}
           >
             <FilePlus2 size={16} aria-hidden="true" />
-            <span>打开文件</span>
+            <span>{copy.actions.openFile}</span>
           </button>
           <button
             type="button"
             onClick={openProject}
             disabled={isWorkspaceBusy}
-            title="打开本地项目文件夹"
+            title={copy.actionTitles.openProject}
           >
             <FolderOpen size={16} aria-hidden="true" />
-            <span>打开项目</span>
+            <span>{copy.actions.openProject}</span>
           </button>
-          <button type="button" onClick={modelWorkflow.settings.openDialog} title="配置 LLM">
+          <button
+            type="button"
+            onClick={modelWorkflow.settings.openDialog}
+            title={copy.actionTitles.model}
+          >
             <Settings2 size={16} aria-hidden="true" />
-            <span>模型</span>
+            <span>{copy.actions.model}</span>
           </button>
         </div>
         <div className="topbar-status">
           <span>{workspaceStatus}</span>
-          <span>内测 · Beta 1</span>
+          <span>{copy.brand.stageBadge}</span>
         </div>
       </header>
 
@@ -195,12 +203,12 @@ export function App() {
         <span>{fileStatus.reading}</span>
         <span
           className={`persistence-status ${persistenceStatus}`}
-          title={databasePath || persistenceTooltip(persistenceStatus)}
+          title={databasePath || copy.persistenceTooltip[persistenceStatus]}
         >
-          {persistenceLabel(persistenceStatus)}
+          {copy.persistenceLabel[persistenceStatus]}
         </span>
         <span className={modelWorkflow.config?.configured ? "model-ready" : "model-unconfigured"}>
-          {modelWorkflow.config?.configured ? modelWorkflow.config.model : "模型未配置"}
+          {modelWorkflow.config?.configured ? modelWorkflow.config.model : copy.model.unconfigured}
         </span>
       </footer>
 
@@ -227,35 +235,4 @@ export function App() {
       ) : null}
     </main>
   );
-}
-function persistenceLabel(status: PersistenceStatus) {
-  const labels: Record<PersistenceStatus, string> = {
-    preview: "浏览器预览",
-    initializing: "本地库初始化中",
-    ready: "本地库就绪",
-    error: "本地库异常"
-  };
-  return labels[status];
-}
-
-function persistenceTooltip(status: PersistenceStatus) {
-  const tooltips: Record<PersistenceStatus, string> = {
-    preview: "浏览器预览不创建 SQLite 数据库",
-    initializing: "正在创建或打开 CodeReader SQLite 数据库",
-    ready: "CodeReader SQLite 数据库已就绪",
-    error: "CodeReader SQLite 数据库初始化或写入失败"
-  };
-  return tooltips[status];
-}
-
-function explanationStatusLabel(status: Explanation["status"]) {
-  const labels: Record<Explanation["status"], string> = {
-    valid: "有效",
-    stale: "可能过期",
-    invalid: "已过期",
-    new_unexplained: "新增未解释",
-    deleted: "已删除",
-    transient: "临时选择"
-  };
-  return labels[status];
 }
