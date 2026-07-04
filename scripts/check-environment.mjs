@@ -73,3 +73,7 @@ const missingRust = results.some(
 if (missingRust) {
   console.log("\nTauri desktop commands require Rust. The Vite frontend can still run without it.");
 }
+
+if (process.platform === "linux") {
+  console.log("\nFor Debian/Ubuntu Tauri development dependencies, run: npm run doctor:linux");
+}

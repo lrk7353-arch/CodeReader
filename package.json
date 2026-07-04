@@ -16,6 +16,7 @@
     "format:check": "node scripts/format.mjs --check",
     "test": "node scripts/test.mjs",
     "doctor": "node scripts/check-environment.mjs",
+    "doctor:linux": "node scripts/linux-dev-doctor.mjs",
     "repair:native": "node scripts/repair-native-deps.mjs",
     "icons:generate": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/generate-icons.ps1",
     "release:windows": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/release-windows.ps1",
