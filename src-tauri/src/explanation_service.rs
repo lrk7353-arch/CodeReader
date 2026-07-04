@@ -175,7 +175,7 @@ pub fn save_model_config(
     if let Some(api_key) = request.api_key.as_deref() {
         let api_key = api_key.trim();
         if !api_key.is_empty() {
-            credential_entry()?
+            SystemCredentialStore
                 .set_password(api_key)
                 .map_err(keyring_error)?;
         }
@@ -191,7 +191,7 @@ pub fn save_model_config(
 #[cfg(not(test))]
 #[tauri::command]
 pub fn reset_model_config(app: AppHandle) -> Result<ModelConfigPayload, AppError> {
-    match credential_entry()?.delete_credential() {
+    match SystemCredentialStore.delete_credential() {
         Ok(()) | Err(KeyringError::NoEntry) => {}
         Err(error) => return Err(keyring_error(error)),
     }
@@ -681,12 +681,38 @@ fn normalize_display_mode(value: Option<&str>) -> Result<String, AppError> {
     }
 }
 
-fn credential_entry() -> Result<Entry, AppError> {
-    Entry::new(KEYRING_SERVICE, KEYRING_USER).map_err(keyring_error)
+trait CredentialStore {
+    fn set_password(&self, value: &str) -> Result<(), KeyringError>;
+    fn get_password(&self) -> Result<String, KeyringError>;
+    fn delete_credential(&self) -> Result<(), KeyringError>;
+}
+
+struct SystemCredentialStore;
+
+impl CredentialStore for SystemCredentialStore {
+    fn set_password(&self, value: &str) -> Result<(), KeyringError> {
+        credential_entry()?.set_password(value)
+    }
+
+    fn get_password(&self) -> Result<String, KeyringError> {
+        credential_entry()?.get_password()
+    }
+
+    fn delete_credential(&self) -> Result<(), KeyringError> {
+        credential_entry()?.delete_credential()
+    }
+}
+
+fn credential_entry() -> Result<Entry, KeyringError> {
+    Entry::new(KEYRING_SERVICE, KEYRING_USER)
 }
 
 fn read_api_key() -> Result<Option<String>, AppError> {
-    match credential_entry()?.get_password() {
+    read_api_key_from_store(&SystemCredentialStore)
+}
+
+fn read_api_key_from_store(store: &impl CredentialStore) -> Result<Option<String>, AppError> {
+    match store.get_password() {
         Ok(value) if value.trim().is_empty() => Ok(None),
         Ok(value) => Ok(Some(value)),
         Err(KeyringError::NoEntry) => Ok(None),
@@ -820,6 +846,28 @@ mod tests {
     }
 
     #[test]
+    fn credential_store_no_entry_is_treated_as_missing_key() {
+        let store = FakeCredentialStore {
+            get_result: Err(KeyringError::NoEntry),
+        };
+
+        let key = read_api_key_from_store(&store).expect("no entry should not fail");
+
+        assert!(key.is_none());
+    }
+
+    #[test]
+    fn credential_store_access_failure_has_stable_error_code() {
+        let store = FakeCredentialStore {
+            get_result: Err(KeyringError::NoStorageAccess(Box::new(FakeCredentialError))),
+        };
+
+        let error = read_api_key_from_store(&store).expect_err("credential store should fail");
+
+        assert!(error.to_string().contains("credential.unavailable"));
+    }
+
+    #[test]
     fn retries_semantically_invalid_provider_output() {
         let runtime = tokio::runtime::Builder::new_multi_thread()
             .enable_all()
@@ -880,6 +928,42 @@ mod tests {
             server.join().expect("mock provider thread joins");
         });
     }
+
+    struct FakeCredentialStore {
+        get_result: Result<String, KeyringError>,
+    }
+
+    impl CredentialStore for FakeCredentialStore {
+        fn set_password(&self, _value: &str) -> Result<(), KeyringError> {
+            Ok(())
+        }
+
+        fn get_password(&self) -> Result<String, KeyringError> {
+            match &self.get_result {
+                Ok(value) => Ok(value.clone()),
+                Err(KeyringError::NoEntry) => Err(KeyringError::NoEntry),
+                Err(KeyringError::NoStorageAccess(_)) => {
+                    Err(KeyringError::NoStorageAccess(Box::new(FakeCredentialError)))
+                }
+                Err(other) => panic!("unexpected fake credential error: {other}"),
+            }
+        }
+
+        fn delete_credential(&self) -> Result<(), KeyringError> {
+            Ok(())
+        }
+    }
+
+    #[derive(Debug)]
+    struct FakeCredentialError;
+
+    impl std::fmt::Display for FakeCredentialError {
+        fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            formatter.write_str("credential store locked")
+        }
+    }
+
+    impl std::error::Error for FakeCredentialError {}
 
     fn read_http_request(stream: &mut std::net::TcpStream) {
         let mut buffer = Vec::new();
