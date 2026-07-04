@@ -1,5 +1,12 @@
 import type { CodeFile, ProjectScanResult } from "../../types/explanation";
 
+export interface ProjectOpenPlan {
+  placeholders: CodeFile[];
+  previewableFiles: CodeFile[];
+  preferredFileId?: string;
+  scanNote: string;
+}
+
 export function buildProjectFilePlaceholders(project: ProjectScanResult): CodeFile[] {
   return project.files.map((file) => ({
     ...file,
@@ -10,6 +17,24 @@ export function buildProjectFilePlaceholders(project: ProjectScanResult): CodeFi
     source: "local",
     isLoaded: false
   }));
+}
+
+export function buildProjectOpenPlan(
+  project: ProjectScanResult,
+  preferredFileId?: string
+): ProjectOpenPlan {
+  const placeholders = buildProjectFilePlaceholders(project);
+  const previewableFiles = project.files.filter((file) => file.capability.canPreview);
+  const previewablePreferredFileId = previewableFiles.some((file) => file.id === preferredFileId)
+    ? preferredFileId
+    : previewableFiles[0]?.id;
+
+  return {
+    placeholders,
+    previewableFiles,
+    preferredFileId: previewablePreferredFileId,
+    scanNote: buildProjectScanNote(project)
+  };
 }
 
 export function buildProjectScanNote(project: ProjectScanResult): string {

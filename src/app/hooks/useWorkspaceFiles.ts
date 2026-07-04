@@ -28,7 +28,8 @@ import { useWorkspaceSelection } from "./useWorkspaceSelection";
 import { codeSelectionForExplanation, pickRetainedExplanation } from "./retainExplanation";
 import { seedBrowserHydratedFile, stripUnexplainableFile } from "./hydrateLoadedFile";
 import { upsertFileInList } from "./workspaceFileList";
-import { buildProjectFilePlaceholders, buildProjectScanNote } from "./projectOpenHelpers";
+import { canRefreshLoadedFile } from "./workspaceRefreshController";
+import { buildProjectOpenPlan } from "./projectOpenHelpers";
 import { resolveWorkspaceName } from "../utils/workspacePaths";
 
 export type PersistenceStatus = "preview" | "initializing" | "ready" | "error";
@@ -144,10 +145,11 @@ export function useWorkspaceFiles() {
   const refreshLoadedFile = useCallback(
     async (file: CodeFile, announce: boolean) => {
       if (
-        !isDesktopRuntime() ||
-        file.source !== "local" ||
-        !file.isLoaded ||
-        refreshInFlightRef.current
+        !canRefreshLoadedFile({
+          file,
+          isDesktop: isDesktopRuntime(),
+          refreshInFlight: refreshInFlightRef.current
+        })
       ) {
         return;
       }
@@ -358,8 +360,8 @@ export function useWorkspaceFiles() {
       setProjectGuide(guide);
       setGuideFocusToken((current) => current + 1);
 
-      const placeholders = buildProjectFilePlaceholders(project);
-      const previewableFiles = project.files.filter((file) => file.capability.canPreview);
+      const projectOpenPlan = buildProjectOpenPlan(project, guide?.readingPath[0]?.fileId);
+      const { placeholders, previewableFiles } = projectOpenPlan;
       if (previewableFiles.length === 0) {
         setFiles(placeholders);
         setSelectedFileId(placeholders[0]?.id ?? "");
@@ -373,11 +375,10 @@ export function useWorkspaceFiles() {
       let activeFirstFile: CodeFile;
       try {
         activeFirstFile = await hydrateLoadedFile(
-          await loadFirstAvailableProjectFile(project, guide?.readingPath[0]?.fileId)
+          await loadFirstAvailableProjectFile(project, projectOpenPlan.preferredFileId)
         );
       } catch (error) {
-        const fallbackFileId =
-          guide?.readingPath[0]?.fileId ?? previewableFiles[0]?.id ?? placeholders[0]?.id ?? "";
+        const fallbackFileId = projectOpenPlan.preferredFileId ?? placeholders[0]?.id ?? "";
         setFiles(placeholders);
         setSelectedFileId(fallbackFileId);
         setSelectedExplanationId("");
@@ -394,9 +395,8 @@ export function useWorkspaceFiles() {
       if (guide && activeFirstFile.projectId) {
         await refreshPersistedProjectGuide(activeFirstFile.projectId);
       }
-      const scanNote = buildProjectScanNote(project);
       setWorkspaceStatus(
-        `${project.files.length} 个文件，${previewableFiles.length} 个可预览：${project.rootPath}${scanNote}${guideError ? `；阅读路径生成失败：${guideError}` : ""}`
+        `${project.files.length} 个文件，${previewableFiles.length} 个可预览：${project.rootPath}${projectOpenPlan.scanNote}${guideError ? `；阅读路径生成失败：${guideError}` : ""}`
       );
     } catch (error) {
       setWorkspaceStatus(errorMessage(error));

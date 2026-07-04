@@ -5,7 +5,11 @@ import type {
   ProjectScanResult,
   ProjectTreeNode
 } from "../../types/explanation";
-import { buildProjectFilePlaceholders, buildProjectScanNote } from "./projectOpenHelpers";
+import {
+  buildProjectFilePlaceholders,
+  buildProjectOpenPlan,
+  buildProjectScanNote
+} from "./projectOpenHelpers";
 
 describe("buildProjectFilePlaceholders", () => {
   it("maps each project file entry into a placeholder preserving entry fields", () => {
@@ -112,6 +116,57 @@ describe("buildProjectScanNote", () => {
     const project = projectScanResult({ truncated: false, skippedEntries: 0 });
 
     expect(buildProjectScanNote(project)).toBe("");
+  });
+});
+
+describe("buildProjectOpenPlan", () => {
+  it("keeps the preferred reading path file when it is previewable", () => {
+    const entryA = projectFileEntry({ id: "file:a", relativePath: "a.py" });
+    const entryB = projectFileEntry({ id: "file:b", relativePath: "b.py" });
+    const project = projectScanResult({ files: [entryA, entryB] });
+
+    const plan = buildProjectOpenPlan(project, "file:b");
+
+    expect(plan.placeholders).toHaveLength(2);
+    expect(plan.previewableFiles.map((file) => file.id)).toEqual(["file:a", "file:b"]);
+    expect(plan.preferredFileId).toBe("file:b");
+  });
+
+  it("falls back to the first previewable file when the preferred file is unsafe", () => {
+    const safe = projectFileEntry({ id: "file:safe", relativePath: "safe.py" });
+    const unsafe = projectFileEntry({
+      id: "file:unsafe",
+      relativePath: "unsafe.bin",
+      capability: capability({ canPreview: false, canExplain: false })
+    });
+    const project = projectScanResult({ files: [safe, unsafe] });
+
+    const plan = buildProjectOpenPlan(project, "file:unsafe");
+
+    expect(plan.previewableFiles.map((file) => file.id)).toEqual(["file:safe"]);
+    expect(plan.preferredFileId).toBe("file:safe");
+  });
+
+  it("keeps placeholders but has no preferred file when nothing can be previewed", () => {
+    const unsafe = projectFileEntry({
+      id: "file:unsafe",
+      capability: capability({ canPreview: false, canExplain: false })
+    });
+    const project = projectScanResult({ files: [unsafe] });
+
+    const plan = buildProjectOpenPlan(project, "file:unsafe");
+
+    expect(plan.placeholders).toHaveLength(1);
+    expect(plan.previewableFiles).toEqual([]);
+    expect(plan.preferredFileId).toBeUndefined();
+  });
+
+  it("includes the scan note used by the workspace status", () => {
+    const project = projectScanResult({ truncated: true, skippedEntries: 12 });
+
+    const plan = buildProjectOpenPlan(project);
+
+    expect(plan.scanNote).toBe(buildProjectScanNote(project));
   });
 });
 
