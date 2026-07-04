@@ -20,7 +20,8 @@
     "repair:native": "node scripts/repair-native-deps.mjs",
     "icons:generate": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/generate-icons.ps1",
     "release:windows": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/release-windows.ps1",
-    "verify:signature": "node scripts/verify-authenticode.mjs"
+    "verify:signature": "node scripts/verify-authenticode.mjs",
+    "verify:linux": "node scripts/verify-linux-dev.mjs"
   },
   "dependencies": {
     "@tauri-apps/api": "2.11.0",
