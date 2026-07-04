@@ -183,7 +183,7 @@ impl std::fmt::Display for ProviderError {
 }
 
 impl ProviderErrorCode {
-    fn as_str(self) -> &'static str {
+    pub(crate) fn as_str(self) -> &'static str {
         match self {
             Self::ClientConfiguration => "llm.client_configuration",
             Self::Timeout => "llm.timeout",

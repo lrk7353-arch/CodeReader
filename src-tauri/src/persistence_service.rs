@@ -1568,6 +1568,21 @@ mod tests {
     use super::*;
 
     #[test]
+    fn corrupted_database_file_returns_error_without_replacing_file() {
+        let database_path = temp_database_path("corrupt");
+        std::fs::write(&database_path, b"not a sqlite database")
+            .expect("corrupt fixture should write");
+
+        let error = open_database(&database_path).expect_err("corrupt database should fail");
+        let contents = std::fs::read(&database_path).expect("corrupt fixture should remain");
+
+        assert!(error.contains("SQLite persistence error"));
+        assert_eq!(contents, b"not a sqlite database");
+
+        let _ = std::fs::remove_file(database_path);
+    }
+
+    #[test]
     fn hydrates_seed_explanations_and_restores_reading_state() {
         let database_path = temp_database_path("hydrate");
         let request = sample_request();

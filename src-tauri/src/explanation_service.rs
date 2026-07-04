@@ -7,6 +7,7 @@ use serde_json::json;
 #[cfg(not(test))]
 use tauri::AppHandle;
 
+use crate::app_error::AppError;
 #[cfg(not(test))]
 use crate::context_builder::ContextNodeInput;
 use crate::context_builder::{
@@ -145,9 +146,10 @@ struct ExplanationValidationContext<'a> {
 
 #[cfg(not(test))]
 #[tauri::command]
-pub fn get_model_config(app: AppHandle) -> Result<ModelConfigPayload, String> {
-    let database_path = persistence_service::database_path(&app)?;
-    let stored = persistence_service::load_model_config(&database_path)?;
+pub fn get_model_config(app: AppHandle) -> Result<ModelConfigPayload, AppError> {
+    let database_path = persistence_service::database_path(&app).map_err(AppError::database)?;
+    let stored =
+        persistence_service::load_model_config(&database_path).map_err(AppError::database)?;
     model_config_payload(stored)
 }
 
@@ -156,14 +158,14 @@ pub fn get_model_config(app: AppHandle) -> Result<ModelConfigPayload, String> {
 pub fn save_model_config(
     app: AppHandle,
     request: SaveModelConfigRequest,
-) -> Result<ModelConfigPayload, String> {
+) -> Result<ModelConfigPayload, AppError> {
     let endpoint = normalize_endpoint(&request.endpoint)?;
     let model = request.model.trim();
     if model.is_empty() {
-        return Err("模型名称不能为空。".to_string());
+        return Err(AppError::configuration("模型名称不能为空。"));
     }
     if model.chars().count() > 160 {
-        return Err("模型名称过长。".to_string());
+        return Err(AppError::configuration("模型名称过长。"));
     }
     let timeout_seconds = request
         .timeout_seconds
@@ -179,21 +181,22 @@ pub fn save_model_config(
         }
     }
 
-    let database_path = persistence_service::database_path(&app)?;
+    let database_path = persistence_service::database_path(&app).map_err(AppError::database)?;
     let stored =
-        persistence_service::save_model_config(&database_path, &endpoint, model, timeout_seconds)?;
+        persistence_service::save_model_config(&database_path, &endpoint, model, timeout_seconds)
+            .map_err(AppError::database)?;
     model_config_payload(Some(stored))
 }
 
 #[cfg(not(test))]
 #[tauri::command]
-pub fn reset_model_config(app: AppHandle) -> Result<ModelConfigPayload, String> {
+pub fn reset_model_config(app: AppHandle) -> Result<ModelConfigPayload, AppError> {
     match credential_entry()?.delete_credential() {
         Ok(()) | Err(KeyringError::NoEntry) => {}
         Err(error) => return Err(keyring_error(error)),
     }
-    let database_path = persistence_service::database_path(&app)?;
-    persistence_service::delete_model_config(&database_path)?;
+    let database_path = persistence_service::database_path(&app).map_err(AppError::database)?;
+    persistence_service::delete_model_config(&database_path).map_err(AppError::database)?;
     model_config_payload(None)
 }
 
@@ -202,18 +205,25 @@ pub fn reset_model_config(app: AppHandle) -> Result<ModelConfigPayload, String> 
 pub async fn generate_explanation(
     app: AppHandle,
     request: GenerateExplanationRequest,
-) -> Result<GenerateExplanationPayload, String> {
+) -> Result<GenerateExplanationPayload, AppError> {
     if !request.code_transmission_approved {
-        return Err("发送已取消：必须由用户明确确认后才能把上下文片段发送给模型。".to_string());
+        return Err(AppError::configuration(
+            "发送已取消：必须由用户明确确认后才能把上下文片段发送给模型。",
+        ));
     }
 
-    let database_path = persistence_service::database_path(&app)?;
-    let stored = persistence_service::load_model_config(&database_path)?
-        .ok_or_else(|| "尚未配置 LLM。请先在模型设置中填写端点和模型名称。".to_string())?;
+    let database_path = persistence_service::database_path(&app).map_err(AppError::database)?;
+    let stored = persistence_service::load_model_config(&database_path)
+        .map_err(AppError::database)?
+        .ok_or_else(|| {
+            AppError::configuration("尚未配置 LLM。请先在模型设置中填写端点和模型名称。")
+        })?;
     let endpoint = normalize_endpoint(&stored.endpoint)?;
     let api_key = read_api_key()?;
     if api_key.is_none() && !endpoint_allows_keyless(&endpoint)? {
-        return Err("当前远程模型端点没有可用的 API Key。请先打开模型设置保存密钥。".to_string());
+        return Err(AppError::credential_not_set(
+            "当前远程模型端点没有可用的 API Key。请先打开模型设置保存密钥。",
+        ));
     }
 
     let context_request = BuildContextRequest {
@@ -245,9 +255,9 @@ pub async fn generate_explanation(
         },
         budget: None,
     };
-    let context = build_context_bundle(context_request)?;
+    let context = build_context_bundle(context_request).map_err(AppError::configuration)?;
     let display_mode = normalize_display_mode(request.display_mode.as_deref())?;
-    let prompt = build_user_prompt(&context, &display_mode)?;
+    let prompt = build_user_prompt(&context, &display_mode).map_err(AppError::configuration)?;
     let (structured, attempts) = request_structured_explanation(
         &stored,
         api_key.as_deref(),
@@ -320,8 +330,9 @@ pub async fn generate_explanation(
         "endpoint": endpoint.clone(),
     })
     .to_string();
-    let context_sources = serde_json::to_string(&context.sources)
-        .map_err(|error| format!("Failed to serialize context provenance: {error}"))?;
+    let context_sources = serde_json::to_string(&context.sources).map_err(|error| {
+        AppError::configuration(format!("Failed to serialize context provenance: {error}"))
+    })?;
 
     let explanation = persistence_service::save_generated_explanation(
         &database_path,
@@ -360,7 +371,8 @@ pub async fn generate_explanation(
             context_id: context.context_id.clone(),
             context_sources,
         },
-    )?;
+    )
+    .map_err(AppError::database)?;
 
     Ok(GenerateExplanationPayload {
         explanation,
@@ -371,7 +383,7 @@ pub async fn generate_explanation(
     })
 }
 
-fn model_config_payload(stored: Option<StoredModelConfig>) -> Result<ModelConfigPayload, String> {
+fn model_config_payload(stored: Option<StoredModelConfig>) -> Result<ModelConfigPayload, AppError> {
     let has_api_key = read_api_key()?.is_some();
     let (endpoint, model, timeout_seconds, updated_at) = match stored {
         Some(config) => (
@@ -407,9 +419,8 @@ async fn request_structured_explanation(
     target_end: usize,
     file_line_count: usize,
     expected_display_mode: &str,
-) -> Result<(StructuredExplanation, usize), String> {
-    let provider =
-        OpenAiCompatibleProvider::new(config.timeout_seconds).map_err(|error| error.to_string())?;
+) -> Result<(StructuredExplanation, usize), AppError> {
+    let provider = OpenAiCompatibleProvider::new(config.timeout_seconds).map_err(AppError::from)?;
     let validation = ExplanationValidationContext {
         target_start,
         target_end,
@@ -426,7 +437,7 @@ async fn request_structured_explanation_with_provider<P: LlmProvider>(
     api_key: Option<&str>,
     prompt: String,
     validation: &ExplanationValidationContext<'_>,
-) -> Result<(StructuredExplanation, usize), String> {
+) -> Result<(StructuredExplanation, usize), AppError> {
     let mut messages = vec![
         ProviderMessage::system(system_prompt()),
         ProviderMessage::user(prompt),
@@ -440,7 +451,7 @@ async fn request_structured_explanation_with_provider<P: LlmProvider>(
             messages: messages.clone(),
         })
         .await
-        .map_err(|error| error.to_string())?;
+        .map_err(AppError::from)?;
     match parse_and_validate_structured_explanation(
         &first,
         validation.target_start,
@@ -452,8 +463,8 @@ async fn request_structured_explanation_with_provider<P: LlmProvider>(
         Err(first_error) => {
             messages.push(ProviderMessage::assistant(first));
             messages.push(ProviderMessage::user(format!(
-                    "上一次输出无法通过结构校验：{first_error}。只修复 JSON 格式和字段，不要添加代码围栏或额外说明。"
-                )));
+                "上一次输出无法通过结构校验：{first_error}。只修复 JSON 格式和字段，不要添加代码围栏或额外说明。"
+            )));
             let repaired = provider
                 .complete(CompletionRequest {
                     endpoint: &config.endpoint,
@@ -462,7 +473,7 @@ async fn request_structured_explanation_with_provider<P: LlmProvider>(
                     messages,
                 })
                 .await
-                .map_err(|error| error.to_string())?;
+                .map_err(AppError::from)?;
             parse_and_validate_structured_explanation(
                 &repaired,
                 validation.target_start,
@@ -472,7 +483,9 @@ async fn request_structured_explanation_with_provider<P: LlmProvider>(
             )
             .map(|structured| (structured, 2))
             .map_err(|error| {
-                format!("模型连续两次返回了无效结构，现有解释未被覆盖。最后一次错误：{error}")
+                AppError::llm_invalid_response(format!(
+                    "模型连续两次返回了无效结构，现有解释未被覆盖。最后一次错误：{error}"
+                ))
             })
         }
     }
@@ -630,24 +643,27 @@ schema:
 关系行号只能引用 Context Bundle 中真实存在的当前文件行号。不要输出 raw confidence 数字。"#
 }
 
-fn normalize_endpoint(value: &str) -> Result<String, String> {
+fn normalize_endpoint(value: &str) -> Result<String, AppError> {
     let value = value.trim();
-    let url = Url::parse(value).map_err(|_| "模型端点不是有效 URL。".to_string())?;
+    let url = Url::parse(value).map_err(|_| AppError::configuration("模型端点不是有效 URL。"))?;
     let host = url
         .host_str()
-        .ok_or_else(|| "模型端点缺少主机名。".to_string())?;
+        .ok_or_else(|| AppError::configuration("模型端点缺少主机名。"))?;
     let local = is_local_host(host);
     if url.scheme() != "https" && !(url.scheme() == "http" && local) {
-        return Err("远程模型端点必须使用 HTTPS；HTTP 仅允许 localhost。".to_string());
+        return Err(AppError::configuration(
+            "远程模型端点必须使用 HTTPS；HTTP 仅允许 localhost。",
+        ));
     }
     if url.cannot_be_a_base() {
-        return Err("模型端点格式无效。".to_string());
+        return Err(AppError::configuration("模型端点格式无效。"));
     }
     Ok(url.to_string())
 }
 
-fn endpoint_allows_keyless(endpoint: &str) -> Result<bool, String> {
-    let url = Url::parse(endpoint).map_err(|_| "模型端点不是有效 URL。".to_string())?;
+fn endpoint_allows_keyless(endpoint: &str) -> Result<bool, AppError> {
+    let url =
+        Url::parse(endpoint).map_err(|_| AppError::configuration("模型端点不是有效 URL。"))?;
     Ok(url.host_str().map(is_local_host).unwrap_or(false))
 }
 
@@ -655,19 +671,21 @@ fn is_local_host(host: &str) -> bool {
     matches!(host, "localhost" | "127.0.0.1" | "::1")
 }
 
-fn normalize_display_mode(value: Option<&str>) -> Result<String, String> {
+fn normalize_display_mode(value: Option<&str>) -> Result<String, AppError> {
     match value.unwrap_or("plain") {
         "plain" => Ok("plain".to_string()),
         "detailed" => Ok("detailed".to_string()),
-        _ => Err("展示模式必须是 plain 或 detailed。".to_string()),
+        _ => Err(AppError::configuration(
+            "展示模式必须是 plain 或 detailed。",
+        )),
     }
 }
 
-fn credential_entry() -> Result<Entry, String> {
+fn credential_entry() -> Result<Entry, AppError> {
     Entry::new(KEYRING_SERVICE, KEYRING_USER).map_err(keyring_error)
 }
 
-fn read_api_key() -> Result<Option<String>, String> {
+fn read_api_key() -> Result<Option<String>, AppError> {
     match credential_entry()?.get_password() {
         Ok(value) if value.trim().is_empty() => Ok(None),
         Ok(value) => Ok(Some(value)),
@@ -676,8 +694,8 @@ fn read_api_key() -> Result<Option<String>, String> {
     }
 }
 
-fn keyring_error(error: KeyringError) -> String {
-    format!("系统凭据库操作失败：{error}")
+fn keyring_error(error: KeyringError) -> AppError {
+    AppError::credential_unavailable(format!("系统凭据库操作失败：{error}"))
 }
 
 fn stable_explanation_id(

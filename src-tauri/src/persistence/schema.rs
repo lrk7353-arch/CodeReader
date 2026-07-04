@@ -371,6 +371,21 @@ mod tests {
         assert!(error.contains("newer than this CodeReader build supports"));
     }
 
+    #[test]
+    fn failed_migration_rolls_back_user_version() {
+        let conn = Connection::open_in_memory().expect("database opens");
+        conn.pragma_update(None, "user_version", 0)
+            .expect("version writes");
+
+        let error =
+            run_migration(&conn, LATEST_DATABASE_VERSION + 1).expect_err("migration should fail");
+
+        assert!(error.contains("No SQLite migration is registered"));
+        assert_eq!(database_version(&conn).expect("version reads"), 0);
+        conn.execute("CREATE TABLE rollback_probe (id INTEGER)", [])
+            .expect("transaction should be closed after rollback");
+    }
+
     fn column_names(conn: &Connection, table: &str) -> Vec<String> {
         let mut statement = conn
             .prepare(&format!("PRAGMA table_info({table})"))
