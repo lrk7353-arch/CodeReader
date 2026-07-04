@@ -1,3 +1,4 @@
+mod app_error;
 mod change_detection;
 mod code_service;
 mod context_builder;
