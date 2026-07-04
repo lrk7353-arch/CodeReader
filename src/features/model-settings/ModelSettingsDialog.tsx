@@ -84,16 +84,20 @@ export function ModelSettingsDialog({
 
         <form className="settings-form" onSubmit={submit}>
           <label>
-            <span>Chat Completions URL</span>
+            <span>Chat Completions / Responses URL</span>
             <input
               type="url"
               autoFocus
               value={endpoint}
               onChange={(event) => setEndpoint(event.target.value)}
-              placeholder="https://api.example.com/v1/chat/completions"
+              placeholder="https://api.example.com/v1/chat/completions or /v1/responses"
               required
             />
           </label>
+          <p className="credential-note">
+            Supports Chat Completions, for example /v1/chat/completions, or Responses, for example
+            /v1/responses.
+          </p>
           <label>
             <span>模型名称</span>
             <input
