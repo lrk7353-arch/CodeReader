@@ -11,5 +11,5 @@ export function canRefreshLoadedFile({
   isDesktop,
   refreshInFlight
 }: WorkspaceRefreshGuardInput): boolean {
-  return isDesktop && file.source === "local" && file.isLoaded && !refreshInFlight;
+  return isDesktop && file.source === "local" && file.isLoaded === true && !refreshInFlight;
 }

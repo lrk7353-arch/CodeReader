@@ -1,8 +1,8 @@
-import type { CodeFile, ProjectScanResult } from "../../types/explanation";
+import type { CodeFile, ProjectFileEntry, ProjectScanResult } from "../../types/explanation";
 
 export interface ProjectOpenPlan {
   placeholders: CodeFile[];
-  previewableFiles: CodeFile[];
+  previewableFiles: ProjectFileEntry[];
   preferredFileId?: string;
   scanNote: string;
 }
