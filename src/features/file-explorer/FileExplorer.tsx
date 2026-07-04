@@ -17,6 +17,8 @@ import { ProjectGuidePanel } from "../project-guide/ProjectGuidePanel";
 import { buildProjectTree, type ProjectTreeItem } from "./projectTree";
 import { buildFocusedTargetList, COMPACT_TARGET_LIMIT } from "./targetList";
 
+const EMPTY_PROJECT_NODES: ProjectTreeNode[] = [];
+
 interface FileExplorerProps {
   files: SampleFile[];
   guideFocusToken?: number;
@@ -35,7 +37,7 @@ export function FileExplorer({
   files,
   guideFocusToken = 0,
   projectGuide,
-  projectNodes = [],
+  projectNodes = EMPTY_PROJECT_NODES,
   selectedFileId,
   selectedExplanationId,
   activeLine,

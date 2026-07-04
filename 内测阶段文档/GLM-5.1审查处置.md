@@ -13,6 +13,12 @@
 | 跨平台脚本 | 部分可取 | `cargo:*` 已提供跨平台 Node 入口；正式安装包仍只承诺 Windows x64。 |
 | 国际化 | 方向可取，非本轮硬门槛 | 当前内测用户界面仍以中文为主；文案资源层进入 Beta 2。 |
 | 细化错误类型 | 可取 | provider 已产生稳定分类；全后端统一 `AppError` 进入 Beta 2。 |
+
+## Beta 2 收尾复核
+
+- 文案资源层：已在 `0.11.0-beta.2` 中以 `src/app/copy.ts` 落地 `zh-CN`（默认）与 `en` 两套资源；本轮仅迁移阶段身份、顶栏、持久化、解释状态等可见顶层文案，深嵌套业务文案留待后续按区域推进。
+- `AppError`：后端统一枚举与稳定错误码已合入，前端解析逻辑见 `src/app/appError.ts` 与 `src/app/appError.test.ts`。
+- 签名验证：Windows 发布脚本接入 `scripts/sign-windows-artifacts.ps1`，并新增跨平台 `scripts/verify-authenticode.mjs` 策略层（Vitest 17 项覆盖），公开分发前切换为 `--require-signed` 即为硬门槛。
 | 增加架构与上手文档 | 可取 | 已新增本架构入口与内测质量基线；根 README 更新阶段入口。 |
 | 增加核心容器与 LLM 测试 | 判断部分失真 | 仓库原有 provider HTTP mock 测试；本轮新增 App 冒烟、错误映射和迁移测试，交互级 UI 测试进入 Beta 2。 |
 

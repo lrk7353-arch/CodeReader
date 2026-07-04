@@ -7,6 +7,7 @@ $ErrorActionPreference = "Stop"
 
 $repoRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot ".."))
 . (Join-Path $PSScriptRoot "configure-windows-rust.ps1")
+. (Join-Path $PSScriptRoot "sign-windows-artifacts.ps1")
 $cargoTarget = if ($env:CODEREADER_CARGO_TARGET_DIR) {
     $env:CODEREADER_CARGO_TARGET_DIR
 } elseif (Test-Path -LiteralPath "D:\CodeReaderCache") {
@@ -126,19 +127,40 @@ try {
         $destination = Join-Path $artifactDirectory $bundle.Name
         Copy-Item -LiteralPath $bundle.FullName -Destination $destination -Force
         $copied = Get-Item -LiteralPath $destination
-        $hash = Get-FileHash -LiteralPath $destination -Algorithm SHA256
         [pscustomobject]@{
             name = $copied.Name
             bundleType = $copied.Extension.TrimStart(".").ToLowerInvariant()
             architecture = "x86_64"
             sizeBytes = $copied.Length
-            sha256 = $hash.Hash.ToLowerInvariant()
+            sha256 = $null
             sourcePath = $bundle.FullName
             artifactPath = $copied.FullName
         }
     }
 
     $package = Get-Content -Raw package.json | ConvertFrom-Json
+
+    $copiedArtifacts = @($manifestEntries | ForEach-Object { Get-Item -LiteralPath $_.artifactPath })
+    $signingManifestPath = Join-Path $artifactDirectory "signing-manifest.json"
+    $signingEntries = @(Protect-ReleaseArtifacts -Artifacts $copiedArtifacts -ManifestPath $signingManifestPath)
+    foreach ($entry in $manifestEntries) {
+        $signingEntry = $signingEntries |
+            Where-Object { $_.name -eq $entry.name } |
+            Select-Object -First 1
+        $signingSummary = [ordered]@{
+            signed = $signingEntry.signed
+            verified = $signingEntry.verified
+            signatureStatus = $signingEntry.signatureStatus
+            signer = $signingEntry.signer
+            thumbprint = $signingEntry.thumbprint
+            timestampSigner = $signingEntry.timestampSigner
+        }
+        Add-Member -NotePropertyName signing -NotePropertyValue $signingSummary -InputObject $entry
+        $finalArtifact = Get-Item -LiteralPath $entry.artifactPath
+        $entry.sizeBytes = $finalArtifact.Length
+        $entry.sha256 = (Get-FileHash -LiteralPath $entry.artifactPath -Algorithm SHA256).Hash.ToLowerInvariant()
+    }
+
     $manifest = [ordered]@{
         product = "CodeReader"
         version = $package.version
@@ -146,9 +168,10 @@ try {
         architecture = "x86_64"
         generatedAt = [DateTimeOffset]::Now.ToString("o")
         artifacts = @($manifestEntries)
+        signingManifest = $signingManifestPath
     }
     $manifestPath = Join-Path $artifactDirectory "release-manifest.json"
-    $manifest | ConvertTo-Json -Depth 5 | Set-Content -Encoding UTF8 $manifestPath
+    $manifest | ConvertTo-Json -Depth 6 | Set-Content -Encoding UTF8 $manifestPath
 
     $checksumPath = Join-Path $artifactDirectory "SHA256SUMS.txt"
     $manifestEntries |
@@ -161,6 +184,7 @@ try {
         Select-Object name, bundleType, architecture, sizeBytes, sha256, artifactPath |
         Format-Table -AutoSize
     Write-Host "Manifest: $manifestPath"
+    Write-Host "Signing manifest: $signingManifestPath"
     Write-Host "Checksums: $checksumPath"
 } finally {
     Pop-Location

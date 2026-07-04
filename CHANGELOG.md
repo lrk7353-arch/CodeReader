@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+### 0.11.0-beta.2
+
+- Promote the internal beta phase to `0.11.0-beta.2` with formalised diagnosability and regression coverage.
+- Land a backend `AppError` taxonomy that propagates stable codes to the frontend parser.
+- Add React Testing Library interaction coverage for the workspace controllers (open file, open project, refresh, feedback).
+- Cover migration rollback, corrupted database, and credential-store failure paths in unit tests.
+- Define an internal beta feedback template, crash/log redaction rules, and a regression checklist.
+- Add a cross-module Authenticode signing and verification framework that records unsigned-internal-beta builds without requiring a real certificate, and ships a unit-testable Node policy module.
+- Extract a user-facing copy resource layer that reserves an English UI entry alongside the shipped Chinese strings.
+- Update the topbar stage badge, version metadata, and beta acceptance docs to reflect the Beta 2 milestone.
+
+### 0.11.0-beta.1
+
 - Start the `0.11.0-beta.1` internal beta phase with explicit quality, architecture, and iteration standards.
 - Add transactional SQLite migrations driven by `PRAGMA user_version`, including legacy and future-schema tests.
 - Add an `LlmProvider` boundary with stable provider error categories.
