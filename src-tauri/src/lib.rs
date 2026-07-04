@@ -26,6 +26,7 @@ pub fn run() {
             persistence_service::initialize_persistence,
             persistence_service::save_explanation_feedback,
             persistence_service::save_reading_state,
+            persistence_service::upsert_prompt_version,
             project_guidance::generate_project_guide,
             project_guidance::load_project_guide
         ])

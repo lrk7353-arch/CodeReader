@@ -2,7 +2,7 @@ use rusqlite::Connection;
 
 use super::database_error;
 
-pub(super) const LATEST_DATABASE_VERSION: i64 = 1;
+pub(super) const LATEST_DATABASE_VERSION: i64 = 2;
 
 pub(super) fn migrate(conn: &Connection) -> Result<(), String> {
     conn.execute_batch("PRAGMA foreign_keys = ON;")
@@ -32,6 +32,7 @@ fn run_migration(conn: &Connection, version: i64) -> Result<(), String> {
 
     let result = match version {
         1 => migrate_to_v1(conn),
+        2 => migrate_to_v2(conn),
         _ => Err(format!(
             "No SQLite migration is registered for version {version}."
         )),
@@ -48,6 +49,31 @@ fn run_migration(conn: &Connection, version: i64) -> Result<(), String> {
             Err(error)
         }
     }
+}
+
+fn migrate_to_v2(conn: &Connection) -> Result<(), String> {
+    conn.execute_batch(
+        "
+        CREATE TABLE IF NOT EXISTS prompt_versions (
+          version TEXT PRIMARY KEY,
+          status TEXT NOT NULL,
+          rollout_percent INTEGER NOT NULL,
+          rollback_from TEXT,
+          notes TEXT,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_prompt_versions_status
+          ON prompt_versions(status, rollout_percent, updated_at);
+
+        INSERT OR IGNORE INTO prompt_versions
+          (version, status, rollout_percent, rollback_from, notes, created_at, updated_at)
+        VALUES
+          ('code-explanation-v0.1', 'active', 100, NULL, 'Default Beta prompt', datetime('now'), datetime('now'));
+        ",
+    )
+    .map_err(database_error)
 }
 
 fn migrate_to_v1(conn: &Connection) -> Result<(), String> {
@@ -322,6 +348,14 @@ mod tests {
             )
             .expect("table query succeeds");
         assert_eq!(table_count, 1);
+        let prompt_table_count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'prompt_versions'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("prompt table query succeeds");
+        assert_eq!(prompt_table_count, 1);
     }
 
     #[test]
@@ -384,6 +418,28 @@ mod tests {
         assert_eq!(database_version(&conn).expect("version reads"), 0);
         conn.execute("CREATE TABLE rollback_probe (id INTEGER)", [])
             .expect("transaction should be closed after rollback");
+    }
+
+    #[test]
+    fn version_one_database_receives_prompt_registry() {
+        let conn = Connection::open_in_memory().expect("database opens");
+        run_migration(&conn, 1).expect("v1 migration succeeds");
+        assert_eq!(database_version(&conn).expect("version reads"), 1);
+
+        migrate(&conn).expect("v1 database upgrades");
+
+        assert_eq!(
+            database_version(&conn).expect("version reads"),
+            LATEST_DATABASE_VERSION
+        );
+        let status: String = conn
+            .query_row(
+                "SELECT status FROM prompt_versions WHERE version = 'code-explanation-v0.1'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("default prompt version exists");
+        assert_eq!(status, "active");
     }
 
     fn column_names(conn: &Connection, table: &str) -> Vec<String> {

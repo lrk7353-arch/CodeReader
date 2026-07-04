@@ -25,7 +25,6 @@ const DEFAULT_ENDPOINT: &str = "https://api.openai.com/v1/chat/completions";
 const DEFAULT_TIMEOUT_SECONDS: u64 = 60;
 const KEYRING_SERVICE: &str = "com.codereader.app";
 const KEYRING_USER: &str = "default-llm-api-key";
-const PROMPT_VERSION: &str = "code-explanation-v0.1";
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -333,6 +332,11 @@ pub async fn generate_explanation(
     let context_sources = serde_json::to_string(&context.sources).map_err(|error| {
         AppError::configuration(format!("Failed to serialize context provenance: {error}"))
     })?;
+    let prompt_version = persistence_service::active_prompt_version(
+        &database_path,
+        persistence_service::DEFAULT_GENERATION_PROMPT_VERSION,
+    )
+    .map_err(AppError::database)?;
 
     let explanation = persistence_service::save_generated_explanation(
         &database_path,
@@ -366,7 +370,7 @@ pub async fn generate_explanation(
             depends_on_lines: structured.depends_on_lines,
             affects_lines: structured.affects_lines,
             display_mode: structured.display_mode,
-            prompt_version: PROMPT_VERSION.to_string(),
+            prompt_version,
             model_info,
             context_id: context.context_id.clone(),
             context_sources,
