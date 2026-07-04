@@ -3,6 +3,7 @@ import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+const passthroughArgs = process.argv.slice(2);
 
 function toWslPath(value) {
   const normalized = value.replaceAll("/", "\\");
@@ -40,7 +41,7 @@ if (wslRoot) {
     '[ -f "$HOME/.profile" ] && . "$HOME/.profile"',
     'export PATH="$HOME/.local/bin:$PATH"',
     `cd ${shellQuote(wslRoot)}`,
-    "node scripts/test.mjs"
+    ["node scripts/test.mjs", ...passthroughArgs.map(shellQuote)].join(" ")
   ].join("; ");
   const result = spawnSync("wsl", ["bash", "-lc", command], {
     stdio: "inherit",
@@ -49,4 +50,8 @@ if (wslRoot) {
   process.exit(result.status ?? 1);
 }
 
-run("Vitest", process.execPath, [resolve(root, "node_modules/vitest/vitest.mjs"), "run"]);
+run("Vitest", process.execPath, [
+  resolve(root, "node_modules/vitest/vitest.mjs"),
+  "run",
+  ...passthroughArgs
+]);
