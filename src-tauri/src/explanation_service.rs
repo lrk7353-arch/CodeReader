@@ -332,9 +332,10 @@ pub async fn generate_explanation(
     let context_sources = serde_json::to_string(&context.sources).map_err(|error| {
         AppError::configuration(format!("Failed to serialize context provenance: {error}"))
     })?;
-    let prompt_version = persistence_service::active_prompt_version(
+    let prompt_version = persistence_service::pick_prompt_version(
         &database_path,
         persistence_service::DEFAULT_GENERATION_PROMPT_VERSION,
+        rand::random::<f64>(),
     )
     .map_err(AppError::database)?;
 

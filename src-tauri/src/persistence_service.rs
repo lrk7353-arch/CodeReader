@@ -40,14 +40,41 @@ pub(crate) use model_config::{
 };
 #[cfg(not(test))]
 #[doc(hidden)]
+pub use prompt_registry::__cmd__list_prompt_versions;
+#[cfg(not(test))]
+#[doc(hidden)]
+pub use prompt_registry::__cmd__rollback_prompt_version;
+#[cfg(not(test))]
+#[doc(hidden)]
 pub use prompt_registry::__cmd__upsert_prompt_version;
+#[cfg(not(test))]
+#[doc(hidden)]
+pub use prompt_registry::__tauri_command_name_list_prompt_versions;
+#[cfg(not(test))]
+#[doc(hidden)]
+pub use prompt_registry::__tauri_command_name_rollback_prompt_version;
 #[cfg(not(test))]
 #[doc(hidden)]
 pub use prompt_registry::__tauri_command_name_upsert_prompt_version;
 #[allow(unused_imports)]
 pub(crate) use prompt_registry::active_prompt_version;
 #[cfg(not(test))]
+pub use prompt_registry::list_prompt_versions;
+#[allow(unused_imports)]
+pub(crate) use prompt_registry::pick_prompt_version;
+#[cfg(not(test))]
+pub use prompt_registry::rollback_prompt_version;
+#[cfg(not(test))]
 pub use prompt_registry::upsert_prompt_version;
+#[allow(unused_imports)]
+pub(crate) use prompt_registry::{
+    list_prompt_versions_at_path, rollback_prompt_version_at_path,
+};
+#[allow(unused_imports)]
+pub(crate) use prompt_registry::{
+    PromptVersionPayload, RollbackPromptVersionPayload, RollbackPromptVersionRequest,
+    UpsertPromptVersionRequest,
+};
 #[allow(unused_imports)]
 pub(crate) use prompt_registry::DEFAULT_GENERATION_PROMPT_VERSION;
 #[cfg(not(test))]

@@ -374,6 +374,7 @@ name = "codereader"
 version = "0.11.0-beta.2"
 dependencies = [
  "keyring",
+ "rand",
  "reqwest",
  "rusqlite",
  "serde",

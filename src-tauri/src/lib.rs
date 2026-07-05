@@ -24,6 +24,8 @@ pub fn run() {
             explanation_service::save_model_config,
             persistence_service::hydrate_code_file_persistence,
             persistence_service::initialize_persistence,
+            persistence_service::list_prompt_versions,
+            persistence_service::rollback_prompt_version,
             persistence_service::save_explanation_feedback,
             persistence_service::save_reading_state,
             persistence_service::upsert_prompt_version,
