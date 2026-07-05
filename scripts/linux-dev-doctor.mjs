@@ -1,4 +1,5 @@
 import { spawnSync } from "node:child_process";
+import { existsSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -49,7 +50,12 @@ export const REQUIRED_PKG_CONFIG = Object.freeze([
     apt: "libwebkit2gtk-4.1-dev",
     hint: "JavaScriptCore headers pulled by WebKitGTK"
   },
-  { id: "xdo", apt: "libxdo-dev", hint: "window activation helpers" },
+  {
+    id: "xdo",
+    apt: "libxdo-dev",
+    hint: "window activation helpers",
+    headerFallback: "/usr/include/xdo.h"
+  },
   {
     id: "ayatana-appindicator3-0.1",
     apt: "libayatana-appindicator3-dev",
@@ -129,7 +135,18 @@ export function buildLinuxDevDoctorReport({
     platform === "linux" && hasPkgConfig
       ? REQUIRED_PKG_CONFIG.map((check) => {
           const result = runCheck(executor, "pkg-config", ["--exists", check.id]);
-          return { ...check, ...result };
+          if (result.ok || !check.headerFallback) {
+            return { ...check, ...result };
+          }
+          // libxdo-dev ships headers/libraries but no .pc file; fall back to a
+          // header existence check so the doctor does not false-negative on a
+          // correctly installed package.
+          const headerPresent = existsSync(check.headerFallback);
+          return {
+            ...check,
+            ok: headerPresent,
+            value: headerPresent ? `ok (header at ${check.headerFallback})` : result.value
+          };
         })
       : REQUIRED_PKG_CONFIG.map((check) => ({
           ...check,

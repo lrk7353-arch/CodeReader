@@ -2,7 +2,7 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
-import type { PromptVersionInfo } from "../../types/explanation";
+import type { PromptVersionInfo, UpsertPromptVersionInput } from "../../types/explanation";
 import { PromptRegistryDialog } from "./PromptRegistryDialog";
 
 function sampleVersions(overrides: Partial<PromptVersionInfo>[] = []): PromptVersionInfo[] {
@@ -37,12 +37,7 @@ interface RenderOptions {
   onClose?: () => void;
   onRefresh?: () => void;
   onRollback?: (target: string, failed: string, notes: string) => void;
-  onUpsert?: (input: {
-    version: string;
-    status: string;
-    rolloutPercent: number;
-    notes: string | null;
-  }) => void;
+  onUpsert?: (input: UpsertPromptVersionInput) => void;
 }
 
 function renderDialog(options: RenderOptions = {}) {
