@@ -58,6 +58,18 @@ function shellQuote(value) {
   return `'${value.replaceAll("'", "'\\''")}'`;
 }
 
+function buildEvidence({ platform, plannedGates, skipBuild }) {
+  return {
+    generatedAt: new Date().toISOString(),
+    platform,
+    root,
+    cwd: process.cwd(),
+    nodeVersion: process.version,
+    plannedGates,
+    skipBuild
+  };
+}
+
 export function runLinuxDevVerification({
   platform = process.platform,
   args = [],
@@ -72,6 +84,7 @@ export function runLinuxDevVerification({
   const plannedGates = skipBuild ? GATES.filter((gate) => gate.script !== "build") : [...GATES];
   const skipped = skipBuild ? ["build"] : [];
   const gateResults = [];
+  const evidence = buildEvidence({ platform: report.platform, plannedGates, skipBuild });
 
   if (!report.ok) {
     for (const gate of plannedGates) {
@@ -81,7 +94,7 @@ export function runLinuxDevVerification({
       printLinuxDevDoctorReport(report);
       stdout.write("\nVerification failed: Linux dev doctor prerequisites not met.\n");
     }
-    const summary = { ok: false, doctor: report, gates: gateResults, skipped };
+    const summary = { ok: false, doctor: report, gates: gateResults, skipped, evidence };
     if (json) {
       stdout.write(`${JSON.stringify(summary, null, 2)}\n`);
     }
@@ -121,7 +134,7 @@ export function runLinuxDevVerification({
     }
   }
 
-  const summary = { ok: !failed, doctor: report, gates: gateResults, skipped };
+  const summary = { ok: !failed, doctor: report, gates: gateResults, skipped, evidence };
 
   if (json) {
     stdout.write(`${JSON.stringify(summary, null, 2)}\n`);

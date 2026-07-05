@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { GATES, parseVerifyArgs, runLinuxDevVerification } from "./verify-linux-dev.mjs";
+import { DEBIAN_TAURI_PACKAGES } from "./linux-dev-doctor.mjs";
+
+const baselineAptInstallCommand = `sudo apt-get install -y ${DEBIAN_TAURI_PACKAGES.join(" ")}`;
 
 function passingDoctor() {
   return {
@@ -9,18 +12,27 @@ function passingDoctor() {
     missingCommands: [],
     missingPkgConfig: [],
     missingAptPackages: [],
+    recommendedAptInstallCommand: null,
+    baselineAptInstallCommand,
     ok: true
   };
 }
 
 function failingDoctor() {
+  const missingAptPackages = ["libwebkit2gtk-4.1-dev"];
   return {
     platform: "linux",
     commandChecks: [{ name: "rustc", ok: false, value: "not found" }],
-    pkgConfigChecks: [],
+    pkgConfigChecks: [
+      { id: "webkit2gtk-4.1", apt: "libwebkit2gtk-4.1-dev", ok: false, value: "not found" }
+    ],
     missingCommands: [{ name: "rustc", ok: false, value: "not found" }],
-    missingPkgConfig: [],
-    missingAptPackages: [],
+    missingPkgConfig: [
+      { id: "webkit2gtk-4.1", apt: "libwebkit2gtk-4.1-dev", ok: false, value: "not found" }
+    ],
+    missingAptPackages,
+    recommendedAptInstallCommand: `sudo apt-get install -y ${missingAptPackages.join(" ")}`,
+    baselineAptInstallCommand,
     ok: false
   };
 }
@@ -81,6 +93,8 @@ describe("runLinuxDevVerification", () => {
     expect(calls).toEqual([]);
     expect(summary.skipped).toEqual(GATES.map((gate) => gate.script));
     expect(summary.doctor.ok).toBe(false);
+    expect(summary.doctor.recommendedAptInstallCommand).toContain("libwebkit2gtk-4.1-dev");
+    expect(summary.doctor.baselineAptInstallCommand).toBe(baselineAptInstallCommand);
   });
 
   it("runs every gate in order and reports success when all pass", () => {
@@ -140,6 +154,10 @@ describe("runLinuxDevVerification", () => {
     expect(summary.gates.map((gate) => gate.script)).toEqual(
       GATES.filter((gate) => gate.script !== "build").map((gate) => gate.script)
     );
+    expect(summary.evidence.skipBuild).toBe(true);
+    expect(summary.evidence.plannedGates.map((gate) => gate.script)).toEqual(
+      GATES.filter((gate) => gate.script !== "build").map((gate) => gate.script)
+    );
   });
 
   it("emits a JSON summary with doctor, gates, ok, and skipped fields", () => {
@@ -167,6 +185,15 @@ describe("runLinuxDevVerification", () => {
     expect(parsed.gates[0]).toHaveProperty("status", 0);
     expect(Array.isArray(parsed.skipped)).toBe(true);
     expect(parsed.skipped).toEqual([]);
+    expect(parsed.evidence).toBeDefined();
+    expect(parsed.evidence.platform).toBe("linux");
+    expect(typeof parsed.evidence.generatedAt).toBe("string");
+    expect(new Date(parsed.evidence.generatedAt).toISOString()).toBe(parsed.evidence.generatedAt);
+    expect(parsed.evidence.nodeVersion).toBe(process.version);
+    expect(parsed.evidence.skipBuild).toBe(false);
+    expect(parsed.evidence.plannedGates.map((gate) => gate.script)).toEqual(
+      GATES.map((gate) => gate.script)
+    );
   });
 
   it("emits a JSON summary with skipped gates when doctor fails", () => {
@@ -187,5 +214,11 @@ describe("runLinuxDevVerification", () => {
     expect(parsed.gates).toEqual([]);
     expect(parsed.skipped).toEqual(GATES.map((gate) => gate.script));
     expect(calls).toEqual([]);
+    expect(parsed.evidence.skipBuild).toBe(false);
+    expect(parsed.evidence.plannedGates.map((gate) => gate.script)).toEqual(
+      GATES.map((gate) => gate.script)
+    );
+    expect(parsed.doctor.recommendedAptInstallCommand).toContain("libwebkit2gtk-4.1-dev");
+    expect(parsed.doctor.baselineAptInstallCommand).toBe(baselineAptInstallCommand);
   });
 });

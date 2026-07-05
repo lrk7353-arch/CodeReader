@@ -65,6 +65,21 @@ machine-readable evidence and `--skip-build` for faster dependency checks while
 iterating. The lower-level `npm run doctor:linux` command remains useful when
 only the prerequisite report is needed.
 
+### JSON Evidence And Doctor Guidance
+
+The `--json` summary now carries an `evidence` object with stable fields for
+release records: `generatedAt` (ISO timestamp), `platform`, `root`/`cwd`,
+`nodeVersion`, `plannedGates`, and `skipBuild`. When the doctor fails, the
+summary's `doctor` report object carries the guidance fields
+`recommendedAptInstallCommand` (null when nothing is missing) and
+`baselineAptInstallCommand` (the full `DEBIAN_TAURI_PACKAGES` install command).
+
+The doctor also enforces Node.js major version 22: `node --version` output like
+`v20.x` is reported as `ok:false` with a hint pointing at Node.js 22.x, while
+unparseable output from an exiting-0 `node` command stays `ok:true` to avoid
+false negatives. This evidence shape is intended for Beta 3 acceptance records
+only and does not by itself confirm a pure Debian success.
+
 ## Current Evidence
 
 On the current WSL/Debian-like workspace, the frontend Linux path has been

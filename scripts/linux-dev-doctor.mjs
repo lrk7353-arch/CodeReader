@@ -19,7 +19,12 @@ export const DEBIAN_TAURI_PACKAGES = Object.freeze([
 ]);
 
 export const REQUIRED_COMMANDS = Object.freeze([
-  { name: "node", args: ["--version"], hint: "Install Node.js 22.x." },
+  {
+    name: "node",
+    args: ["--version"],
+    hint: "Install Node.js 22.x.",
+    requiredMajor: 22
+  },
   { name: "npm", args: ["--version"], hint: "Install npm with Node.js 22.x." },
   { name: "git", args: ["--version"], hint: "Install git.", apt: "git" },
   { name: "rustc", args: ["--version"], hint: "Install Rust stable with rustup." },
@@ -70,6 +75,27 @@ function runCheck(executor, command, args) {
   };
 }
 
+function parseMajorVersion(value) {
+  const match = String(value ?? "").match(/(\d+)\./);
+  return match ? Number(match[1]) : null;
+}
+
+function runCommandCheck(executor, check) {
+  const result = runCheck(executor, check.name, check.args);
+  if (result.ok && check.requiredMajor !== undefined) {
+    const major = parseMajorVersion(result.value);
+    if (major !== null && major !== check.requiredMajor) {
+      return {
+        ...check,
+        ...result,
+        ok: false,
+        hint: `Install Node.js ${check.requiredMajor}.x (detected ${major}.x).`
+      };
+    }
+  }
+  return { ...check, ...result };
+}
+
 export function createSpawnExecutor() {
   return (command, args) =>
     spawnSync(command, args, {
@@ -96,10 +122,7 @@ export function buildLinuxDevDoctorReport({
   platform = process.platform,
   executor = createSpawnExecutor()
 } = {}) {
-  const commandChecks = REQUIRED_COMMANDS.map((check) => {
-    const result = runCheck(executor, check.name, check.args);
-    return { ...check, ...result };
-  });
+  const commandChecks = REQUIRED_COMMANDS.map((check) => runCommandCheck(executor, check));
 
   const hasPkgConfig = commandChecks.some((check) => check.name === "pkg-config" && check.ok);
   const pkgConfigChecks =
@@ -119,6 +142,11 @@ export function buildLinuxDevDoctorReport({
   const missingAptPackages = [
     ...new Set([...missingCommands, ...missingPkgConfig].map((check) => check.apt).filter(Boolean))
   ];
+  const recommendedAptInstallCommand =
+    missingAptPackages.length > 0
+      ? `sudo apt-get install -y ${missingAptPackages.join(" ")}`
+      : null;
+  const baselineAptInstallCommand = `sudo apt-get install -y ${DEBIAN_TAURI_PACKAGES.join(" ")}`;
 
   return {
     platform,
@@ -127,6 +155,8 @@ export function buildLinuxDevDoctorReport({
     missingCommands,
     missingPkgConfig,
     missingAptPackages,
+    recommendedAptInstallCommand,
+    baselineAptInstallCommand,
     ok: missingCommands.length === 0 && missingPkgConfig.length === 0
   };
 }
@@ -145,9 +175,9 @@ export function printLinuxDevDoctorReport(report) {
   printTable("Commands", report.commandChecks);
   printTable("Tauri pkg-config libraries", report.pkgConfigChecks, "id");
 
-  if (report.missingAptPackages.length > 0) {
+  if (report.recommendedAptInstallCommand) {
     console.log("\nSuggested Debian/Ubuntu packages:");
-    console.log(`sudo apt-get install -y ${report.missingAptPackages.join(" ")}`);
+    console.log(report.recommendedAptInstallCommand);
   } else if (report.platform === "linux") {
     console.log("\nTauri Linux system dependencies are available.");
   }
