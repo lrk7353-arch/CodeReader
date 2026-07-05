@@ -316,15 +316,16 @@ async fn parse_chat_completion_response(
         })
 }
 
-async fn parse_responses_response(
-    response: reqwest::Response,
-) -> Result<String, ProviderError> {
-    let parsed = response.json::<ResponsesResponse>().await.map_err(|error| {
-        ProviderError::new(
-            ProviderErrorCode::InvalidResponse,
-            format!("Model response is not valid Responses JSON: {error}"),
-        )
-    })?;
+async fn parse_responses_response(response: reqwest::Response) -> Result<String, ProviderError> {
+    let parsed = response
+        .json::<ResponsesResponse>()
+        .await
+        .map_err(|error| {
+            ProviderError::new(
+                ProviderErrorCode::InvalidResponse,
+                format!("Model response is not valid Responses JSON: {error}"),
+            )
+        })?;
     if let Some(text) = parsed.output_text.as_deref() {
         if !text.trim().is_empty() {
             return Ok(text.to_string());
@@ -356,8 +357,12 @@ mod tests {
     fn detects_responses_endpoint_by_path() {
         assert!(is_responses_endpoint("https://api.openai.com/v1/responses"));
         assert!(is_responses_endpoint("http://127.0.0.1:11434/v1/responses"));
-        assert!(is_responses_endpoint("https://api.example.com/api/responses"));
-        assert!(!is_responses_endpoint("https://api.openai.com/v1/chat/completions"));
+        assert!(is_responses_endpoint(
+            "https://api.example.com/api/responses"
+        ));
+        assert!(!is_responses_endpoint(
+            "https://api.openai.com/v1/chat/completions"
+        ));
         assert!(!is_responses_endpoint("not-a-url"));
     }
 
@@ -384,7 +389,10 @@ mod tests {
                     request.body
                 );
                 assert!(
-                    request.headers.to_ascii_lowercase().contains("bearer sk-test-key"),
+                    request
+                        .headers
+                        .to_ascii_lowercase()
+                        .contains("bearer sk-test-key"),
                     "bearer auth header should be sent: {}",
                     request.headers
                 );
@@ -597,8 +605,9 @@ mod tests {
                 })
                 .unwrap_or(0);
             if buffer.len() >= header_end + content_length {
-                let body = String::from_utf8_lossy(&buffer[header_end..header_end + content_length])
-                    .to_string();
+                let body =
+                    String::from_utf8_lossy(&buffer[header_end..header_end + content_length])
+                        .to_string();
                 return CapturedRequest { headers, body };
             }
         }

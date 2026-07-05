@@ -216,8 +216,7 @@ mod tests {
         let active = active_prompt_version(&database_path, "fallback-v0")
             .expect("active prompt version resolves");
         assert_eq!(
-            active,
-            DEFAULT_GENERATION_PROMPT_VERSION,
+            active, DEFAULT_GENERATION_PROMPT_VERSION,
             "active must outrank canary"
         );
 
@@ -233,8 +232,8 @@ mod tests {
         )
         .expect("default version deprecates");
 
-        let promoted = active_prompt_version(&database_path, "fallback-v0")
-            .expect("canary is promoted");
+        let promoted =
+            active_prompt_version(&database_path, "fallback-v0").expect("canary is promoted");
         assert_eq!(promoted, "code-explanation-v0.2-rc1");
 
         let _ = std::fs::remove_file(database_path);
@@ -262,8 +261,10 @@ mod tests {
             record.rollback_from.as_deref(),
             Some(DEFAULT_GENERATION_PROMPT_VERSION)
         );
-        assert!(record.notes.as_deref().is_some_and(|notes| notes
-            .contains("malformed JSON")));
+        assert!(record
+            .notes
+            .as_deref()
+            .is_some_and(|notes| notes.contains("malformed JSON")));
 
         let active = active_prompt_version(&database_path, "fallback-v0")
             .expect("active prompt version resolves");
@@ -323,8 +324,7 @@ mod tests {
             &PathBuf::from(":memory:"),
             prompt_registration("code-explanation-v0.3", "rolled_back", 0, None, None),
         );
-        assert!(rollback_without_source
-            .is_err_and(|error| error.contains("rollback_from")));
+        assert!(rollback_without_source.is_err_and(|error| error.contains("rollback_from")));
     }
 
     fn prompt_registration(

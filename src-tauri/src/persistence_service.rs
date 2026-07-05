@@ -19,18 +19,25 @@ mod schema;
 #[path = "persistence/prompt_registry.rs"]
 mod prompt_registry;
 
+#[path = "persistence/model_config.rs"]
+mod model_config;
+
 #[allow(unused_imports)]
-pub(crate) use prompt_registry::DEFAULT_GENERATION_PROMPT_VERSION;
-#[allow(unused_imports)]
-pub(crate) use prompt_registry::active_prompt_version;
-#[cfg(not(test))]
-pub use prompt_registry::upsert_prompt_version;
+pub(crate) use model_config::{
+    delete_model_config, load_model_config, save_model_config, StoredModelConfig,
+};
 #[cfg(not(test))]
 #[doc(hidden)]
 pub use prompt_registry::__cmd__upsert_prompt_version;
 #[cfg(not(test))]
 #[doc(hidden)]
 pub use prompt_registry::__tauri_command_name_upsert_prompt_version;
+#[allow(unused_imports)]
+pub(crate) use prompt_registry::active_prompt_version;
+#[cfg(not(test))]
+pub use prompt_registry::upsert_prompt_version;
+#[allow(unused_imports)]
+pub(crate) use prompt_registry::DEFAULT_GENERATION_PROMPT_VERSION;
 
 const DATABASE_FILE_NAME: &str = "codereader.sqlite";
 const EXPLANATION_SCHEMA_VERSION: &str = "mvp-0.1";
@@ -153,13 +160,6 @@ pub struct ExplanationPayload {
     pub(crate) status: String,
     pub(crate) reading_state: String,
     pub(crate) created_at: String,
-    pub(crate) updated_at: String,
-}
-
-pub(crate) struct StoredModelConfig {
-    pub(crate) endpoint: String,
-    pub(crate) model: String,
-    pub(crate) timeout_seconds: u64,
     pub(crate) updated_at: String,
 }
 
@@ -678,69 +678,6 @@ fn save_feedback_at_path(
         feedback_type: request.feedback_type,
         created_at,
     })
-}
-
-pub(crate) fn load_model_config(database_path: &Path) -> Result<Option<StoredModelConfig>, String> {
-    let conn = open_database(database_path)?;
-    let mut statement = conn
-        .prepare(
-            "SELECT endpoint, model, timeout_seconds, updated_at
-             FROM model_provider_settings
-             WHERE id = 'default'",
-        )
-        .map_err(database_error)?;
-    let mut rows = statement.query([]).map_err(database_error)?;
-    let Some(row) = rows.next().map_err(database_error)? else {
-        return Ok(None);
-    };
-    let timeout_seconds: i64 = row.get(2).map_err(database_error)?;
-    Ok(Some(StoredModelConfig {
-        endpoint: row.get(0).map_err(database_error)?,
-        model: row.get(1).map_err(database_error)?,
-        timeout_seconds: usize::try_from(timeout_seconds.max(1))
-            .unwrap_or(60)
-            .min(300) as u64,
-        updated_at: row.get(3).map_err(database_error)?,
-    }))
-}
-
-pub(crate) fn save_model_config(
-    database_path: &Path,
-    endpoint: &str,
-    model: &str,
-    timeout_seconds: u64,
-) -> Result<StoredModelConfig, String> {
-    let conn = open_database(database_path)?;
-    let updated_at = now_timestamp();
-    conn.execute(
-        "INSERT INTO model_provider_settings
-         (id, endpoint, model, timeout_seconds, updated_at)
-         VALUES ('default', ?1, ?2, ?3, ?4)
-         ON CONFLICT(id) DO UPDATE SET
-           endpoint = excluded.endpoint,
-           model = excluded.model,
-           timeout_seconds = excluded.timeout_seconds,
-           updated_at = excluded.updated_at",
-        params![endpoint, model, timeout_seconds as i64, updated_at],
-    )
-    .map_err(database_error)?;
-
-    Ok(StoredModelConfig {
-        endpoint: endpoint.to_string(),
-        model: model.to_string(),
-        timeout_seconds,
-        updated_at,
-    })
-}
-
-pub(crate) fn delete_model_config(database_path: &Path) -> Result<(), String> {
-    let conn = open_database(database_path)?;
-    conn.execute(
-        "DELETE FROM model_provider_settings WHERE id = 'default'",
-        [],
-    )
-    .map_err(database_error)?;
-    Ok(())
 }
 
 pub(crate) fn save_generated_explanation(
