@@ -31,6 +31,7 @@ jobs:
             curl \
             wget \
             file \
+            pkg-config \
             libxdo-dev \
             libssl-dev \
             libayatana-appindicator3-dev \
@@ -56,26 +57,8 @@ jobs:
       - name: Install frontend dependencies
         run: npm ci
 
-      - name: Frontend tests
-        run: npm test
-
-      - name: Frontend lint
-        run: npm run lint
-
-      - name: Frontend format
-        run: npm run format:check
-
-      - name: Frontend production build
-        run: npm run build
-
-      - name: Rust tests
-        run: npm run cargo:test
-
       - name: Rust format
         run: cargo fmt --manifest-path src-tauri/Cargo.toml -- --check
 
-      - name: Rust clippy
-        run: npm run cargo:clippy
-
-      - name: Rust check
-        run: npm run cargo:check
+      - name: Linux development verification
+        run: npm run verify:linux

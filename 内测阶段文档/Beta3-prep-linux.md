@@ -55,30 +55,27 @@ Recommended validation flow on Debian:
 
 ```bash
 npm ci
-npm run doctor:linux
-npm test
-npm run lint
-npm run format:check
-npm run build
-npm run cargo:test
-npm run cargo:clippy
-npm run cargo:check
+npm run verify:linux
 npm run tauri dev
 ```
 
-`npm run doctor:linux` checks command-line tools and `pkg-config` libraries. It
-fails when required Linux development prerequisites are missing and prints the
-Debian packages most likely to fix the issue.
+`npm run verify:linux` first runs the Linux doctor, then runs the Rust and
+frontend gates used for development validation. It supports `--json` for
+machine-readable evidence and `--skip-build` for faster dependency checks while
+iterating. The lower-level `npm run doctor:linux` command remains useful when
+only the prerequisite report is needed.
 
 ## Current Evidence
 
 On the current WSL/Debian-like workspace, the frontend Linux path has been
 validated with:
 
-- `npm test`: 21 test files / 148 tests.
+- `npm test`: 23 test files / 158 tests.
 - `npm run lint`.
 - `npm run format:check`.
 - `npm run build`.
+- `npm run verify:linux -- --json --skip-build`: correctly forwards from the
+  Windows/UNC workspace into WSL and reports missing Linux prerequisites.
 
 Rust cannot be fully validated inside the current WSL shell until `rustc` and
 `cargo` are installed there. Windows-side Rust gates were already green during
@@ -87,6 +84,7 @@ gates in the pure Linux/Debian environment.
 
 ## Done Criteria For Beta 3 Linux Validation
 
+- `npm run verify:linux` passes on the Debian workstation.
 - `npm run doctor:linux` passes on the Debian workstation.
 - `npm run tauri dev` launches the desktop app from that workstation.
 - Frontend gates and Rust gates pass on Linux/Debian.
