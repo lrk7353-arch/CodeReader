@@ -74,6 +74,15 @@ summary's `doctor` report object carries the guidance fields
 `recommendedAptInstallCommand` (null when nothing is missing) and
 `baselineAptInstallCommand` (the full `DEBIAN_TAURI_PACKAGES` install command).
 
+The `--output <path>` flag writes the same JSON summary to a file, creating
+parent directories as needed, and does so even when the doctor fails so that
+evidence can be captured for release records without relying on stdout. It is
+additive: `--json` still prints JSON to stdout, and without `--json` the human
+report is preserved. For example:
+`npm run verify:linux -- --json --output artifacts/linux-evidence/verify-linux.json`.
+This command is available for evidence capture; it does not by itself confirm a
+passing Linux validation.
+
 The doctor enforces a minimum of Node.js major version 22: `node --version`
 output like `v20.x` is reported as `ok:false` with a hint pointing at Node.js
 22.x or newer LTS, while newer LTS releases such as `v24.x` are accepted.

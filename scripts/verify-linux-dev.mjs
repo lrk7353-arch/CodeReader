@@ -1,4 +1,5 @@
 import { spawnSync } from "node:child_process";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
 import { buildLinuxDevDoctorReport, printLinuxDevDoctorReport } from "./linux-dev-doctor.mjs";
@@ -16,10 +17,22 @@ export const GATES = Object.freeze([
 ]);
 
 export function parseVerifyArgs(argv) {
-  return {
-    skipBuild: argv.includes("--skip-build"),
-    json: argv.includes("--json")
-  };
+  const result = { skipBuild: false, json: false, output: null };
+  for (let i = 0; i < argv.length; i += 1) {
+    const arg = argv[i];
+    if (arg === "--skip-build") {
+      result.skipBuild = true;
+    } else if (arg === "--json") {
+      result.json = true;
+    } else if (arg === "--output") {
+      const next = argv[i + 1];
+      if (next !== undefined && !next.startsWith("--")) {
+        result.output = next;
+        i += 1;
+      }
+    }
+  }
+  return result;
 }
 
 function npmCommand() {
@@ -70,6 +83,20 @@ function buildEvidence({ platform, plannedGates, skipBuild }) {
   };
 }
 
+function writeSummaryOutput(summary, { output, json, stdout }) {
+  if (!json && !output) {
+    return;
+  }
+  const jsonText = `${JSON.stringify(summary, null, 2)}\n`;
+  if (json) {
+    stdout.write(jsonText);
+  }
+  if (output) {
+    mkdirSync(dirname(output), { recursive: true });
+    writeFileSync(output, jsonText);
+  }
+}
+
 export function runLinuxDevVerification({
   platform = process.platform,
   args = [],
@@ -77,7 +104,7 @@ export function runLinuxDevVerification({
   executor,
   stdout = process.stdout
 } = {}) {
-  const { skipBuild, json } = parseVerifyArgs(args);
+  const { skipBuild, json, output } = parseVerifyArgs(args);
 
   const report = doctorReport ?? buildLinuxDevDoctorReport({ platform });
 
@@ -95,9 +122,7 @@ export function runLinuxDevVerification({
       stdout.write("\nVerification failed: Linux dev doctor prerequisites not met.\n");
     }
     const summary = { ok: false, doctor: report, gates: gateResults, skipped, evidence };
-    if (json) {
-      stdout.write(`${JSON.stringify(summary, null, 2)}\n`);
-    }
+    writeSummaryOutput(summary, { output, json, stdout });
     return summary;
   }
 
@@ -136,11 +161,10 @@ export function runLinuxDevVerification({
 
   const summary = { ok: !failed, doctor: report, gates: gateResults, skipped, evidence };
 
-  if (json) {
-    stdout.write(`${JSON.stringify(summary, null, 2)}\n`);
-  } else {
+  if (!json) {
     stdout.write(`\n${summary.ok ? "All gates passed." : "Verification failed."}\n`);
   }
+  writeSummaryOutput(summary, { output, json, stdout });
 
   return summary;
 }

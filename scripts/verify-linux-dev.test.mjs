@@ -1,4 +1,7 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { GATES, parseVerifyArgs, runLinuxDevVerification } from "./verify-linux-dev.mjs";
 import { DEBIAN_TAURI_PACKAGES } from "./linux-dev-doctor.mjs";
 
@@ -68,10 +71,46 @@ function failingOnExecutor(failScript) {
 
 describe("parseVerifyArgs", () => {
   it("parses --skip-build and --json flags", () => {
-    expect(parseVerifyArgs([])).toEqual({ skipBuild: false, json: false });
-    expect(parseVerifyArgs(["--skip-build"])).toEqual({ skipBuild: true, json: false });
-    expect(parseVerifyArgs(["--json"])).toEqual({ skipBuild: false, json: true });
-    expect(parseVerifyArgs(["--skip-build", "--json"])).toEqual({ skipBuild: true, json: true });
+    expect(parseVerifyArgs([])).toEqual({ skipBuild: false, json: false, output: null });
+    expect(parseVerifyArgs(["--skip-build"])).toEqual({
+      skipBuild: true,
+      json: false,
+      output: null
+    });
+    expect(parseVerifyArgs(["--json"])).toEqual({ skipBuild: false, json: true, output: null });
+    expect(parseVerifyArgs(["--skip-build", "--json"])).toEqual({
+      skipBuild: true,
+      json: true,
+      output: null
+    });
+  });
+
+  it("parses --output <path> and leaves output null when absent or missing a value", () => {
+    expect(parseVerifyArgs(["--output", "artifacts/verify-linux.json"])).toEqual({
+      skipBuild: false,
+      json: false,
+      output: "artifacts/verify-linux.json"
+    });
+    expect(parseVerifyArgs(["--json", "--output", "out.json"])).toEqual({
+      skipBuild: false,
+      json: true,
+      output: "out.json"
+    });
+    expect(parseVerifyArgs(["--skip-build", "--output", "out.json", "--json"])).toEqual({
+      skipBuild: true,
+      json: true,
+      output: "out.json"
+    });
+    expect(parseVerifyArgs(["--output"])).toEqual({
+      skipBuild: false,
+      json: false,
+      output: null
+    });
+    expect(parseVerifyArgs(["--output", "--json"])).toEqual({
+      skipBuild: false,
+      json: true,
+      output: null
+    });
   });
 });
 
@@ -220,5 +259,64 @@ describe("runLinuxDevVerification", () => {
     );
     expect(parsed.doctor.recommendedAptInstallCommand).toContain("libwebkit2gtk-4.1-dev");
     expect(parsed.doctor.baselineAptInstallCommand).toBe(baselineAptInstallCommand);
+  });
+});
+
+describe("runLinuxDevVerification --output", () => {
+  let tempDir;
+
+  beforeEach(() => {
+    tempDir = mkdtempSync(join(tmpdir(), "verify-linux-output-"));
+  });
+
+  afterEach(() => {
+    rmSync(tempDir, { recursive: true, force: true });
+  });
+
+  it("writes the JSON summary to --output and stdout when --json is also passed", () => {
+    const { executor } = succeedingExecutor();
+    const stdout = silentStdout();
+    const outputPath = join(tempDir, "verify-linux.json");
+
+    const summary = runLinuxDevVerification({
+      platform: "linux",
+      args: ["--json", "--output", outputPath],
+      doctorReport: passingDoctor(),
+      executor,
+      stdout
+    });
+
+    const printed = stdout.text();
+    expect(printed).toContain('"ok"');
+    expect(existsSync(outputPath)).toBe(true);
+    const fileContent = readFileSync(outputPath, "utf8");
+    expect(fileContent).toBe(printed);
+    expect(JSON.parse(fileContent)).toEqual(summary);
+    expect(JSON.parse(fileContent).ok).toBe(true);
+  });
+
+  it("writes the JSON summary to --output even when the doctor fails and --json is absent", () => {
+    const { executor, calls } = succeedingExecutor();
+    const stdout = silentStdout();
+    const outputPath = join(tempDir, "nested", "verify-linux.json");
+
+    const summary = runLinuxDevVerification({
+      platform: "linux",
+      args: ["--output", outputPath],
+      doctorReport: failingDoctor(),
+      executor,
+      stdout
+    });
+
+    expect(summary.ok).toBe(false);
+    expect(calls).toEqual([]);
+    expect(stdout.text()).toContain("Verification failed");
+    expect(stdout.text()).not.toContain('"ok"');
+    expect(existsSync(outputPath)).toBe(true);
+    const fileContent = readFileSync(outputPath, "utf8");
+    expect(JSON.parse(fileContent)).toEqual(summary);
+    expect(JSON.parse(fileContent).ok).toBe(false);
+    expect(JSON.parse(fileContent).gates).toEqual([]);
+    expect(JSON.parse(fileContent).skipped).toEqual(GATES.map((gate) => gate.script));
   });
 });
