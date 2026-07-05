@@ -90,6 +90,19 @@ Unparseable output from an exiting-0 `node` command stays `ok:true` to avoid
 false negatives. This evidence shape is intended for Beta 3 acceptance records
 only and does not by itself confirm a pure Debian success.
 
+### Desktop Smoke Evidence Template
+
+`npm run smoke:linux-desktop` writes a manual evidence template to
+`artifacts/linux-evidence/desktop-smoke.json` (override with `--output <path>`),
+creating parent directories as needed. The template records `generatedAt`,
+`platform`, `root`/`cwd`, `nodeVersion`, the recommended manual command
+`npm run tauri dev`, a `checklist` with the fields `tauriDevLaunched`,
+`windowVisible`, `openFileWorks`, `openProjectWorks`, `modelSettingsOpen`, and
+`notes`, plus a `status` that defaults to `manual_required`. It is intended to
+be run after `npm run evidence:linux` on the Debian workstation, then filled in
+by hand after observing the desktop app. It does not launch the app and does
+not by itself confirm a passing Linux smoke.
+
 ## Current Evidence
 
 On the current WSL/Debian-like workspace, the frontend Linux path has been
