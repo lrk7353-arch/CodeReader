@@ -22,6 +22,9 @@ mod prompt_registry;
 #[path = "persistence/model_config.rs"]
 mod model_config;
 
+#[path = "persistence/user_activity.rs"]
+mod user_activity;
+
 #[allow(unused_imports)]
 pub(crate) use model_config::{
     delete_model_config, load_model_config, save_model_config, StoredModelConfig,
@@ -38,6 +41,26 @@ pub(crate) use prompt_registry::active_prompt_version;
 pub use prompt_registry::upsert_prompt_version;
 #[allow(unused_imports)]
 pub(crate) use prompt_registry::DEFAULT_GENERATION_PROMPT_VERSION;
+#[cfg(not(test))]
+#[doc(hidden)]
+pub use user_activity::__cmd__save_explanation_feedback;
+#[cfg(not(test))]
+#[doc(hidden)]
+pub use user_activity::__cmd__save_reading_state;
+#[cfg(not(test))]
+#[doc(hidden)]
+pub use user_activity::__tauri_command_name_save_explanation_feedback;
+#[cfg(not(test))]
+#[doc(hidden)]
+pub use user_activity::__tauri_command_name_save_reading_state;
+#[cfg(not(test))]
+pub use user_activity::{save_explanation_feedback, save_reading_state};
+#[allow(unused_imports)]
+pub(crate) use user_activity::{save_feedback_at_path, save_reading_state_at_path};
+#[allow(unused_imports)]
+pub use user_activity::{
+    SaveFeedbackPayload, SaveFeedbackRequest, SaveReadingStatePayload, SaveReadingStateRequest,
+};
 
 const DATABASE_FILE_NAME: &str = "codereader.sqlite";
 const EXPLANATION_SCHEMA_VERSION: &str = "mvp-0.1";
@@ -199,41 +222,6 @@ pub(crate) struct GeneratedExplanationInput {
     pub(crate) context_sources: String,
 }
 
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct SaveReadingStateRequest {
-    project_id: String,
-    explanation_id: String,
-    state: String,
-    note: Option<String>,
-}
-
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct SaveReadingStatePayload {
-    explanation_id: String,
-    state: String,
-    updated_at: String,
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct SaveFeedbackRequest {
-    project_id: String,
-    explanation_id: String,
-    feedback_type: String,
-    user_note: Option<String>,
-}
-
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct SaveFeedbackPayload {
-    id: String,
-    explanation_id: String,
-    feedback_type: String,
-    created_at: String,
-}
-
 #[cfg(not(test))]
 #[tauri::command]
 pub fn hydrate_code_file_persistence(
@@ -253,26 +241,6 @@ pub fn initialize_persistence(app: AppHandle) -> Result<PersistenceStatusPayload
         database_path: display_path(&database_path),
         initialized: true,
     })
-}
-
-#[cfg(not(test))]
-#[tauri::command]
-pub fn save_reading_state(
-    app: AppHandle,
-    request: SaveReadingStateRequest,
-) -> Result<SaveReadingStatePayload, String> {
-    let database_path = database_path(&app)?;
-    save_reading_state_at_path(&database_path, request)
-}
-
-#[cfg(not(test))]
-#[tauri::command]
-pub fn save_explanation_feedback(
-    app: AppHandle,
-    request: SaveFeedbackRequest,
-) -> Result<SaveFeedbackPayload, String> {
-    let database_path = database_path(&app)?;
-    save_feedback_at_path(&database_path, request)
 }
 
 fn hydrate_code_file_at_path(
@@ -609,74 +577,6 @@ fn hydrate_code_file_at_path(
         database_path: display_path(database_path),
         project_id,
         change_summary,
-    })
-}
-
-fn save_reading_state_at_path(
-    database_path: &Path,
-    request: SaveReadingStateRequest,
-) -> Result<SaveReadingStatePayload, String> {
-    let conn = open_database(database_path)?;
-    let updated_at = now_timestamp();
-    conn.execute(
-        "INSERT INTO user_reading_states (id, project_id, explanation_id, state, note, updated_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6)
-         ON CONFLICT(project_id, explanation_id) DO UPDATE SET
-           state = excluded.state,
-           note = excluded.note,
-           updated_at = excluded.updated_at",
-        params![
-            reading_state_id(&request.project_id, &request.explanation_id),
-            request.project_id,
-            request.explanation_id,
-            request.state,
-            request.note,
-            updated_at
-        ],
-    )
-    .map_err(database_error)?;
-
-    Ok(SaveReadingStatePayload {
-        explanation_id: request.explanation_id,
-        state: request.state,
-        updated_at,
-    })
-}
-
-fn save_feedback_at_path(
-    database_path: &Path,
-    request: SaveFeedbackRequest,
-) -> Result<SaveFeedbackPayload, String> {
-    let conn = open_database(database_path)?;
-    let created_at = now_timestamp();
-    let id = feedback_id(
-        &request.project_id,
-        &request.explanation_id,
-        &request.feedback_type,
-        request.user_note.as_deref(),
-        &created_at,
-    );
-
-    conn.execute(
-        "INSERT INTO explanation_feedback
-         (id, project_id, explanation_id, feedback_type, user_note, created_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-        params![
-            id,
-            request.project_id,
-            request.explanation_id,
-            request.feedback_type,
-            request.user_note,
-            created_at
-        ],
-    )
-    .map_err(database_error)?;
-
-    Ok(SaveFeedbackPayload {
-        id,
-        explanation_id: request.explanation_id,
-        feedback_type: request.feedback_type,
-        created_at,
     })
 }
 
