@@ -21,7 +21,8 @@
     "icons:generate": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/generate-icons.ps1",
     "release:windows": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/release-windows.ps1",
     "verify:signature": "node scripts/verify-authenticode.mjs",
-    "verify:linux": "node scripts/verify-linux-dev.mjs"
+    "verify:linux": "node scripts/verify-linux-dev.mjs",
+    "evidence:linux": "node scripts/verify-linux-dev.mjs --json --output artifacts/linux-evidence/verify-linux.json"
   },
   "dependencies": {
     "@tauri-apps/api": "2.11.0",

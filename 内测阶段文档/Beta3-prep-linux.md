@@ -79,7 +79,7 @@ parent directories as needed, and does so even when the doctor fails so that
 evidence can be captured for release records without relying on stdout. It is
 additive: `--json` still prints JSON to stdout, and without `--json` the human
 report is preserved. For example:
-`npm run verify:linux -- --json --output artifacts/linux-evidence/verify-linux.json`.
+`npm run evidence:linux`.
 This command is available for evidence capture; it does not by itself confirm a
 passing Linux validation.
 
