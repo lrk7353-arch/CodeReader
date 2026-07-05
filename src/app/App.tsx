@@ -1,14 +1,16 @@
 import { useMemo } from "react";
-import { BookOpen, FilePlus2, FolderOpen, Settings2 } from "lucide-react";
+import { BookOpen, FilePlus2, FolderOpen, Settings2, Tags } from "lucide-react";
 import { FileExplorer } from "../features/file-explorer/FileExplorer";
 import { MonacoCodeViewer } from "../features/code-viewer/MonacoCodeViewer";
 import { ExplanationPanel } from "../features/explanation-panel/ExplanationPanel";
 import { GenerationConfirmDialog } from "../features/explanation-generation/GenerationConfirmDialog";
 import { ModelSettingsDialog } from "../features/model-settings/ModelSettingsDialog";
+import { PromptRegistryDialog } from "../features/prompt-registry/PromptRegistryDialog";
 import { getAppCopy } from "./copy";
 import { useExplanationContext } from "./hooks/useExplanationContext";
 import { useExplanationFeedback } from "./hooks/useExplanationFeedback";
 import { useExplanationWriteback } from "./hooks/useExplanationWriteback";
+import { usePromptRegistry } from "./hooks/usePromptRegistry";
 import { useWorkspaceFiles } from "./hooks/useWorkspaceFiles";
 import { useModelWorkflow } from "./hooks/useModelWorkflow";
 
@@ -68,6 +70,7 @@ export function App() {
     setWorkspaceStatus,
     refreshPersistedProjectGuide
   });
+  const promptRegistry = usePromptRegistry({ onWorkspaceStatus: setWorkspaceStatus });
 
   const fileStatus = useMemo(() => {
     if (selectedFile.capability?.canPreview === false) {
@@ -131,6 +134,10 @@ export function App() {
           >
             <Settings2 size={16} aria-hidden="true" />
             <span>{copy.actions.model}</span>
+          </button>
+          <button type="button" onClick={promptRegistry.openDialog} title="Prompt 版本管理">
+            <Tags size={16} aria-hidden="true" />
+            <span>Prompt 版本</span>
           </button>
         </div>
         <div className="topbar-status">
@@ -220,6 +227,16 @@ export function App() {
         onClose={modelWorkflow.settings.close}
         onResetConfig={modelWorkflow.settings.clear}
         onSave={modelWorkflow.settings.save}
+      />
+      <PromptRegistryDialog
+        busy={promptRegistry.busy}
+        error={promptRegistry.error}
+        open={promptRegistry.open}
+        versions={promptRegistry.versions}
+        onClose={promptRegistry.close}
+        onRefresh={promptRegistry.refresh}
+        onRollback={promptRegistry.rollback}
+        onUpsert={promptRegistry.upsert}
       />
       {modelWorkflow.config && explanationContext.bundle && selectedExplanation ? (
         <GenerationConfirmDialog

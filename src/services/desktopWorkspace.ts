@@ -10,8 +10,12 @@ import type {
   ModelConfig,
   ProjectGuide,
   ProjectScanResult,
+  PromptVersionInfo,
   ReadingState,
-  SaveModelConfigInput
+  RollbackPromptVersionInput,
+  RollbackPromptVersionResult,
+  SaveModelConfigInput,
+  UpsertPromptVersionInput
 } from "../types/explanation";
 
 export function isDesktopRuntime() {
@@ -161,6 +165,25 @@ export async function saveModelConfig(input: SaveModelConfigInput): Promise<Mode
 export async function resetModelConfig(): Promise<ModelConfig> {
   ensureDesktopRuntime();
   return invoke<ModelConfig>("reset_model_config");
+}
+
+export async function listPromptVersions(): Promise<PromptVersionInfo[]> {
+  ensureDesktopRuntime();
+  return invoke<PromptVersionInfo[]>("list_prompt_versions");
+}
+
+export async function upsertPromptVersion(
+  input: UpsertPromptVersionInput
+): Promise<PromptVersionInfo> {
+  ensureDesktopRuntime();
+  return invoke<PromptVersionInfo>("upsert_prompt_version", { request: input });
+}
+
+export async function rollbackPromptVersion(
+  input: RollbackPromptVersionInput
+): Promise<RollbackPromptVersionResult> {
+  ensureDesktopRuntime();
+  return invoke<RollbackPromptVersionResult>("rollback_prompt_version", { request: input });
 }
 
 export async function generateExplanation(

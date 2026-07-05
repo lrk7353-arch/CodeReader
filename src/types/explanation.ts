@@ -306,3 +306,34 @@ export interface GenerateExplanationResult {
   model: string;
   attempts: number;
 }
+
+export type PromptVersionStatus = "active" | "canary" | "rolled_back" | "deprecated";
+
+export interface PromptVersionInfo {
+  version: string;
+  status: PromptVersionStatus;
+  rolloutPercent: number;
+  rollbackFrom?: string | null;
+  notes?: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface UpsertPromptVersionInput {
+  version: string;
+  status: PromptVersionStatus;
+  rolloutPercent: number;
+  rollbackFrom?: string | null;
+  notes?: string | null;
+}
+
+export interface RollbackPromptVersionInput {
+  targetVersion: string;
+  failedVersion: string;
+  notes?: string | null;
+}
+
+export interface RollbackPromptVersionResult {
+  target: PromptVersionInfo;
+  failed: PromptVersionInfo;
+}
