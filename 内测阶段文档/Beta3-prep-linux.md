@@ -33,7 +33,7 @@ The broader Beta 3 support backlog is still valid, but it is not the mainline:
 
 ## Debian Workstation Setup
 
-Install Node.js 22.x, npm, Rust stable, and the Linux packages needed by Tauri:
+Install Node.js 22.x or newer LTS (for example, 24.x), npm, Rust stable, and the Linux packages needed by Tauri:
 
 ```bash
 sudo apt-get update
@@ -74,9 +74,10 @@ summary's `doctor` report object carries the guidance fields
 `recommendedAptInstallCommand` (null when nothing is missing) and
 `baselineAptInstallCommand` (the full `DEBIAN_TAURI_PACKAGES` install command).
 
-The doctor also enforces Node.js major version 22: `node --version` output like
-`v20.x` is reported as `ok:false` with a hint pointing at Node.js 22.x, while
-unparseable output from an exiting-0 `node` command stays `ok:true` to avoid
+The doctor enforces a minimum of Node.js major version 22: `node --version`
+output like `v20.x` is reported as `ok:false` with a hint pointing at Node.js
+22.x or newer LTS, while newer LTS releases such as `v24.x` are accepted.
+Unparseable output from an exiting-0 `node` command stays `ok:true` to avoid
 false negatives. This evidence shape is intended for Beta 3 acceptance records
 only and does not by itself confirm a pure Debian success.
 

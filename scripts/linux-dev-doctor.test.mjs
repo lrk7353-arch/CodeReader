@@ -60,8 +60,23 @@ describe("linux-dev-doctor", () => {
     expect(nodeCheck.ok).toBe(false);
     expect(nodeCheck.value).toBe("v20.11.0");
     expect(nodeCheck.hint).toContain("Node.js 22.x");
+    expect(nodeCheck.hint).toContain("newer LTS");
     expect(nodeCheck.hint).toContain("20.x");
     expect(report.missingCommands.map((check) => check.name)).toContain("node");
+  });
+
+  it("accepts Node.js 24.x as a supported newer LTS release", () => {
+    const report = buildLinuxDevDoctorReport({
+      platform: "linux",
+      executor: executorWith({ nodeVersion: "v24.15.0" })
+    });
+
+    expect(report.ok).toBe(true);
+    const nodeCheck = report.commandChecks.find((check) => check.name === "node");
+    expect(nodeCheck.ok).toBe(true);
+    expect(nodeCheck.value).toBe("v24.15.0");
+    expect(nodeCheck.hint).toBe("Install Node.js 22.x or newer LTS.");
+    expect(report.missingCommands.map((check) => check.name)).not.toContain("node");
   });
 
   it("rejects the 'node 20.11.0' stdout shape when major is not 22", () => {
@@ -90,7 +105,7 @@ describe("linux-dev-doctor", () => {
 
     const nodeCheck = report.commandChecks.find((check) => check.name === "node");
     expect(nodeCheck.ok).toBe(true);
-    expect(nodeCheck.hint).toBe("Install Node.js 22.x.");
+    expect(nodeCheck.hint).toBe("Install Node.js 22.x or newer LTS.");
   });
 
   it("reports missing Rust commands and Debian package hints for missing Tauri libs", () => {

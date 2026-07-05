@@ -22,10 +22,10 @@ export const REQUIRED_COMMANDS = Object.freeze([
   {
     name: "node",
     args: ["--version"],
-    hint: "Install Node.js 22.x.",
-    requiredMajor: 22
+    hint: "Install Node.js 22.x or newer LTS.",
+    minimumMajor: 22
   },
-  { name: "npm", args: ["--version"], hint: "Install npm with Node.js 22.x." },
+  { name: "npm", args: ["--version"], hint: "Install npm with Node.js 22.x or newer LTS." },
   { name: "git", args: ["--version"], hint: "Install git.", apt: "git" },
   { name: "rustc", args: ["--version"], hint: "Install Rust stable with rustup." },
   { name: "cargo", args: ["--version"], hint: "Install Rust stable with rustup." },
@@ -82,14 +82,14 @@ function parseMajorVersion(value) {
 
 function runCommandCheck(executor, check) {
   const result = runCheck(executor, check.name, check.args);
-  if (result.ok && check.requiredMajor !== undefined) {
+  if (result.ok && check.minimumMajor !== undefined) {
     const major = parseMajorVersion(result.value);
-    if (major !== null && major !== check.requiredMajor) {
+    if (major !== null && major < check.minimumMajor) {
       return {
         ...check,
         ...result,
         ok: false,
-        hint: `Install Node.js ${check.requiredMajor}.x (detected ${major}.x).`
+        hint: `Install Node.js ${check.minimumMajor}.x or newer LTS (detected ${major}.x).`
       };
     }
   }
