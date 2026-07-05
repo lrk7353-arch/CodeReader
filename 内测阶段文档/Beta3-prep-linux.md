@@ -116,11 +116,15 @@ Linux system dependency set installed.
 - `npm run verify:linux`: all 7 gates pass on Linux — `cargo:check`,
   `cargo:clippy`, `cargo:test` (82 Rust tests), `test` (25 files / 184 tests),
   `lint`, `format:check`, `build`.
+- `npm run tauri dev`: launches the desktop app on Linux. The
+  `target/debug/codereader` binary started on WSL Ubuntu 24.04 with the WSLg
+  X server (`DISPLAY=:0`) and remained stable (no crash, no GTK errors) for
+  over two minutes while the Vite dev server bound `127.0.0.1:1420`.
+  `xdotool` was not installed so the window title could not be queried
+  programmatically; the open-file / open-project / model-settings checklist
+  items still require a manual interactive session. Evidence recorded in
+  `artifacts/linux-evidence/desktop-smoke.json`.
 - Machine-readable evidence: `artifacts/linux-evidence/verify-linux.json`.
-
-The `npm run tauri dev` manual smoke (launching the desktop app from the
-Debian workstation) remains a manual step; it requires an active Linux desktop
-session and is recorded via `npm run smoke:linux-desktop` after observation.
 
 Earlier frontend-only evidence (retained for reference): on the WSL workspace
 the frontend Linux path was previously validated with `npm test` (23 files /
@@ -134,13 +138,18 @@ Rust was installed).
 - `npm run verify:linux` passes on the Debian workstation. **Done.**
 - `npm run doctor:linux` passes on the Debian workstation. **Done.**
 - `npm run tauri dev` launches the desktop app from that workstation.
-  Manual step pending a Linux desktop session; evidence template available via
-  `npm run smoke:linux-desktop`.
+  **Done** — the debug binary starts and runs stably; the interactive
+  checklist (open file / open project / model settings) still requires a
+  manual desktop session.
 - Frontend gates and Rust gates pass on Linux/Debian. **Done.**
 - Any Linux-only dependency or path issue is either fixed or documented as a
   known limitation with a reproduction note.
   - Known limitation: `libxdo-dev` does not ship a `xdo.pc` pkg-config file;
     the doctor falls back to checking `/usr/include/xdo.h`. Tauri's Linux build
     links libxdo via header/library paths and is unaffected.
+  - Known limitation: `scripts/tauri.mjs` is designed for the Windows host and
+    forwards into WSL via a generated `.cmd` wrapper. To launch `tauri dev`
+    from inside WSL, run `node node_modules/@tauri-apps/cli/tauri.js dev`
+    directly until the wrapper learns to detect a Linux runtime.
 - The Windows release pipeline remains unchanged unless a separate release task
   explicitly expands the platform promise.
