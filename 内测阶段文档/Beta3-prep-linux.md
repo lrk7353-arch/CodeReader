@@ -105,28 +105,42 @@ not by itself confirm a passing Linux smoke.
 
 ## Current Evidence
 
-On the current WSL/Debian-like workspace, the frontend Linux path has been
-validated with:
+Beta 3 Linux validation has been completed on a WSL Ubuntu 24.04 LTS
+workstation with Rust 1.96.1 (x86_64-unknown-linux-gnu) and the full Tauri
+Linux system dependency set installed.
 
-- `npm test`: 23 test files / 158 tests.
-- `npm run lint`.
-- `npm run format:check`.
-- `npm run build`.
-- `npm run verify:linux -- --json --skip-build`: correctly forwards from the
-  Windows/UNC workspace into WSL and reports missing Linux prerequisites.
+- `npm run doctor:linux`: passes on Linux (node 24.15.0, npm 11.12.1,
+  rustc 1.96.1, cargo 1.96.1, pkg-config 1.8.1, gcc 13.3.0, all Tauri
+  pkg-config libraries present; `xdo` verified via header fallback at
+  `/usr/include/xdo.h` because `libxdo-dev` ships no `.pc` file).
+- `npm run verify:linux`: all 7 gates pass on Linux — `cargo:check`,
+  `cargo:clippy`, `cargo:test` (82 Rust tests), `test` (25 files / 184 tests),
+  `lint`, `format:check`, `build`.
+- Machine-readable evidence: `artifacts/linux-evidence/verify-linux.json`.
 
-Rust cannot be fully validated inside the current WSL shell until `rustc` and
-`cargo` are installed there. Windows-side Rust gates were already green during
-Beta 2 finalization, but Beta 3 Linux validation requires repeating the Rust
-gates in the pure Linux/Debian environment.
+The `npm run tauri dev` manual smoke (launching the desktop app from the
+Debian workstation) remains a manual step; it requires an active Linux desktop
+session and is recorded via `npm run smoke:linux-desktop` after observation.
+
+Earlier frontend-only evidence (retained for reference): on the WSL workspace
+the frontend Linux path was previously validated with `npm test` (23 files /
+158 tests), `npm run lint`, `npm run format:check`, `npm run build`, and
+`npm run verify:linux -- --json --skip-build` (which forwarded from the
+Windows/UNC workspace into WSL and reported missing Linux prerequisites before
+Rust was installed).
 
 ## Done Criteria For Beta 3 Linux Validation
 
-- `npm run verify:linux` passes on the Debian workstation.
-- `npm run doctor:linux` passes on the Debian workstation.
+- `npm run verify:linux` passes on the Debian workstation. **Done.**
+- `npm run doctor:linux` passes on the Debian workstation. **Done.**
 - `npm run tauri dev` launches the desktop app from that workstation.
-- Frontend gates and Rust gates pass on Linux/Debian.
+  Manual step pending a Linux desktop session; evidence template available via
+  `npm run smoke:linux-desktop`.
+- Frontend gates and Rust gates pass on Linux/Debian. **Done.**
 - Any Linux-only dependency or path issue is either fixed or documented as a
   known limitation with a reproduction note.
+  - Known limitation: `libxdo-dev` does not ship a `xdo.pc` pkg-config file;
+    the doctor falls back to checking `/usr/include/xdo.h`. Tauri's Linux build
+    links libxdo via header/library paths and is unaffected.
 - The Windows release pipeline remains unchanged unless a separate release task
   explicitly expands the platform promise.
