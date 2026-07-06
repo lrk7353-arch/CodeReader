@@ -256,7 +256,21 @@ pub async fn generate_explanation(
     };
     let context = build_context_bundle(context_request).map_err(AppError::configuration)?;
     let display_mode = normalize_display_mode(request.display_mode.as_deref())?;
-    let prompt = build_user_prompt(&context, &display_mode).map_err(AppError::configuration)?;
+    let project_id = request
+        .file
+        .project_id
+        .clone()
+        .unwrap_or_else(|| format!("project:{}", &sha256_hex(&request.file.path)[..20]));
+    let prompt_version = persistence_service::pick_prompt_version_for_target(
+        &database_path,
+        persistence_service::DEFAULT_GENERATION_PROMPT_VERSION,
+        &project_id,
+        &request.file.path,
+        &request.target.id,
+    )
+    .map_err(AppError::database)?;
+    let prompt =
+        build_user_prompt(&context, &display_mode, &prompt_version).map_err(AppError::configuration)?;
     let (structured, attempts) = request_structured_explanation(
         &stored,
         api_key.as_deref(),
@@ -332,12 +346,9 @@ pub async fn generate_explanation(
     let context_sources = serde_json::to_string(&context.sources).map_err(|error| {
         AppError::configuration(format!("Failed to serialize context provenance: {error}"))
     })?;
-    let prompt_version = persistence_service::pick_prompt_version(
-        &database_path,
-        persistence_service::DEFAULT_GENERATION_PROMPT_VERSION,
-        rand::random::<f64>(),
-    )
-    .map_err(AppError::database)?;
+    // prompt_version was resolved before build_user_prompt so it could be
+    // injected into the prompt text; the same value flows into the persistence
+    // record below instead of re-rolling the canary sample.
 
     let explanation = persistence_service::save_generated_explanation(
         &database_path,
@@ -609,6 +620,7 @@ fn validate_structured_explanation(
 fn build_user_prompt(
     context: &crate::context_builder::ContextBundle,
     display_mode: &str,
+    prompt_version: &str,
 ) -> Result<String, String> {
     let payload = serde_json::to_string_pretty(context)
         .map_err(|error| format!("Failed to serialize Context Bundle: {error}"))?;
@@ -616,6 +628,7 @@ fn build_user_prompt(
         "请根据下列经过授权的 Context Bundle 解释目标代码。\n\
          你只能使用此 Bundle 中的信息；缺少项目上下文时必须明确降低可信标签，不得猜测。\n\
          目标展示模式：{display_mode}\n\
+         本次解释使用的 Prompt 版本：{prompt_version}\n\
          只输出一个 JSON 对象，字段与系统消息中的 schema 完全一致。\n\
          Context Bundle:\n{payload}"
     ))
@@ -827,7 +840,8 @@ mod tests {
             }),
         })
         .expect("context should build");
-        let prompt = build_user_prompt(&context, "plain").expect("prompt should build");
+        let prompt = build_user_prompt(&context, "plain", "test-prompt-v1")
+            .expect("prompt should build");
         let embedded_bundle = prompt
             .split_once("Context Bundle:\n")
             .map(|(_, payload)| payload)

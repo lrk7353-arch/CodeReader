@@ -62,6 +62,8 @@ pub(crate) use prompt_registry::active_prompt_version;
 pub use prompt_registry::list_prompt_versions;
 #[allow(unused_imports)]
 pub(crate) use prompt_registry::pick_prompt_version;
+#[allow(unused_imports)]
+pub(crate) use prompt_registry::pick_prompt_version_for_target;
 #[cfg(not(test))]
 pub use prompt_registry::rollback_prompt_version;
 #[cfg(not(test))]

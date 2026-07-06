@@ -4,6 +4,8 @@ use std::path::Path;
 #[cfg(not(test))]
 use tauri::AppHandle;
 
+use crate::utils::sha256_hex;
+
 pub(crate) const DEFAULT_GENERATION_PROMPT_VERSION: &str = "code-explanation-v0.1";
 
 pub(crate) struct PromptVersionRegistration {
@@ -214,6 +216,27 @@ pub(crate) fn pick_prompt_version(
         (None, Some(canary)) => Ok(canary.version),
         (None, None) => Ok(fallback_version.to_string()),
     }
+}
+
+/// Selects a prompt version for a specific generation target using a stable
+/// hash of `project_id + file_path + target_id` as the rollout sample.
+///
+/// This keeps canary selection reproducible across regenerations of the same
+/// target (so a known-good file does not flip between active and canary on
+/// every refresh) while still distributing different targets across the canary
+/// bucket according to `rollout_percent`.
+pub(crate) fn pick_prompt_version_for_target(
+    database_path: &Path,
+    fallback_version: &str,
+    project_id: &str,
+    file_path: &str,
+    target_id: &str,
+) -> Result<String, String> {
+    let digest = sha256_hex(&format!("{project_id}:{file_path}:{target_id}"));
+    // Take the first 8 hex chars (32 bits) and map to [0.0, 1.0).
+    let prefix = u32::from_str_radix(&digest[..8], 16).unwrap_or(0);
+    let sample = (prefix as f64) / (u32::MAX as f64);
+    pick_prompt_version(database_path, fallback_version, sample)
 }
 
 fn load_active_version(conn: &Connection) -> Result<Option<String>, String> {
@@ -638,6 +661,55 @@ mod tests {
             pick_prompt_version(&database_path, "fallback-v0", 0.9)
                 .expect("canary picked at high sample"),
             "code-explanation-v0.2-rc1"
+        );
+
+        let _ = std::fs::remove_file(database_path);
+    }
+
+    #[test]
+    fn pick_prompt_version_for_target_is_stable_across_calls() {
+        let database_path = temp_database_path("prompt-pick-stable");
+        super::super::open_database(&database_path).expect("database initializes");
+        upsert_prompt_version_at_path(
+            &database_path,
+            prompt_registration("code-explanation-v0.2-rc1", "canary", 30, None, None),
+        )
+        .expect("canary registers");
+
+        // Same target inputs must resolve to the same version on every call.
+        let first = pick_prompt_version_for_target(
+            &database_path,
+            "fallback-v0",
+            "project:sample",
+            "examples/sample.ts",
+            "exp:target:sample:function",
+        )
+        .expect("first call resolves");
+        for _ in 0..5 {
+            let again = pick_prompt_version_for_target(
+                &database_path,
+                "fallback-v0",
+                "project:sample",
+                "examples/sample.ts",
+                "exp:target:sample:function",
+            )
+            .expect("repeat call resolves");
+            assert_eq!(again, first, "same target must pick same version");
+        }
+
+        // Different targets should be able to resolve independently (no panic,
+        // valid version string). We do not assert which bucket they land in.
+        let other = pick_prompt_version_for_target(
+            &database_path,
+            "fallback-v0",
+            "project:other",
+            "other/path.ts",
+            "exp:other",
+        )
+        .expect("other target resolves");
+        assert!(
+            other == DEFAULT_GENERATION_PROMPT_VERSION || other == "code-explanation-v0.2-rc1",
+            "other target should pick a registered version"
         );
 
         let _ = std::fs::remove_file(database_path);
