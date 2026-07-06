@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+### 0.11.0-beta.3
+
+- Promote the internal beta phase to `0.11.0-beta.3` with execution-level prompt gray rollout and Linux development validation.
+- Add prompt version registry persistence (schema v3) with `system_prompt_template` and `user_prompt_template` columns; the explanation service loads the selected version's templates and sends them as the system/user messages to the provider, so a canary version truly changes the prompt content.
+- Implement stable canary rollout via `sha256(project_id:file_path:target_id)` sampling so the same target resolves to the same version across regenerations.
+- Add atomic `rollback_prompt_version` and `list_prompt_versions` Tauri commands, plus a Prompt Registry management dialog that lists, registers, edits, and rolls back versions.
+- Harden prompt template handling: custom user templates must include the `{payload}` placeholder; partial upserts preserve existing templates via COALESCE; `load_prompt_templates` propagates database errors instead of swallowing them.
+- Validate Linux/Debian development: `npm run doctor:linux` and `npm run verify:linux` pass on WSL Ubuntu 24.04 with Rust 1.96.1; `npm run tauri dev` launches the desktop app via WSLg.
+- Fix Linux reproducibility: remove the `powershell.exe` script-shell override, prepend `~/.cargo/bin` to PATH in cargo/doctor scripts, and add a header fallback for `libxdo-dev` which ships no pkg-config file.
+- Extract `persistence/explanation_hydration.rs` from `persistence_service.rs` (1996 → ~1300 lines) continuing the workspace-state splitting by responsibility.
+
 ### 0.11.0-beta.2
 
 - Promote the internal beta phase to `0.11.0-beta.2` with formalised diagnosability and regression coverage.

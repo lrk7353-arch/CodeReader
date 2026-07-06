@@ -2,18 +2,18 @@
 
 CodeReader 是一个独立桌面端 AI 代码阅读 IDE，目标是把 AI 生成的代码从黑箱产物转化为可阅读、可解释、可审阅、可持久化、可逐步掌握的认知资产。
 
-`v0.10.0-mvp` 已于 2026 年 6 月 11 日完成 Windows 桌面发行验收。项目从 2026 年 6 月 12 日起进入 `0.11.x` 内测迭代，当前阶段为 `0.11.0-beta.2`，重点从“证明最小闭环可行”转为真实使用中的可靠性、数据兼容、可诊断性和回归保护。
+`v0.10.0-mvp` 已于 2026 年 6 月 11 日完成 Windows 桌面发行验收。项目从 2026 年 6 月 12 日起进入 `0.11.x` 内测迭代，当前阶段为 `0.11.0-beta.3`，重点从可诊断性与回归保护扩展到执行级 Prompt 灰度、Linux 开发验证和按职责的模块拆分。
 
 ## 文档入口
 
 正式项目文档：
 
-- [内测阶段文档](<内测阶段文档/README.md>)
-- [内测质量基线](<内测阶段文档/内测质量基线.md>)
-- [架构入口](<内测阶段文档/架构入口.md>)
-- [内测迭代路线图](<内测阶段文档/迭代路线图.md>)
-- [Opus 4.8 审查处置](<内测阶段文档/Opus-4.8审查处置.md>)
-- [发布签名与安全门禁](<内测阶段文档/发布签名与安全门禁.md>)
+- [内测阶段文档](内测阶段文档/README.md)
+- [内测质量基线](内测阶段文档/内测质量基线.md)
+- [架构入口](内测阶段文档/架构入口.md)
+- [内测迭代路线图](内测阶段文档/迭代路线图.md)
+- [Opus 4.8 审查处置](内测阶段文档/Opus-4.8审查处置.md)
+- [发布签名与安全门禁](内测阶段文档/发布签名与安全门禁.md)
 - [项目文档包](<doc for app/README.md>)
 - [产品设计文档](<doc for app/产品设计文档.md>)
 - [需求文档](<doc for app/需求文档.md>)
@@ -25,13 +25,13 @@ CodeReader 是一个独立桌面端 AI 代码阅读 IDE，目标是把 AI 生成
 
 开发辅助资料：
 
-- [MVP 开发任务 Prompt v0.4](<完善文档与prompt整理/CodeReader_MVP开发任务Prompt_v0.4.md>)
-- [启动前约束与检查](<完善文档与prompt整理/启动前约束与检查.md>)
-- [本地 Git 管理文档](<完善文档与prompt整理/git管理文档.md>)
+- [MVP 开发任务 Prompt v0.4](完善文档与prompt整理/CodeReader_MVP开发任务Prompt_v0.4.md)
+- [启动前约束与检查](完善文档与prompt整理/启动前约束与检查.md)
+- [本地 Git 管理文档](完善文档与prompt整理/git管理文档.md)
 
 归档资料：
 
-- [历史归档说明](<archive/README.md>)
+- [历史归档说明](archive/README.md)
 - [VS Code 插件旧方向归档](<archive/for VS Code Extension/ARCHIVE.md>)
 
 ## 当前内测定位
@@ -114,7 +114,7 @@ npm run release:windows
 - `CodeReader_0.10.0_x64_zh-CN.msi`：供需要 MSI 部署的环境使用；
 - `release-manifest.json` 与 `SHA256SUMS.txt`：记录架构、体积和 SHA-256。
 
-安装包包含 React、Monaco、Rust、SQLite、Tree-sitter 和 WebView2 引导程序，不依赖 Vite、Node 开发服务器或独立后端进程。内测版本在完成新的安装/升级验收前，不替代该发行基线。当前安装包尚未进行 Authenticode 代码签名，Windows SmartScreen 可能显示未知发布者提示；公开分发前必须通过[发布签名与安全门禁](<内测阶段文档/发布签名与安全门禁.md>)。
+安装包包含 React、Monaco、Rust、SQLite、Tree-sitter 和 WebView2 引导程序，不依赖 Vite、Node 开发服务器或独立后端进程。内测版本在完成新的安装/升级验收前，不替代该发行基线。当前安装包尚未进行 Authenticode 代码签名，Windows SmartScreen 可能显示未知发布者提示；公开分发前必须通过[发布签名与安全门禁](内测阶段文档/发布签名与安全门禁.md)。
 
 ## 当前阶段标签
 
@@ -130,5 +130,6 @@ npm run release:windows
 - `v0.10.0-mvp`：Windows x64 安装包与 MVP 总验收完成。
 - `0.11.0-beta.1`：内测工程基线，加入数据库迁移、CI、provider 边界和阶段质量规范。
 - `0.11.0-beta.2`：内测可诊断性与回归保护，落地 `AppError` 分类、关键工作区交互测试、签名验证框架与文案资源层。
+- `0.11.0-beta.3`：执行级 Prompt 灰度与 Linux 开发验证，落地 prompt 版本注册表/模板/灰度/回滚、Linux/Debian `verify:linux` 与 `tauri dev` 验收、`persistence_service` 按职责拆分。
 
 `v0.10.0-mvp` 是已验证的桌面发行基线；`0.11.x` 是内测迭代线。完整知识图谱、更广泛语言支持、协作与云同步等能力仍按后续路线演进。

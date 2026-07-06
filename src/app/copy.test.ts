@@ -9,7 +9,7 @@ describe("app copy layer", () => {
 
     const copy = getAppCopy();
     expect(copy.brand.title).toBe("CodeReader");
-    expect(copy.brand.stageBadge).toBe("\u5185\u6d4b \u00b7 Beta 2");
+    expect(copy.brand.stageBadge).toBe("\u5185\u6d4b \u00b7 Beta 3");
     expect(copy.actions.sample).toBe("\u4f53\u9a8c\u793a\u4f8b");
   });
 
@@ -18,7 +18,7 @@ describe("app copy layer", () => {
 
     expect(copy.brand.title).toBe("CodeReader");
     expect(copy.brand.tagline).toBe("Standalone desktop code-reading IDE");
-    expect(copy.brand.stageBadge).toBe("Internal \u00b7 Beta 2");
+    expect(copy.brand.stageBadge).toBe("Internal \u00b7 Beta 3");
     expect(copy.actions.openProject).toBe("Open project");
     expect(copy.model.unconfigured).toBe("Model not configured");
   });
