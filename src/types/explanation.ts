@@ -315,6 +315,8 @@ export interface PromptVersionInfo {
   rolloutPercent: number;
   rollbackFrom?: string | null;
   notes?: string | null;
+  systemPromptTemplate?: string | null;
+  userPromptTemplate?: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -325,6 +327,8 @@ export interface UpsertPromptVersionInput {
   rolloutPercent: number;
   rollbackFrom?: string | null;
   notes?: string | null;
+  systemPromptTemplate?: string | null;
+  userPromptTemplate?: string | null;
 }
 
 export interface RollbackPromptVersionInput {

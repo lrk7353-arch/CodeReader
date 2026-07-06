@@ -146,6 +146,56 @@ describe("PromptRegistryDialog interactions", () => {
     );
   });
 
+  it("submits custom prompt templates when provided", async () => {
+    const user = userEvent.setup();
+    const onUpsert = vi.fn();
+    renderDialog({ onUpsert });
+
+    await user.type(
+      screen.getByPlaceholderText("code-explanation-v0.2-rc1"),
+      "code-explanation-v0.3"
+    );
+    await user.type(
+      screen.getByPlaceholderText(
+        "留空使用默认 system prompt；自定义文本会作为 system 消息发送给模型"
+      ),
+      "CUSTOM SYSTEM"
+    );
+    await user.type(
+      screen.getByLabelText("User Prompt 模板（可选，留空用默认）"),
+      "CUSTOM USER TEMPLATE"
+    );
+    await user.click(screen.getByRole("button", { name: "保存版本" }));
+
+    expect(onUpsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        version: "code-explanation-v0.3",
+        systemPromptTemplate: "CUSTOM SYSTEM",
+        userPromptTemplate: "CUSTOM USER TEMPLATE"
+      })
+    );
+  });
+
+  it("shows 自定义 marker for versions with custom templates", () => {
+    renderDialog({
+      versions: [
+        {
+          version: "code-explanation-v0.2-rc1",
+          status: "canary",
+          rolloutPercent: 30,
+          rollbackFrom: null,
+          notes: null,
+          systemPromptTemplate: "CUSTOM SYSTEM",
+          userPromptTemplate: null,
+          createdAt: "2026-07-01T00:00:00.000Z",
+          updatedAt: "2026-07-01T00:00:00.000Z"
+        }
+      ]
+    });
+
+    expect(screen.getByText("自定义")).toBeInTheDocument();
+  });
+
   it("disables actions while busy", () => {
     renderDialog({ busy: true });
 

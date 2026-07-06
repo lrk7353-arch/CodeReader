@@ -35,6 +35,8 @@ export function PromptRegistryDialog({
   const [registerStatus, setRegisterStatus] = useState<PromptVersionStatus>("canary");
   const [registerRollout, setRegisterRollout] = useState(50);
   const [registerNotes, setRegisterNotes] = useState("");
+  const [registerSystemTemplate, setRegisterSystemTemplate] = useState("");
+  const [registerUserTemplate, setRegisterUserTemplate] = useState("");
 
   useEffect(() => {
     if (!open) {
@@ -46,6 +48,8 @@ export function PromptRegistryDialog({
     setRegisterStatus("canary");
     setRegisterRollout(50);
     setRegisterNotes("");
+    setRegisterSystemTemplate("");
+    setRegisterUserTemplate("");
   }, [open]);
 
   useEffect(() => {
@@ -73,7 +77,9 @@ export function PromptRegistryDialog({
       version: registerVersion.trim(),
       status: registerStatus,
       rolloutPercent: registerRollout,
-      notes: registerNotes.trim() || null
+      notes: registerNotes.trim() || null,
+      systemPromptTemplate: registerSystemTemplate.trim() || null,
+      userPromptTemplate: registerUserTemplate.trim() || null
     });
   }
 
@@ -132,6 +138,7 @@ export function PromptRegistryDialog({
                 <th>灰度</th>
                 <th>回滚来源</th>
                 <th>备注</th>
+                <th>模板</th>
                 <th>更新时间</th>
                 <th aria-label="操作" />
               </tr>
@@ -139,7 +146,7 @@ export function PromptRegistryDialog({
             <tbody>
               {versions.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="prompt-registry-empty">
+                  <td colSpan={8} className="prompt-registry-empty">
                     暂无已注册版本。
                   </td>
                 </tr>
@@ -151,6 +158,9 @@ export function PromptRegistryDialog({
                     <td>{entry.rolloutPercent}%</td>
                     <td>{entry.rollbackFrom ?? "—"}</td>
                     <td>{entry.notes ?? "—"}</td>
+                    <td>
+                      {entry.systemPromptTemplate || entry.userPromptTemplate ? "自定义" : "默认"}
+                    </td>
                     <td>{entry.updatedAt}</td>
                     <td>
                       {entry.status !== "active" ? (
@@ -252,6 +262,26 @@ export function PromptRegistryDialog({
                 value={registerNotes}
                 onChange={(event) => setRegisterNotes(event.target.value)}
                 placeholder="可选"
+              />
+            </label>
+            <label>
+              <span>System Prompt 模板（可选，留空用默认）</span>
+              <textarea
+                value={registerSystemTemplate}
+                onChange={(event) => setRegisterSystemTemplate(event.target.value)}
+                placeholder="留空使用默认 system prompt；自定义文本会作为 system 消息发送给模型"
+                rows={3}
+              />
+            </label>
+            <label>
+              <span>User Prompt 模板（可选，留空用默认）</span>
+              <textarea
+                value={registerUserTemplate}
+                onChange={(event) => setRegisterUserTemplate(event.target.value)}
+                placeholder={
+                  "支持占位符：{display_mode} {prompt_version} {payload}\n留空使用默认 user prompt"
+                }
+                rows={3}
               />
             </label>
             {error ? <p className="dialog-error">{error}</p> : null}
