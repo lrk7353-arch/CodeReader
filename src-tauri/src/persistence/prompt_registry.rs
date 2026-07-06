@@ -8,12 +8,52 @@ use crate::utils::sha256_hex;
 
 pub(crate) const DEFAULT_GENERATION_PROMPT_VERSION: &str = "code-explanation-v0.1";
 
+/// Default system prompt template used when a prompt version has no custom
+/// template. Kept here so the schema seed and the explanation service share a
+/// single source of truth.
+pub(crate) const DEFAULT_SYSTEM_PROMPT_TEMPLATE: &str = r#"你是 CodeReader 的结构化代码解释器，不是聊天助手。
+只解释用户选中的代码目标，只依据提供的 Context Bundle，不得虚构未提供的调用关系或业务背景。
+输出必须是一个 JSON 对象，不要使用 Markdown 代码围栏，不要输出额外文字。
+schema:
+{
+  "codeLevelMeaning": "string, 代码本身做什么",
+  "localCompositionMeaning": "string, 在当前函数或文件中的作用",
+  "projectRoleMeaning": "string, 在已知项目上下文中的角色；上下文不足时应明确说明",
+  "priorKnowledge": "string，可为空",
+  "risks": [
+    {
+      "riskType": "string",
+      "level": "low | medium | high",
+      "description": "string"
+    }
+  ],
+  "reviewSuggestion": "string，可为空",
+  "dependsOnLines": [1],
+  "affectsLines": [2],
+  "trustLabel": "clear | context_needed | review_recommended",
+  "trustReason": "string，面向用户的白话依据",
+  "displayMode": "plain | detailed"
+}
+关系行号只能引用 Context Bundle 中真实存在的当前文件行号。不要输出 raw confidence 数字。"#;
+
+/// Default user prompt template. Placeholders `{display_mode}`,
+/// `{prompt_version}`, and `{payload}` are substituted by the explanation
+/// service at generation time.
+pub(crate) const DEFAULT_USER_PROMPT_TEMPLATE: &str = "请根据下列经过授权的 Context Bundle 解释目标代码。\n\
+         你只能使用此 Bundle 中的信息；缺少项目上下文时必须明确降低可信标签，不得猜测。\n\
+         目标展示模式：{display_mode}\n\
+         本次解释使用的 Prompt 版本：{prompt_version}\n\
+         只输出一个 JSON 对象，字段与系统消息中的 schema 完全一致。\n\
+         Context Bundle:\n{payload}";
+
 pub(crate) struct PromptVersionRegistration {
     pub(crate) version: String,
     pub(crate) status: String,
     pub(crate) rollout_percent: u8,
     pub(crate) rollback_from: Option<String>,
     pub(crate) notes: Option<String>,
+    pub(crate) system_prompt_template: Option<String>,
+    pub(crate) user_prompt_template: Option<String>,
 }
 
 #[derive(Debug)]
@@ -23,6 +63,8 @@ pub(crate) struct PromptVersionRecord {
     pub(crate) rollout_percent: u8,
     pub(crate) rollback_from: Option<String>,
     pub(crate) notes: Option<String>,
+    pub(crate) system_prompt_template: Option<String>,
+    pub(crate) user_prompt_template: Option<String>,
     pub(crate) created_at: String,
     pub(crate) updated_at: String,
 }
@@ -35,6 +77,8 @@ pub struct UpsertPromptVersionRequest {
     rollout_percent: u8,
     rollback_from: Option<String>,
     notes: Option<String>,
+    system_prompt_template: Option<String>,
+    user_prompt_template: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -45,6 +89,8 @@ pub struct PromptVersionPayload {
     rollout_percent: u8,
     rollback_from: Option<String>,
     notes: Option<String>,
+    system_prompt_template: Option<String>,
+    user_prompt_template: Option<String>,
     created_at: String,
     updated_at: String,
 }
@@ -64,6 +110,8 @@ pub fn upsert_prompt_version(
             rollout_percent: request.rollout_percent,
             rollback_from: request.rollback_from,
             notes: request.notes,
+            system_prompt_template: request.system_prompt_template,
+            user_prompt_template: request.user_prompt_template,
         },
     )?;
     Ok(record_to_payload(record))
@@ -118,6 +166,8 @@ fn record_to_payload(record: PromptVersionRecord) -> PromptVersionPayload {
         rollout_percent: record.rollout_percent,
         rollback_from: record.rollback_from,
         notes: record.notes,
+        system_prompt_template: record.system_prompt_template,
+        user_prompt_template: record.user_prompt_template,
         created_at: record.created_at,
         updated_at: record.updated_at,
     }
@@ -139,13 +189,16 @@ pub(crate) fn upsert_prompt_version_at_path(
         .unwrap_or_else(|_| now.clone());
     conn.execute(
         "INSERT INTO prompt_versions
-         (version, status, rollout_percent, rollback_from, notes, created_at, updated_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+         (version, status, rollout_percent, rollback_from, notes,
+          system_prompt_template, user_prompt_template, created_at, updated_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
          ON CONFLICT(version) DO UPDATE SET
            status = excluded.status,
            rollout_percent = excluded.rollout_percent,
            rollback_from = excluded.rollback_from,
            notes = excluded.notes,
+           system_prompt_template = excluded.system_prompt_template,
+           user_prompt_template = excluded.user_prompt_template,
            updated_at = excluded.updated_at",
         params![
             input.version,
@@ -153,6 +206,8 @@ pub(crate) fn upsert_prompt_version_at_path(
             input.rollout_percent as i64,
             input.rollback_from,
             input.notes,
+            input.system_prompt_template,
+            input.user_prompt_template,
             created_at,
             now
         ],
@@ -233,9 +288,11 @@ pub(crate) fn pick_prompt_version_for_target(
     target_id: &str,
 ) -> Result<String, String> {
     let digest = sha256_hex(&format!("{project_id}:{file_path}:{target_id}"));
-    // Take the first 8 hex chars (32 bits) and map to [0.0, 1.0).
+    // Take the first 8 hex chars (32 bits) and map to [0.0, 1.0). Divide by
+    // 2^32 (u32::MAX + 1) so the sample never reaches exactly 1.0, keeping the
+    // upper bound exclusive even when prefix == u32::MAX.
     let prefix = u32::from_str_radix(&digest[..8], 16).unwrap_or(0);
-    let sample = (prefix as f64) / (u32::MAX as f64);
+    let sample = (prefix as f64) / (u32::MAX as f64 + 1.0);
     pick_prompt_version(database_path, fallback_version, sample)
 }
 
@@ -259,7 +316,8 @@ fn load_active_version(conn: &Connection) -> Result<Option<String>, String> {
 fn load_top_canary(conn: &Connection) -> Result<Option<PromptVersionRecord>, String> {
     let mut statement = conn
         .prepare(
-            "SELECT version, status, rollout_percent, rollback_from, notes, created_at, updated_at
+            "SELECT version, status, rollout_percent, rollback_from, notes,
+                    system_prompt_template, user_prompt_template, created_at, updated_at
              FROM prompt_versions
              WHERE status = 'canary' AND rollout_percent > 0
              ORDER BY rollout_percent DESC, updated_at DESC
@@ -275,8 +333,10 @@ fn load_top_canary(conn: &Connection) -> Result<Option<PromptVersionRecord>, Str
             rollout_percent: rollout_percent.clamp(0, 100) as u8,
             rollback_from: row.get(3).map_err(super::database_error)?,
             notes: row.get(4).map_err(super::database_error)?,
-            created_at: row.get(5).map_err(super::database_error)?,
-            updated_at: row.get(6).map_err(super::database_error)?,
+            system_prompt_template: row.get(5).map_err(super::database_error)?,
+            user_prompt_template: row.get(6).map_err(super::database_error)?,
+            created_at: row.get(7).map_err(super::database_error)?,
+            updated_at: row.get(8).map_err(super::database_error)?,
         }));
     }
     Ok(None)
@@ -288,7 +348,8 @@ pub(crate) fn list_prompt_versions_at_path(
     let conn = super::open_database(database_path)?;
     let mut statement = conn
         .prepare(
-            "SELECT version, status, rollout_percent, rollback_from, notes, created_at, updated_at
+            "SELECT version, status, rollout_percent, rollback_from, notes,
+                    system_prompt_template, user_prompt_template, created_at, updated_at
              FROM prompt_versions
              ORDER BY updated_at DESC, version ASC",
         )
@@ -302,8 +363,10 @@ pub(crate) fn list_prompt_versions_at_path(
                 rollout_percent: rollout_percent.clamp(0, 100) as u8,
                 rollback_from: row.get(3)?,
                 notes: row.get(4)?,
-                created_at: row.get(5)?,
-                updated_at: row.get(6)?,
+                system_prompt_template: row.get(5)?,
+                user_prompt_template: row.get(6)?,
+                created_at: row.get(7)?,
+                updated_at: row.get(8)?,
             })
         })
         .map_err(super::database_error)?;
@@ -312,6 +375,43 @@ pub(crate) fn list_prompt_versions_at_path(
         records.push(row.map_err(super::database_error)?);
     }
     Ok(records)
+}
+
+/// Resolved prompt templates for a specific version, falling back to the
+/// built-in defaults when the version's template column is NULL.
+pub(crate) struct PromptTemplates {
+    pub(crate) system: String,
+    pub(crate) user: String,
+}
+
+/// Loads the prompt templates for `version`. Returns `None` if the version is
+/// not registered. NULL template columns fall back to the built-in defaults so
+/// callers always get concrete prompt text.
+pub(crate) fn load_prompt_templates(
+    database_path: &Path,
+    version: &str,
+) -> Result<Option<PromptTemplates>, String> {
+    let conn = super::open_database(database_path)?;
+    let row = conn
+        .query_row(
+            "SELECT system_prompt_template, user_prompt_template
+             FROM prompt_versions
+             WHERE version = ?1",
+            params![version],
+            |row| {
+                let system: Option<String> = row.get(0)?;
+                let user: Option<String> = row.get(1)?;
+                Ok((system, user))
+            },
+        )
+        .ok();
+    match row {
+        Some((system, user)) => Ok(Some(PromptTemplates {
+            system: system.unwrap_or_else(|| DEFAULT_SYSTEM_PROMPT_TEMPLATE.to_string()),
+            user: user.unwrap_or_else(|| DEFAULT_USER_PROMPT_TEMPLATE.to_string()),
+        })),
+        None => Ok(None),
+    }
 }
 
 pub(crate) fn rollback_prompt_version_at_path(
@@ -381,7 +481,8 @@ pub(crate) fn rollback_prompt_version_at_path(
 
 fn load_prompt_version(conn: &Connection, version: &str) -> Result<PromptVersionRecord, String> {
     conn.query_row(
-        "SELECT version, status, rollout_percent, rollback_from, notes, created_at, updated_at
+        "SELECT version, status, rollout_percent, rollback_from, notes,
+                system_prompt_template, user_prompt_template, created_at, updated_at
          FROM prompt_versions
          WHERE version = ?1",
         params![version],
@@ -393,8 +494,10 @@ fn load_prompt_version(conn: &Connection, version: &str) -> Result<PromptVersion
                 rollout_percent: rollout_percent.clamp(0, 100) as u8,
                 rollback_from: row.get(3)?,
                 notes: row.get(4)?,
-                created_at: row.get(5)?,
-                updated_at: row.get(6)?,
+                system_prompt_template: row.get(5)?,
+                user_prompt_template: row.get(6)?,
+                created_at: row.get(7)?,
+                updated_at: row.get(8)?,
             })
         },
     )
@@ -716,6 +819,38 @@ mod tests {
     }
 
     #[test]
+    fn pick_prompt_version_for_target_full_rollout_always_picks_canary() {
+        // Regression for the sample upper-bound bug: when prefix == u32::MAX the
+        // sample must still stay below 1.0 so a 100% canary never falls back to
+        // active. Sweep many targets and assert every one lands on canary.
+        let database_path = temp_database_path("prompt-pick-full-canary");
+        super::super::open_database(&database_path).expect("database initializes");
+        upsert_prompt_version_at_path(
+            &database_path,
+            prompt_registration("code-explanation-v0.2-rc1", "canary", 100, None, None),
+        )
+        .expect("canary registers");
+
+        for i in 0..512u32 {
+            let target_id = format!("exp:target:{i}");
+            let picked = pick_prompt_version_for_target(
+                &database_path,
+                "fallback-v0",
+                "project:sweep",
+                "sweep.ts",
+                &target_id,
+            )
+            .expect("sweep target resolves");
+            assert_eq!(
+                picked, "code-explanation-v0.2-rc1",
+                "100% canary must always be picked (target {i})"
+            );
+        }
+
+        let _ = std::fs::remove_file(database_path);
+    }
+
+    #[test]
     fn list_prompt_versions_orders_by_updated_at_desc() {
         let database_path = temp_database_path("prompt-list");
         super::super::open_database(&database_path).expect("database initializes");
@@ -843,6 +978,71 @@ mod tests {
         let _ = std::fs::remove_file(database_path);
     }
 
+    #[test]
+    fn upsert_prompt_version_persists_custom_templates() {
+        let database_path = temp_database_path("prompt-templates-upsert");
+        super::super::open_database(&database_path).expect("database initializes");
+
+        let record = upsert_prompt_version_at_path(
+            &database_path,
+            PromptVersionRegistration {
+                version: "code-explanation-v0.2-rc1".to_string(),
+                status: "canary".to_string(),
+                rollout_percent: 30,
+                rollback_from: None,
+                notes: None,
+                system_prompt_template: Some("CUSTOM SYSTEM PROMPT".to_string()),
+                user_prompt_template: Some("CUSTOM USER PROMPT {payload}".to_string()),
+            },
+        )
+        .expect("upsert with templates");
+
+        assert_eq!(
+            record.system_prompt_template.as_deref(),
+            Some("CUSTOM SYSTEM PROMPT")
+        );
+        assert_eq!(
+            record.user_prompt_template.as_deref(),
+            Some("CUSTOM USER PROMPT {payload}")
+        );
+
+        let templates =
+            load_prompt_templates(&database_path, "code-explanation-v0.2-rc1")
+                .expect("templates load")
+                .expect("version exists");
+        assert_eq!(templates.system, "CUSTOM SYSTEM PROMPT");
+        assert_eq!(templates.user, "CUSTOM USER PROMPT {payload}");
+
+        let _ = std::fs::remove_file(database_path);
+    }
+
+    #[test]
+    fn load_prompt_templates_falls_back_to_defaults_for_seed_version() {
+        let database_path = temp_database_path("prompt-templates-seed");
+        super::super::open_database(&database_path).expect("database initializes");
+
+        let templates =
+            load_prompt_templates(&database_path, DEFAULT_GENERATION_PROMPT_VERSION)
+                .expect("templates load")
+                .expect("seed version exists");
+        assert!(templates.system.contains("CodeReader"));
+        assert!(templates.user.contains("{payload}"));
+
+        let _ = std::fs::remove_file(database_path);
+    }
+
+    #[test]
+    fn load_prompt_templates_returns_none_for_unknown_version() {
+        let database_path = temp_database_path("prompt-templates-unknown");
+        super::super::open_database(&database_path).expect("database initializes");
+
+        let templates = load_prompt_templates(&database_path, "never-registered")
+            .expect("query should not error");
+        assert!(templates.is_none(), "unknown version should return None");
+
+        let _ = std::fs::remove_file(database_path);
+    }
+
 
     fn prompt_registration(
         version: &str,
@@ -857,6 +1057,8 @@ mod tests {
             rollout_percent,
             rollback_from: rollback_from.map(str::to_string),
             notes: notes.map(str::to_string),
+            system_prompt_template: None,
+            user_prompt_template: None,
         }
     }
 

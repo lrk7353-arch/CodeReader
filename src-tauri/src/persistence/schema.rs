@@ -1,8 +1,8 @@
-use rusqlite::Connection;
+use rusqlite::{params, Connection};
 
 use super::database_error;
 
-pub(super) const LATEST_DATABASE_VERSION: i64 = 2;
+pub(super) const LATEST_DATABASE_VERSION: i64 = 3;
 
 pub(super) fn migrate(conn: &Connection) -> Result<(), String> {
     conn.execute_batch("PRAGMA foreign_keys = ON;")
@@ -33,9 +33,10 @@ fn run_migration(conn: &Connection, version: i64) -> Result<(), String> {
     let result = match version {
         1 => migrate_to_v1(conn),
         2 => migrate_to_v2(conn),
+        3 => migrate_to_v3(conn),
         _ => Err(format!(
             "No SQLite migration is registered for version {version}."
-        )),
+        ))
     }
     .and_then(|_| {
         conn.pragma_update(None, "user_version", version)
@@ -49,6 +50,40 @@ fn run_migration(conn: &Connection, version: i64) -> Result<(), String> {
             Err(error)
         }
     }
+}
+
+fn migrate_to_v3(conn: &Connection) -> Result<(), String> {
+    ensure_column(
+        conn,
+        "prompt_versions",
+        "system_prompt_template",
+        "TEXT",
+    )?;
+    ensure_column(
+        conn,
+        "prompt_versions",
+        "user_prompt_template",
+        "TEXT",
+    )?;
+
+    // Backfill the seed version with the built-in default templates so the
+    // default active version carries its prompt content (not just a label).
+    // Canary versions can then override either template via upsert.
+    conn.execute(
+        "UPDATE prompt_versions
+         SET system_prompt_template = ?1,
+             user_prompt_template = ?2
+         WHERE version = ?3
+           AND system_prompt_template IS NULL
+           AND user_prompt_template IS NULL",
+        params![
+            super::prompt_registry::DEFAULT_SYSTEM_PROMPT_TEMPLATE,
+            super::prompt_registry::DEFAULT_USER_PROMPT_TEMPLATE,
+            super::prompt_registry::DEFAULT_GENERATION_PROMPT_VERSION
+        ],
+    )
+    .map_err(database_error)?;
+    Ok(())
 }
 
 fn migrate_to_v2(conn: &Connection) -> Result<(), String> {
@@ -440,6 +475,38 @@ mod tests {
             )
             .expect("default prompt version exists");
         assert_eq!(status, "active");
+    }
+
+    #[test]
+    fn v2_database_receives_prompt_template_columns() {
+        let conn = Connection::open_in_memory().expect("database opens");
+        run_migration(&conn, 1).expect("v1 migration succeeds");
+        run_migration(&conn, 2).expect("v2 migration succeeds");
+        assert_eq!(database_version(&conn).expect("version reads"), 2);
+
+        migrate(&conn).expect("v2 database upgrades to v3");
+        assert_eq!(
+            database_version(&conn).expect("version reads"),
+            LATEST_DATABASE_VERSION
+        );
+
+        let columns = column_names(&conn, "prompt_versions");
+        assert!(columns.contains(&"system_prompt_template".to_string()));
+        assert!(columns.contains(&"user_prompt_template".to_string()));
+
+        // The seed version should be backfilled with the default templates.
+        let (system, user): (Option<String>, Option<String>) = conn
+            .query_row(
+                "SELECT system_prompt_template, user_prompt_template
+                 FROM prompt_versions WHERE version = 'code-explanation-v0.1'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .expect("seed version templates query");
+        assert!(system.is_some(), "seed system template should be backfilled");
+        assert!(user.is_some(), "seed user template should be backfilled");
+        assert!(system.unwrap().contains("CodeReader"));
+        assert!(user.unwrap().contains("{payload}"));
     }
 
     fn column_names(conn: &Connection, table: &str) -> Vec<String> {

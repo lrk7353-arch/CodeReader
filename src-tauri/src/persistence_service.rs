@@ -70,7 +70,8 @@ pub use prompt_registry::rollback_prompt_version;
 pub use prompt_registry::upsert_prompt_version;
 #[allow(unused_imports)]
 pub(crate) use prompt_registry::{
-    list_prompt_versions_at_path, rollback_prompt_version_at_path,
+    list_prompt_versions_at_path, load_prompt_templates, rollback_prompt_version_at_path,
+    PromptTemplates,
 };
 #[allow(unused_imports)]
 pub(crate) use prompt_registry::{
@@ -78,7 +79,10 @@ pub(crate) use prompt_registry::{
     UpsertPromptVersionRequest,
 };
 #[allow(unused_imports)]
-pub(crate) use prompt_registry::DEFAULT_GENERATION_PROMPT_VERSION;
+pub(crate) use prompt_registry::{
+    DEFAULT_GENERATION_PROMPT_VERSION, DEFAULT_SYSTEM_PROMPT_TEMPLATE,
+    DEFAULT_USER_PROMPT_TEMPLATE,
+};
 #[cfg(not(test))]
 #[doc(hidden)]
 pub use user_activity::__cmd__save_explanation_feedback;

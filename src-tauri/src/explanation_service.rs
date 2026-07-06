@@ -16,7 +16,7 @@ use crate::context_builder::{
 use crate::llm_provider::{
     CompletionRequest, LlmProvider, OpenAiCompatibleProvider, ProviderMessage,
 };
-#[cfg(not(test))]
+#[allow(unused_imports)]
 use crate::persistence_service::{self, GeneratedExplanationInput};
 use crate::persistence_service::{ExplanationPayload, StoredModelConfig};
 use crate::utils::sha256_hex;
@@ -269,8 +269,14 @@ pub async fn generate_explanation(
         &request.target.id,
     )
     .map_err(AppError::database)?;
-    let prompt =
-        build_user_prompt(&context, &display_mode, &prompt_version).map_err(AppError::configuration)?;
+    let templates = persistence_service::load_prompt_templates(&database_path, &prompt_version)
+        .map_err(AppError::database)?
+        .unwrap_or_else(|| persistence_service::PromptTemplates {
+            system: persistence_service::DEFAULT_SYSTEM_PROMPT_TEMPLATE.to_string(),
+            user: persistence_service::DEFAULT_USER_PROMPT_TEMPLATE.to_string(),
+        });
+    let prompt = build_user_prompt(&context, &display_mode, &prompt_version, &templates.user)
+        .map_err(AppError::configuration)?;
     let (structured, attempts) = request_structured_explanation(
         &stored,
         api_key.as_deref(),
@@ -279,6 +285,7 @@ pub async fn generate_explanation(
         context.target.end_line,
         request.file.code.lines().count().max(1),
         &display_mode,
+        &templates.system,
     )
     .await?;
 
@@ -427,6 +434,7 @@ fn model_config_payload(stored: Option<StoredModelConfig>) -> Result<ModelConfig
     })
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn request_structured_explanation(
     config: &StoredModelConfig,
     api_key: Option<&str>,
@@ -435,6 +443,7 @@ async fn request_structured_explanation(
     target_end: usize,
     file_line_count: usize,
     expected_display_mode: &str,
+    system_prompt: &str,
 ) -> Result<(StructuredExplanation, usize), AppError> {
     let provider = OpenAiCompatibleProvider::new(config.timeout_seconds).map_err(AppError::from)?;
     let validation = ExplanationValidationContext {
@@ -443,8 +452,15 @@ async fn request_structured_explanation(
         file_line_count,
         expected_display_mode,
     };
-    request_structured_explanation_with_provider(&provider, config, api_key, prompt, &validation)
-        .await
+    request_structured_explanation_with_provider(
+        &provider,
+        config,
+        api_key,
+        prompt,
+        &validation,
+        system_prompt,
+    )
+    .await
 }
 
 async fn request_structured_explanation_with_provider<P: LlmProvider>(
@@ -453,9 +469,10 @@ async fn request_structured_explanation_with_provider<P: LlmProvider>(
     api_key: Option<&str>,
     prompt: String,
     validation: &ExplanationValidationContext<'_>,
+    system_prompt: &str,
 ) -> Result<(StructuredExplanation, usize), AppError> {
     let mut messages = vec![
-        ProviderMessage::system(system_prompt()),
+        ProviderMessage::system(system_prompt),
         ProviderMessage::user(prompt),
     ];
 
@@ -621,44 +638,19 @@ fn build_user_prompt(
     context: &crate::context_builder::ContextBundle,
     display_mode: &str,
     prompt_version: &str,
+    user_template: &str,
 ) -> Result<String, String> {
     let payload = serde_json::to_string_pretty(context)
         .map_err(|error| format!("Failed to serialize Context Bundle: {error}"))?;
-    Ok(format!(
-        "请根据下列经过授权的 Context Bundle 解释目标代码。\n\
-         你只能使用此 Bundle 中的信息；缺少项目上下文时必须明确降低可信标签，不得猜测。\n\
-         目标展示模式：{display_mode}\n\
-         本次解释使用的 Prompt 版本：{prompt_version}\n\
-         只输出一个 JSON 对象，字段与系统消息中的 schema 完全一致。\n\
-         Context Bundle:\n{payload}"
-    ))
+    Ok(user_template
+        .replace("{display_mode}", display_mode)
+        .replace("{prompt_version}", prompt_version)
+        .replace("{payload}", &payload))
 }
 
-fn system_prompt() -> &'static str {
-    r#"你是 CodeReader 的结构化代码解释器，不是聊天助手。
-只解释用户选中的代码目标，只依据提供的 Context Bundle，不得虚构未提供的调用关系或业务背景。
-输出必须是一个 JSON 对象，不要使用 Markdown 代码围栏，不要输出额外文字。
-schema:
-{
-  "codeLevelMeaning": "string, 代码本身做什么",
-  "localCompositionMeaning": "string, 在当前函数或文件中的作用",
-  "projectRoleMeaning": "string, 在已知项目上下文中的角色；上下文不足时应明确说明",
-  "priorKnowledge": "string，可为空",
-  "risks": [
-    {
-      "riskType": "string",
-      "level": "low | medium | high",
-      "description": "string"
-    }
-  ],
-  "reviewSuggestion": "string，可为空",
-  "dependsOnLines": [1],
-  "affectsLines": [2],
-  "trustLabel": "clear | context_needed | review_recommended",
-  "trustReason": "string，面向用户的白话依据",
-  "displayMode": "plain | detailed"
-}
-关系行号只能引用 Context Bundle 中真实存在的当前文件行号。不要输出 raw confidence 数字。"#
+#[cfg(test)]
+fn default_system_prompt() -> &'static str {
+    persistence_service::DEFAULT_SYSTEM_PROMPT_TEMPLATE
 }
 
 fn normalize_endpoint(value: &str) -> Result<String, AppError> {
@@ -840,8 +832,13 @@ mod tests {
             }),
         })
         .expect("context should build");
-        let prompt = build_user_prompt(&context, "plain", "test-prompt-v1")
-            .expect("prompt should build");
+        let prompt = build_user_prompt(
+            &context,
+            "plain",
+            "test-prompt-v1",
+            persistence_service::DEFAULT_USER_PROMPT_TEMPLATE
+        )
+        .expect("prompt should build");
         let embedded_bundle = prompt
             .split_once("Context Bundle:\n")
             .map(|(_, payload)| payload)
@@ -855,6 +852,40 @@ mod tests {
         assert!(prompt.contains("const selected = request.value;"));
         assert!(!prompt.contains("secretOutsideBudget"));
         assert!(!embedded_bundle.contains("const line1 = 1;"));
+    }
+
+    #[test]
+    fn build_user_prompt_uses_custom_template_and_substitutes_placeholders() {
+        let context = build_context_bundle(BuildContextRequest {
+            file: ContextFileInput {
+                path: "src/example.ts".to_string(),
+                language: "typescript".to_string(),
+                code: "const value = 1;".to_string(),
+                code_nodes: Vec::new(),
+            },
+            target: ContextTargetInput {
+                target_type: "line".to_string(),
+                target_name: None,
+                start_line: Some(1),
+                end_line: Some(1),
+                symbol_id: None,
+            },
+            budget: Some(ContextBudgetInput {
+                max_chars: Some(800),
+                max_snippets: Some(4),
+            }),
+        })
+        .expect("context should build");
+        let custom_template =
+            "CUSTOM MARKER display={display_mode} ver={prompt_version} bundle={payload}";
+        let prompt = build_user_prompt(&context, "detailed", "v9-custom", custom_template)
+            .expect("prompt should build");
+        assert!(prompt.contains("CUSTOM MARKER"));
+        assert!(prompt.contains("display=detailed"));
+        assert!(prompt.contains("ver=v9-custom"));
+        assert!(prompt.starts_with("CUSTOM MARKER"));
+        // The default template text must NOT appear when a custom template is used.
+        assert!(!prompt.contains("请根据下列经过授权的"));
     }
 
     #[test]
@@ -938,6 +969,7 @@ mod tests {
                 2,
                 10,
                 "plain",
+                default_system_prompt(),
             )
             .await
             .expect("second provider output should pass");
