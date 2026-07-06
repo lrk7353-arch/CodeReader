@@ -16,6 +16,35 @@ Beta 3 should stay anchored to these priorities:
    OpenAI-compatible responses-style support can be evaluated without committing
    to Anthropic or other provider-specific APIs.
 
+### Mainline Completion Status
+
+- **Prompt version registry, gray rollout, rollback, persistence records**:
+  complete. The registry stores version, status, `rollout_percent`,
+  `rollback_from`, `notes`, and `system_prompt_template` /
+  `user_prompt_template` columns (schema v3). Gray rollout uses a stable
+  `sha256(project_id:file_path:target_id)` sample so the same target resolves
+  to the same canary across regenerations. Rollback is an atomic
+  active/rolled_back swap. The explanation service loads the selected version's
+  templates and sends them as the system/user messages to the provider, so a
+  canary version truly changes the prompt content. Quality guards: custom user
+  templates must include the `{payload}` placeholder; `upsert` preserves
+  existing templates when template fields are omitted (COALESCE);
+  `load_prompt_templates` propagates database errors instead of swallowing
+  them; a mock-provider regression test locks the templates into the LLM
+  request messages. A management dialog lists versions, registers/edits
+  versions with optional templates, and triggers rollback.
+- **Linux/Debian development build validation**: complete.
+  `npm run doctor:linux` and `npm run verify:linux` pass on WSL Ubuntu 24.04
+  with Rust 1.96.1. `npm run tauri dev` launches the desktop app. See the
+  Current Evidence and Done Criteria sections below.
+- **Rust long-module splitting**: in progress. `persistence_service.rs` was
+  split from 1996 to ~1300 lines by extracting `explanation_hydration`.
+  Remaining candidates: `context_builder.rs`, `code_service.rs`.
+- **Provider registry**: OpenAI-compatible chat/completions and responses-style
+  endpoints are supported. A second non-OpenAI protocol (e.g. Ollama) is
+  deferred — it is lower priority for Beta 3 and not a blocker.
+
+
 ## Preparation And Support Items
 
 The broader Beta 3 support backlog is still valid, but it is not the mainline:
