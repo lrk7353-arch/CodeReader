@@ -175,8 +175,25 @@ fn record_to_payload(record: PromptVersionRecord) -> PromptVersionPayload {
 
 pub(crate) fn upsert_prompt_version_at_path(
     database_path: &Path,
-    input: PromptVersionRegistration,
+    mut input: PromptVersionRegistration,
 ) -> Result<PromptVersionRecord, String> {
+    // Normalize empty template strings to None so they are stored as NULL
+    // (meaning "use the built-in default"). This keeps Some("") and None
+    // semantically equivalent at the storage layer.
+    if input
+        .system_prompt_template
+        .as_deref()
+        .is_some_and(|s| s.trim().is_empty())
+    {
+        input.system_prompt_template = None;
+    }
+    if input
+        .user_prompt_template
+        .as_deref()
+        .is_some_and(|s| s.trim().is_empty())
+    {
+        input.user_prompt_template = None;
+    }
     validate_prompt_version(&input)?;
     let conn = super::open_database(database_path)?;
     let now = super::now_timestamp();
@@ -392,25 +409,24 @@ pub(crate) fn load_prompt_templates(
     version: &str,
 ) -> Result<Option<PromptTemplates>, String> {
     let conn = super::open_database(database_path)?;
-    let row = conn
-        .query_row(
-            "SELECT system_prompt_template, user_prompt_template
-             FROM prompt_versions
-             WHERE version = ?1",
-            params![version],
-            |row| {
-                let system: Option<String> = row.get(0)?;
-                let user: Option<String> = row.get(1)?;
-                Ok((system, user))
-            },
-        )
-        .ok();
+    let row = conn.query_row(
+        "SELECT system_prompt_template, user_prompt_template
+         FROM prompt_versions
+         WHERE version = ?1",
+        params![version],
+        |row| {
+            let system: Option<String> = row.get(0)?;
+            let user: Option<String> = row.get(1)?;
+            Ok((system, user))
+        },
+    );
     match row {
-        Some((system, user)) => Ok(Some(PromptTemplates {
+        Ok((system, user)) => Ok(Some(PromptTemplates {
             system: system.unwrap_or_else(|| DEFAULT_SYSTEM_PROMPT_TEMPLATE.to_string()),
             user: user.unwrap_or_else(|| DEFAULT_USER_PROMPT_TEMPLATE.to_string()),
         })),
-        None => Ok(None),
+        Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+        Err(error) => Err(super::database_error(error)),
     }
 }
 
@@ -522,6 +538,15 @@ fn validate_prompt_version(input: &PromptVersionRegistration) -> Result<(), Stri
     }
     if input.status == "active" && input.rollout_percent != 100 {
         return Err("Active prompt versions must use 100 percent rollout.".to_string());
+    }
+    if let Some(template) = input.user_prompt_template.as_deref() {
+        if !template.trim().is_empty() && !template.contains("{payload}") {
+            return Err(
+                "User prompt template must include the {payload} placeholder so the Context \
+                 Bundle is sent to the model."
+                    .to_string()
+            );
+        }
     }
     Ok(())
 }
@@ -670,6 +695,61 @@ mod tests {
             prompt_registration("code-explanation-v0.3", "rolled_back", 0, None, None),
         );
         assert!(rollback_without_source.is_err_and(|error| error.contains("rollback_from")));
+    }
+
+    #[test]
+    fn validate_prompt_version_rejects_user_template_without_payload_placeholder() {
+        let database_path = temp_database_path("prompt-validate-payload");
+        super::super::open_database(&database_path).expect("database initializes");
+
+        let missing_payload = upsert_prompt_version_at_path(
+            &database_path,
+            PromptVersionRegistration {
+                version: "code-explanation-v0.3".to_string(),
+                status: "canary".to_string(),
+                rollout_percent: 30,
+                rollback_from: None,
+                notes: None,
+                system_prompt_template: Some("custom system".to_string()),
+                user_prompt_template: Some("custom user without payload".to_string()),
+            },
+        );
+        assert!(missing_payload.is_err_and(|error| error.contains("{payload}")));
+
+        // A template with the placeholder should be accepted.
+        let with_payload = upsert_prompt_version_at_path(
+            &database_path,
+            PromptVersionRegistration {
+                version: "code-explanation-v0.3".to_string(),
+                status: "canary".to_string(),
+                rollout_percent: 30,
+                rollback_from: None,
+                notes: None,
+                system_prompt_template: Some("custom system".to_string()),
+                user_prompt_template: Some("custom user {payload}".to_string()),
+            },
+        )
+        .expect("template with {payload} should be accepted");
+        assert_eq!(with_payload.user_prompt_template.as_deref(), Some("custom user {payload}"));
+
+        // Empty/whitespace templates are normalized to None and should be accepted.
+        let empty_template = upsert_prompt_version_at_path(
+            &database_path,
+            PromptVersionRegistration {
+                version: "code-explanation-v0.4".to_string(),
+                status: "canary".to_string(),
+                rollout_percent: 30,
+                rollback_from: None,
+                notes: None,
+                system_prompt_template: Some("   ".to_string()),
+                user_prompt_template: Some("".to_string()),
+            },
+        )
+        .expect("empty templates should be accepted (normalized to None)");
+        assert!(empty_template.system_prompt_template.is_none());
+        assert!(empty_template.user_prompt_template.is_none());
+
+        let _ = std::fs::remove_file(database_path);
     }
 
     #[test]

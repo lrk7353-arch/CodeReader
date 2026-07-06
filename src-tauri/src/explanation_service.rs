@@ -1065,4 +1065,128 @@ mod tests {
         })
         .to_string()
     }
+
+    /// A mock LLM provider that records the messages it receives and returns a
+    /// fixed valid structured response. Used to assert that custom prompt
+    /// templates actually reach the provider's request messages.
+    struct RecordingProvider {
+        captured: std::sync::Mutex<Vec<ProviderMessage>>,
+    }
+
+    impl RecordingProvider {
+        fn new() -> Self {
+            Self {
+                captured: std::sync::Mutex::new(Vec::new()),
+            }
+        }
+
+        fn messages(&self) -> Vec<ProviderMessage> {
+            // ProviderMessage is Clone, so we can return owned copies.
+            self.captured
+                .lock()
+                .expect("capture lock")
+                .clone()
+        }
+    }
+
+    impl LlmProvider for RecordingProvider {
+        fn complete<'a>(
+            &'a self,
+            request: CompletionRequest<'a>,
+        ) -> crate::llm_provider::ProviderFuture<'a> {
+            let mut captured = self.captured.lock().expect("capture lock");
+            captured.extend(request.messages.iter().cloned());
+            drop(captured);
+            let body = valid_response_json();
+            Box::pin(async move { Ok(body) })
+        }
+    }
+
+    #[test]
+    fn custom_prompt_templates_reach_provider_messages() {
+        use crate::context_builder::{BuildContextRequest, ContextFileInput, ContextTargetInput};
+        let runtime = tokio::runtime::Builder::new_multi_thread()
+            .enable_all()
+            .build()
+            .expect("test runtime builds");
+        runtime.block_on(async {
+            let context = build_context_bundle(BuildContextRequest {
+                file: ContextFileInput {
+                    path: "src/example.ts".to_string(),
+                    language: "typescript".to_string(),
+                    code: "const value = 1;".to_string(),
+                    code_nodes: Vec::new(),
+                },
+                target: ContextTargetInput {
+                    target_type: "line".to_string(),
+                    target_name: None,
+                    start_line: Some(1),
+                    end_line: Some(1),
+                    symbol_id: None,
+                },
+                budget: Some(ContextBudgetInput {
+                    max_chars: Some(800),
+                    max_snippets: Some(4),
+                }),
+            })
+            .expect("context should build");
+            let system_template = "CUSTOM SYSTEM MARKER for canary";
+            let user_template =
+                "CUSTOM USER MARKER ver={prompt_version} mode={display_mode} bundle={payload}";
+            let prompt = build_user_prompt(&context, "plain", "v9-canary", user_template)
+                .expect("prompt should build");
+            let provider = RecordingProvider::new();
+            let validation = ExplanationValidationContext {
+                target_start: 1,
+                target_end: 1,
+                file_line_count: 10,
+                expected_display_mode: "plain",
+            };
+            let config = StoredModelConfig {
+                endpoint: "http://unused/v1/chat/completions".to_string(),
+                model: "fixture-model".to_string(),
+                timeout_seconds: 10,
+                updated_at: "test".to_string(),
+            };
+            request_structured_explanation_with_provider(
+                &provider,
+                &config,
+                None,
+                prompt,
+                &validation,
+                system_template,
+            )
+            .await
+            .expect("provider call should succeed");
+
+            let messages = provider.messages();
+            assert_eq!(messages.len(), 2, "should send system + user messages");
+            assert_eq!(messages[0].role(), "system");
+            assert!(
+                messages[0].content().contains("CUSTOM SYSTEM MARKER"),
+                "system message should use the custom template: {}",
+                messages[0].content()
+            );
+            assert_eq!(messages[1].role(), "user");
+            let user_content = messages[1].content();
+            assert!(
+                user_content.contains("CUSTOM USER MARKER"),
+                "user message should use the custom template"
+            );
+            assert!(
+                user_content.contains("ver=v9-canary"),
+                "user message should substitute {{prompt_version}}"
+            );
+            assert!(
+                user_content.contains("mode=plain"),
+                "user message should substitute {{display_mode}}"
+            );
+            assert!(
+                user_content.contains("bundle="),
+                "user message should substitute {{payload}}"
+            );
+            // The default prompt text must NOT appear when custom templates are used.
+            assert!(!user_content.contains("请根据下列经过授权的"));
+        });
+    }
 }

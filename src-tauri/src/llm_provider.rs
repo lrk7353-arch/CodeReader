@@ -37,6 +37,16 @@ impl ProviderMessage {
             content: content.into(),
         }
     }
+
+    #[allow(dead_code)]
+    pub(crate) fn content(&self) -> &str {
+        &self.content
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn role(&self) -> &str {
+        self.role
+    }
 }
 
 pub(crate) struct CompletionRequest<'a> {

@@ -22,6 +22,8 @@ function sampleVersions(overrides: Partial<PromptVersionInfo>[] = []): PromptVer
       rolloutPercent: 30,
       rollbackFrom: null,
       notes: "Canary for structured output tightening.",
+      systemPromptTemplate: null,
+      userPromptTemplate: "CUSTOM USER TEMPLATE",
       createdAt: "2026-07-01T00:00:00.000Z",
       updatedAt: "2026-07-01T00:00:00.000Z"
     }
@@ -89,7 +91,7 @@ describe("PromptRegistryDialog interactions", () => {
     const onRollback = vi.fn();
     renderDialog({ onRollback });
 
-    await user.click(screen.getByRole("button", { name: "回滚到该版本" }));
+    await user.click(screen.getByRole("button", { name: "回滚" }));
 
     expect(
       screen.getByPlaceholderText("例如：canary 在 12% 请求中返回畸形 JSON")
@@ -113,7 +115,7 @@ describe("PromptRegistryDialog interactions", () => {
     const onRollback = vi.fn();
     renderDialog({ onRollback });
 
-    await user.click(screen.getByRole("button", { name: "回滚到该版本" }));
+    await user.click(screen.getByRole("button", { name: "回滚" }));
     await user.click(screen.getByRole("button", { name: "确认回滚" }));
 
     expect(onRollback).toHaveBeenCalledWith(
@@ -224,6 +226,23 @@ describe("PromptRegistryDialog interactions", () => {
       ]
     });
 
-    expect(screen.queryByRole("button", { name: "回滚到该版本" })).toBeDisabled();
+    expect(screen.queryByRole("button", { name: "回滚" })).toBeDisabled();
+  });
+
+  it("prefills the register form when editing an existing version", async () => {
+    const user = userEvent.setup();
+    renderDialog();
+
+    // Two versions are listed; edit the second one (code-explanation-v0.2-rc1).
+    const editButtons = screen.getAllByRole("button", { name: "编辑" });
+    await user.click(editButtons[1]);
+
+    expect(screen.getByPlaceholderText("code-explanation-v0.2-rc1")).toHaveValue(
+      "code-explanation-v0.2-rc1"
+    );
+    expect(screen.getByLabelText("灰度百分比")).toHaveValue(30);
+    expect(screen.getByLabelText("User Prompt 模板（可选，留空用默认）")).toHaveValue(
+      "CUSTOM USER TEMPLATE"
+    );
   });
 });

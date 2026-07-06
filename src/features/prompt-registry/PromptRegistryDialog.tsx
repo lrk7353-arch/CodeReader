@@ -83,6 +83,16 @@ export function PromptRegistryDialog({
     });
   }
 
+  function editVersion(entry: PromptVersionInfo) {
+    setRegisterVersion(entry.version);
+    setRegisterStatus(entry.status);
+    setRegisterRollout(entry.rolloutPercent);
+    setRegisterNotes(entry.notes ?? "");
+    setRegisterSystemTemplate(entry.systemPromptTemplate ?? "");
+    setRegisterUserTemplate(entry.userPromptTemplate ?? "");
+    setRollbackTarget(null);
+  }
+
   function confirmRollback() {
     if (!rollbackTarget) {
       return;
@@ -163,19 +173,30 @@ export function PromptRegistryDialog({
                     </td>
                     <td>{entry.updatedAt}</td>
                     <td>
-                      {entry.status !== "active" ? (
+                      <div className="prompt-registry-row-actions">
                         <button
                           type="button"
-                          className="prompt-registry-rollback"
-                          disabled={busy || !activeVersion}
-                          onClick={() => setRollbackTarget(entry.version)}
-                          title={`回滚到 ${entry.version}`}
+                          className="prompt-registry-edit"
+                          disabled={busy}
+                          onClick={() => editVersion(entry)}
+                          title={`编辑 ${entry.version}`}
                         >
-                          回滚到该版本
+                          编辑
                         </button>
-                      ) : (
-                        <span className="prompt-registry-current">当前生效</span>
-                      )}
+                        {entry.status !== "active" ? (
+                          <button
+                            type="button"
+                            className="prompt-registry-rollback"
+                            disabled={busy || !activeVersion}
+                            onClick={() => setRollbackTarget(entry.version)}
+                            title={`回滚到 ${entry.version}`}
+                          >
+                            回滚
+                          </button>
+                        ) : (
+                          <span className="prompt-registry-current">当前生效</span>
+                        )}
+                      </div>
                     </td>
                   </tr>
                 ))
