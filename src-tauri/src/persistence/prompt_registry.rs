@@ -214,8 +214,8 @@ pub(crate) fn upsert_prompt_version_at_path(
            rollout_percent = excluded.rollout_percent,
            rollback_from = excluded.rollback_from,
            notes = excluded.notes,
-           system_prompt_template = excluded.system_prompt_template,
-           user_prompt_template = excluded.user_prompt_template,
+           system_prompt_template = COALESCE(excluded.system_prompt_template, prompt_versions.system_prompt_template),
+           user_prompt_template = COALESCE(excluded.user_prompt_template, prompt_versions.user_prompt_template),
            updated_at = excluded.updated_at",
         params![
             input.version,
@@ -1092,6 +1092,59 @@ mod tests {
                 .expect("version exists");
         assert_eq!(templates.system, "CUSTOM SYSTEM PROMPT");
         assert_eq!(templates.user, "CUSTOM USER PROMPT {payload}");
+
+        let _ = std::fs::remove_file(database_path);
+    }
+
+    #[test]
+    fn upsert_preserves_existing_templates_when_template_fields_are_none() {
+        let database_path = temp_database_path("prompt-templates-preserve");
+        super::super::open_database(&database_path).expect("database initializes");
+
+        // Register a version with custom templates.
+        upsert_prompt_version_at_path(
+            &database_path,
+            PromptVersionRegistration {
+                version: "code-explanation-v0.2-rc1".to_string(),
+                status: "canary".to_string(),
+                rollout_percent: 30,
+                rollback_from: None,
+                notes: None,
+                system_prompt_template: Some("CUSTOM SYSTEM".to_string()),
+                user_prompt_template: Some("CUSTOM USER {payload}".to_string()),
+            },
+        )
+        .expect("initial upsert with templates");
+
+        // Update only rollout/notes, leaving template fields as None. The
+        // COALESCE in ON CONFLICT must keep the previously stored templates
+        // instead of overwriting them with NULL.
+        let updated = upsert_prompt_version_at_path(
+            &database_path,
+            PromptVersionRegistration {
+                version: "code-explanation-v0.2-rc1".to_string(),
+                status: "canary".to_string(),
+                rollout_percent: 50,
+                rollback_from: None,
+                notes: Some("bumped rollout".to_string()),
+                system_prompt_template: None,
+                user_prompt_template: None,
+            },
+        )
+        .expect("upsert without template fields");
+
+        assert_eq!(updated.rollout_percent, 50);
+        assert_eq!(updated.notes.as_deref(), Some("bumped rollout"));
+        assert_eq!(
+            updated.system_prompt_template.as_deref(),
+            Some("CUSTOM SYSTEM"),
+            "system template must be preserved when field is None"
+        );
+        assert_eq!(
+            updated.user_prompt_template.as_deref(),
+            Some("CUSTOM USER {payload}"),
+            "user template must be preserved when field is None"
+        );
 
         let _ = std::fs::remove_file(database_path);
     }
