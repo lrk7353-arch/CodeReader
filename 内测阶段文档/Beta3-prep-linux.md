@@ -151,5 +151,13 @@ Rust was installed).
     forwards into WSL via a generated `.cmd` wrapper. To launch `tauri dev`
     from inside WSL, run `node node_modules/@tauri-apps/cli/tauri.js dev`
     directly until the wrapper learns to detect a Linux runtime.
+  - Fixed: the repo `.npmrc` previously set `script-shell=powershell.exe`,
+    which broke every `npm run` script under Linux because PowerShell is not
+    on PATH. The file has been removed; npm scripts are all
+    `node scripts/*.mjs` and do not depend on a PowerShell host shell.
+  - Fixed: `scripts/cargo.mjs` and `scripts/linux-dev-doctor.mjs` now prepend
+    `~/.cargo/bin` to PATH on Linux, so `npm run cargo:check` /
+    `cargo:clippy` / `cargo:test` and `npm run doctor:linux` locate the Rust
+    toolchain even when the shell has not sourced `~/.cargo/env`.
 - The Windows release pipeline remains unchanged unless a separate release task
   explicitly expands the platform promise.

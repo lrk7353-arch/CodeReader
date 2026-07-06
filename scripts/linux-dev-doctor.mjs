@@ -103,12 +103,33 @@ function runCommandCheck(executor, check) {
 }
 
 export function createSpawnExecutor() {
+  const env = augmentLinuxPath(process.env);
   return (command, args) =>
     spawnSync(command, args, {
       encoding: "utf8",
       stdio: ["ignore", "pipe", "pipe"],
-      shell: false
+      shell: false,
+      env
     });
+}
+
+/**
+ * On Linux, rustup installs cargo/rustc into ~/.cargo/bin which non-interactive
+ * shells (e.g. the shell `npm run` spawns) may not have on PATH. Prepend it so
+ * the doctor can locate the Rust toolchain without requiring the caller to
+ * source ~/.cargo/env first. No-op on other platforms.
+ */
+function augmentLinuxPath(env) {
+  if (process.platform !== "linux") {
+    return env;
+  }
+  const home = env.HOME || "";
+  const cargoBin = home ? `${home}/.cargo/bin` : "";
+  const currentPath = env.PATH || "";
+  if (!cargoBin || currentPath.split(":").includes(cargoBin)) {
+    return env;
+  }
+  return { ...env, PATH: `${cargoBin}:${currentPath}` };
 }
 
 function toWslPath(value) {
@@ -215,7 +236,8 @@ if (isMain) {
     const forwardedArgs = process.argv.slice(2).map(shellQuote).join(" ");
     const command = [
       '[ -f "$HOME/.profile" ] && . "$HOME/.profile"',
-      'export PATH="$HOME/.local/bin:$PATH"',
+      '[ -f "$HOME/.cargo/env" ] && . "$HOME/.cargo/env"',
+      'export PATH="$HOME/.local/bin:$HOME/.cargo/bin:$PATH"',
       `cd ${shellQuote(wslRoot)}`,
       `node scripts/linux-dev-doctor.mjs ${forwardedArgs}`
     ].join("; ");

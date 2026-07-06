@@ -112,7 +112,8 @@ if (isMain) {
     const forwardedArgs = process.argv.slice(2).map(shellQuote).join(" ");
     const command = [
       '[ -f "$HOME/.profile" ] && . "$HOME/.profile"',
-      'export PATH="$HOME/.local/bin:$PATH"',
+      '[ -f "$HOME/.cargo/env" ] && . "$HOME/.cargo/env"',
+      'export PATH="$HOME/.local/bin:$HOME/.cargo/bin:$PATH"',
       `cd ${shellQuote(wslRoot)}`,
       `node scripts/linux-desktop-smoke.mjs ${forwardedArgs}`
     ].join("; ");

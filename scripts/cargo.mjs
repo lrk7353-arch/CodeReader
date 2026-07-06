@@ -1,6 +1,7 @@
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
+import { existsSync } from "node:fs";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const action = process.argv[2];
@@ -23,6 +24,22 @@ if (!(action in commands)) {
   process.exit(2);
 }
 
+// On Linux, rustup installs cargo into ~/.cargo/bin which non-interactive
+// shells (e.g. the shell `npm run` spawns) may not have on PATH. Add it so
+// `npm run cargo:check` works without the caller sourcing ~/.cargo/env first.
+function linuxCargoEnv() {
+  if (process.platform !== "linux") {
+    return process.env;
+  }
+  const home = process.env.HOME || "";
+  const cargoBin = home ? `${home}/.cargo/bin` : "";
+  const currentPath = process.env.PATH || "";
+  if (!cargoBin || !existsSync(cargoBin) || currentPath.split(":").includes(cargoBin)) {
+    return process.env;
+  }
+  return { ...process.env, PATH: `${cargoBin}:${currentPath}` };
+}
+
 const result =
   process.platform === "win32"
     ? spawnSync(
@@ -39,7 +56,8 @@ const result =
     : spawnSync("cargo", commands[action], {
         cwd: root,
         stdio: "inherit",
-        shell: false
+        shell: false,
+        env: linuxCargoEnv()
       });
 
 if (result.error) {
