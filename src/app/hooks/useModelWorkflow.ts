@@ -96,12 +96,12 @@ export function useModelWorkflow({
     if (!explanation || !contextBundle || !config) {
       return;
     }
+    setConfirmOpen(false);
     setGenerationStatus("generating");
     setGenerationError("");
     try {
       const result = await generateExplanation(file, explanation);
       onGenerated(result);
-      setConfirmOpen(false);
       setGenerationStatus("idle");
       onWorkspaceStatus(
         `解释已生成并保存：${result.model}${result.attempts > 1 ? "（结构修复后通过）" : ""}`

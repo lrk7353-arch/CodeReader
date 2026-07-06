@@ -1,4 +1,13 @@
-import { AlertTriangle, Check, CircleHelp, FileText, FileWarning, RefreshCw } from "lucide-react";
+import { useEffect, useState } from "react";
+import {
+  AlertTriangle,
+  Check,
+  CircleHelp,
+  FileText,
+  FileWarning,
+  LoaderCircle,
+  RefreshCw
+} from "lucide-react";
 import type {
   ChangeSummary as ChangeSummaryData,
   CodeFile,
@@ -40,6 +49,22 @@ export function ExplanationPanel({
   onSelectAffected,
   onReadingStateChange
 }: ExplanationPanelProps) {
+  const [generationElapsedSeconds, setGenerationElapsedSeconds] = useState(0);
+
+  useEffect(() => {
+    if (generationStatus !== "generating") {
+      setGenerationElapsedSeconds(0);
+      return;
+    }
+
+    const startedAt = Date.now();
+    const timer = window.setInterval(() => {
+      setGenerationElapsedSeconds(Math.floor((Date.now() - startedAt) / 1000));
+    }, 1000);
+
+    return () => window.clearInterval(timer);
+  }, [generationStatus]);
+
   if (!explanation) {
     const canPreview = file.capability?.canPreview !== false;
     const title = canPreview ? "只读文本预览" : "无法预览此文件";
@@ -87,6 +112,14 @@ export function ExplanationPanel({
       ) : null}
 
       <StatusNotice explanation={explanation} />
+
+      {generationStatus === "generating" ? (
+        <div className="generation-inline-progress" role="status" aria-live="polite">
+          <LoaderCircle className="spin-icon" size={15} aria-hidden="true" />
+          <span>正在等待模型返回</span>
+          <small>已用时 {generationElapsedSeconds} 秒</small>
+        </div>
+      ) : null}
 
       <div className="meaning-stack">
         <section className="meaning-section">

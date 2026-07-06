@@ -933,6 +933,25 @@ button {
   color: #62696c;
 }
 
+.generation-inline-progress {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin: 10px 12px 0;
+  border: 1px solid #bfd2ca;
+  border-radius: 999px;
+  background: #edf4f0;
+  color: #285c4d;
+  padding: 7px 10px;
+  font-size: 12px;
+}
+
+.generation-inline-progress small {
+  margin-left: auto;
+  color: #53645e;
+  font-size: 11px;
+}
+
 .meaning-stack {
   display: grid;
   gap: 10px;

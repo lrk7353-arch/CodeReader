@@ -50,6 +50,13 @@ describe("ExplanationPanel workspace interactions", () => {
     expect(screen.getByRole("button", { name: "生成中" })).toBeDisabled();
   });
 
+  it("shows inline generation progress without leaving the panel", () => {
+    renderPanel({ generationStatus: "generating" });
+
+    expect(screen.getByRole("status")).toHaveTextContent("正在等待模型返回");
+    expect(screen.getByRole("status")).toHaveTextContent("已用时 0 秒");
+  });
+
   it("disables generation until the context bundle is ready", () => {
     renderPanel({ contextStatus: "loading" });
 
