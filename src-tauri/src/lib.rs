@@ -6,6 +6,7 @@ mod explanation_service;
 mod llm_provider;
 mod persistence_service;
 mod project_guidance;
+mod update_check;
 mod utils;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -29,6 +30,7 @@ pub fn run() {
             persistence_service::save_explanation_feedback,
             persistence_service::save_reading_state,
             persistence_service::upsert_prompt_version,
+            update_check::check_for_updates,
             project_guidance::generate_project_guide,
             project_guidance::load_project_guide
         ])
