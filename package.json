@@ -23,7 +23,8 @@
     "verify:signature": "node scripts/verify-authenticode.mjs",
     "verify:linux": "node scripts/verify-linux-dev.mjs",
     "evidence:linux": "node scripts/verify-linux-dev.mjs --json --output artifacts/linux-evidence/verify-linux.json",
-    "smoke:linux-desktop": "node scripts/linux-desktop-smoke.mjs"
+    "smoke:linux-desktop": "node scripts/linux-desktop-smoke.mjs",
+    "smoke:windows-release": "node scripts/windows-release-smoke.mjs"
   },
   "dependencies": {
     "@tauri-apps/api": "2.11.0",

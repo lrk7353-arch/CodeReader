@@ -45,6 +45,7 @@ export function buildDesktopSmokeTemplate({
       openFileWorks: null,
       openProjectWorks: null,
       modelSettingsOpen: null,
+      nonBlockingGenerationProgressVisible: null,
       notes: ""
     }
   };
