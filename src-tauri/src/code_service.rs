@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 use tree_sitter::{Language, Node, Parser};
 use walkdir::{DirEntry, WalkDir};
 
+use crate::app_error::AppError;
 use crate::utils::sha256_hex;
 
 mod wsl_paths;
@@ -104,7 +105,7 @@ const BINARY_EXTENSIONS: &[&str] = &[
     "ttf", "wasm", "webm", "webp", "woff", "woff2", "zip",
 ];
 
-#[derive(Serialize)]
+#[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CodeFilePayload {
     id: String,
@@ -123,7 +124,7 @@ pub struct CodeFilePayload {
     source: String,
 }
 
-#[derive(Serialize, Clone)]
+#[derive(Debug, Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct CodeNodePayload {
     id: String,
@@ -137,7 +138,7 @@ pub struct CodeNodePayload {
     anchor_text: String,
 }
 
-#[derive(Serialize)]
+#[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ProjectScanPayload {
     root_path: String,
@@ -147,7 +148,7 @@ pub struct ProjectScanPayload {
     skipped_entries: usize,
 }
 
-#[derive(Serialize, Clone)]
+#[derive(Debug, Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct ProjectFilePayload {
     id: String,
@@ -158,7 +159,7 @@ pub struct ProjectFilePayload {
     capability: FileCapabilityPayload,
 }
 
-#[derive(Serialize, Clone)]
+#[derive(Debug, Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct ProjectTreeNodePayload {
     id: String,
@@ -182,40 +183,72 @@ pub struct FileCapabilityPayload {
 }
 
 #[cfg_attr(not(test), tauri::command)]
-pub fn load_code_file(path: String) -> Result<CodeFilePayload, String> {
-    let path = canonicalize_input_path(&path, "file path")?;
+pub fn load_code_file(path: String) -> Result<CodeFilePayload, AppError> {
+    let path = canonicalize_input_path(&path, "file path")
+        .map_err(AppError::fs_path_resolve_failed)?;
     if !path.is_file() {
-        return Err("The selected path is not a readable file.".to_string());
+        return Err(AppError::fs_not_a_file(
+            "The selected path is not a readable file.",
+        ));
     }
-    load_file_payload(path, None)
+    load_file_payload(path, None).map_err(fs_error_for_load)
 }
 
 #[cfg_attr(not(test), tauri::command)]
 pub fn load_project_code_file(
     path: String,
     project_root: String,
-) -> Result<CodeFilePayload, String> {
-    let project_root = canonicalize_input_path(&project_root, "project root")?;
+) -> Result<CodeFilePayload, AppError> {
+    let project_root = canonicalize_input_path(&project_root, "project root")
+        .map_err(AppError::fs_path_resolve_failed)?;
     if !project_root.is_dir() {
-        return Err("The selected project root is not a readable folder.".to_string());
+        return Err(AppError::fs_not_a_dir(
+            "The selected project root is not a readable folder.",
+        ));
     }
 
-    let path = canonicalize_input_path(&path, "file path")?;
+    let path = canonicalize_input_path(&path, "file path")
+        .map_err(AppError::fs_path_resolve_failed)?;
     if !path.is_file() {
-        return Err("The selected path is not a readable file.".to_string());
+        return Err(AppError::fs_not_a_file(
+            "The selected path is not a readable file.",
+        ));
     }
     if !path.starts_with(&project_root) {
-        return Err("The selected file is outside the active project root.".to_string());
+        return Err(AppError::fs_path_resolve_failed(
+            "The selected file is outside the active project root.",
+        ));
     }
 
-    load_file_payload(path, Some(&project_root))
+    load_file_payload(path, Some(&project_root)).map_err(fs_error_for_load)
+}
+
+/// Maps the raw string errors from the file-loading pipeline onto stable
+/// `fs.*` codes so the frontend can branch on the code (e.g. too-large vs
+/// invalid-utf8 vs unsupported).
+fn fs_error_for_load(message: String) -> AppError {
+    let lower = message.to_lowercase();
+    if lower.contains("too large") {
+        AppError::fs_too_large(message)
+    } else if lower.contains("not valid utf-8") {
+        AppError::fs_invalid_utf8(message)
+    } else if lower.contains("failed to read file") || lower.contains("failed to inspect") {
+        AppError::fs_read_failed(message)
+    } else if lower.contains("binary") || lower.contains("unsupported") {
+        AppError::fs_unsupported(message)
+    } else {
+        AppError::fs_read_failed(message)
+    }
 }
 
 #[cfg_attr(not(test), tauri::command)]
-pub fn scan_project(path: String) -> Result<ProjectScanPayload, String> {
-    let root = canonicalize_input_path(&path, "project path")?;
+pub fn scan_project(path: String) -> Result<ProjectScanPayload, AppError> {
+    let root = canonicalize_input_path(&path, "project path")
+        .map_err(AppError::fs_path_resolve_failed)?;
     if !root.is_dir() {
-        return Err("The selected path is not a project folder.".to_string());
+        return Err(AppError::fs_not_a_dir(
+            "The selected path is not a project folder.",
+        ));
     }
 
     let mut files = Vec::new();
@@ -1369,6 +1402,28 @@ WHERE created_at < CURRENT_DATE;
             )),
             "//wsl.localhost/Ubuntu/home/konglingrui/CodeReader"
         );
+    }
+
+    #[test]
+    fn load_code_file_returns_stable_fs_codes_for_failure_paths() {
+        let missing = load_code_file("/this/path/does/not/exist.ts".to_string())
+            .expect_err("missing path should error");
+        assert_eq!(missing.code(), "fs.path_resolve_failed");
+
+        let not_a_file = load_code_file("/tmp".to_string())
+            .expect_err("directory should not load as a file");
+        assert_eq!(not_a_file.code(), "fs.not_a_file");
+    }
+
+    #[test]
+    fn scan_project_returns_stable_fs_codes_for_failure_paths() {
+        let missing = scan_project("/this/path/does/not/exist".to_string())
+            .expect_err("missing path should error");
+        assert_eq!(missing.code(), "fs.path_resolve_failed");
+
+        let not_a_dir = scan_project("/dev/null".to_string())
+            .expect_err("file should not scan as a project");
+        assert_eq!(not_a_dir.code(), "fs.not_a_dir");
     }
 
     fn temp_project_path(name: &str) -> PathBuf {

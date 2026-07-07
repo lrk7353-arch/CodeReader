@@ -77,12 +77,15 @@ node scripts/verify-authenticode.mjs artifacts/windows-x64/signing-manifest.json
 
 | 路径 | 稳定码 | 可执行动作 |
 | --- | --- | --- |
-| 打开项目/扫描 | （待补） | （待补） |
-| 打开单文件/预览 | （待补） | （待补） |
-| 刷新/变更迁移 | （待补） | （待补） |
-| 生成解释/LLM | `llm.timeout` / `llm.connection` / `llm.http` / `llm.invalid_response` / `llm.empty_response` | 重试 / 检查网络 / 检查模型配置 |
-| SQLite 迁移/读写 | （待补） | （待补） |
+| 打开项目/扫描 | `fs.path_resolve_failed` / `fs.not_a_dir` | 检查路径 |
+| 打开单文件/预览 | `fs.not_a_file` / `fs.read_failed` / `fs.too_large` / `fs.invalid_utf8` / `fs.unsupported` | 检查编码（invalid_utf8）/ 无（其他） |
+| 路径解析 | `fs.path_resolve_failed` | 检查路径 |
+| 生成解释/LLM | `llm.timeout` / `llm.connection` / `llm.http` / `llm.invalid_response` / `llm.empty_response` | 重试 / 检查网络 |
+| SQLite 迁移/读写 | `db.error`（待细分） | 重试 |
 | 凭据库/API Key | `credential.not_set` / `credential.unavailable` | 打开模型设置 |
+| 配置错误 | `config.invalid` | 打开模型设置 |
+
+前端映射见 `src/app/appError.ts` 的 `errorAction()`，按 code 返回 `retry` / `openModelSettings` / `checkEncoding` / `none`。
 
 脱敏边界：不记录 API Key、完整源码、完整 prompt 或完整模型响应。具体可记录字段见 `内测反馈与回归清单.md`。
 

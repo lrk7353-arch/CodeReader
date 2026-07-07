@@ -18,6 +18,42 @@ export function errorMessage(error: unknown): string {
   return parseAppError(error).message;
 }
 
+export type ErrorAction = "retry" | "openModelSettings" | "checkNetwork" | "checkEncoding" | "none";
+
+/**
+ * Maps a stable error code to a user-facing actionable suggestion so the UI
+ * can offer the right next step instead of a generic "failed" message.
+ */
+export function errorAction(error: unknown): ErrorAction {
+  const { code } = parseAppError(error);
+  switch (code) {
+    case "llm.timeout":
+    case "llm.connection":
+    case "llm.http":
+    case "llm.empty_response":
+      return "retry";
+    case "llm.invalid_response":
+      return "retry";
+    case "credential.not_set":
+    case "credential.unavailable":
+    case "config.invalid":
+      return "openModelSettings";
+    case "fs.invalid_utf8":
+      return "checkEncoding";
+    case "fs.too_large":
+    case "fs.unsupported":
+    case "fs.not_a_file":
+    case "fs.not_a_dir":
+    case "fs.path_resolve_failed":
+    case "fs.read_failed":
+      return "none";
+    case "db.error":
+      return "retry";
+    default:
+      return "none";
+  }
+}
+
 interface Extracted {
   code?: string;
   message?: string;

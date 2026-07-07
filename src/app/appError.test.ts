@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { errorMessage, parseAppError } from "./appError";
+import { errorMessage, errorAction, parseAppError } from "./appError";
 
 describe("errorMessage", () => {
   it("reads native and serialized application errors", () => {
@@ -108,5 +108,37 @@ describe("parseAppError", () => {
       }
     };
     expect(parseAppError(tooDeep)).toEqual({ message: "未知错误" });
+  });
+
+  describe("errorAction", () => {
+    it("suggests retry for transient LLM errors", () => {
+      expect(errorAction({ code: "llm.timeout", message: "x" })).toBe("retry");
+      expect(errorAction({ code: "llm.connection", message: "x" })).toBe("retry");
+      expect(errorAction({ code: "llm.http", message: "x" })).toBe("retry");
+      expect(errorAction({ code: "llm.invalid_response", message: "x" })).toBe("retry");
+    });
+
+    it("suggests opening model settings for credential/config errors", () => {
+      expect(errorAction({ code: "credential.not_set", message: "x" })).toBe("openModelSettings");
+      expect(errorAction({ code: "credential.unavailable", message: "x" })).toBe(
+        "openModelSettings"
+      );
+      expect(errorAction({ code: "config.invalid", message: "x" })).toBe("openModelSettings");
+    });
+
+    it("suggests checking encoding for invalid UTF-8 files", () => {
+      expect(errorAction({ code: "fs.invalid_utf8", message: "x" })).toBe("checkEncoding");
+    });
+
+    it("returns none for unsupported/too-large file errors", () => {
+      expect(errorAction({ code: "fs.too_large", message: "x" })).toBe("none");
+      expect(errorAction({ code: "fs.unsupported", message: "x" })).toBe("none");
+    });
+
+    it("falls back to none for unknown codes and bare strings", () => {
+      expect(errorAction({ code: "unknown.code", message: "x" })).toBe("none");
+      expect(errorAction("just a string")).toBe("none");
+      expect(errorAction(undefined)).toBe("none");
+    });
   });
 });
