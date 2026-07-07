@@ -108,7 +108,7 @@ describe("runAutomatedReleaseChecks", () => {
     expect(checks.some((c) => c.name.includes("exists") && !c.ok)).toBe(true);
   });
 
-  it("verifies sha256 consistency between manifest and files", () => {
+  it("verifies sha256 consistency between manifest, files, and SHA256SUMS", () => {
     const setup = Buffer.from("setup payload");
     const msi = Buffer.from("msi payload");
     const dir = makeArtifactsDir(tempDir);
@@ -125,8 +125,20 @@ describe("runAutomatedReleaseChecks", () => {
         ]
       })
     );
-    writeFileSync(join(dir, "signing-manifest.json"), JSON.stringify({}));
-    writeFileSync(join(dir, "SHA256SUMS.txt"), "");
+    writeFileSync(
+      join(dir, "signing-manifest.json"),
+      JSON.stringify({
+        configuration: { enabled: false, required: false },
+        artifacts: [
+          { path: "setup.exe", signed: false, signatureStatus: "NotSigned" },
+          { path: "app.msi", signed: false, signatureStatus: "NotSigned" }
+        ]
+      })
+    );
+    writeFileSync(
+      join(dir, "SHA256SUMS.txt"),
+      `${sha256(setup)}  setup.exe\n${sha256(msi)}  app.msi\n`
+    );
 
     const { checks, allOk } = runAutomatedReleaseChecks({ artifactsDir: dir });
     expect(allOk).toBe(true);
@@ -136,6 +148,94 @@ describe("runAutomatedReleaseChecks", () => {
     expect(checks.find((c) => c.name.includes("app.msi") && c.name.includes("sha256")).ok).toBe(
       true
     );
+    expect(checks.find((c) => c.name.includes("SHA256SUMS matches manifest")).ok).toBe(true);
+  });
+
+  it("fails allOk when SHA256SUMS.txt is missing", () => {
+    const setup = Buffer.from("setup payload");
+    const dir = makeArtifactsDir(tempDir);
+    writeFileSync(join(dir, "setup.exe"), setup);
+    writeFileSync(
+      join(dir, "release-manifest.json"),
+      JSON.stringify({
+        artifacts: [{ name: "setup.exe", sha256: sha256(setup), sizeBytes: setup.length }]
+      })
+    );
+    writeFileSync(
+      join(dir, "signing-manifest.json"),
+      JSON.stringify({
+        configuration: { enabled: false },
+        artifacts: [{ path: "setup.exe", signed: false, signatureStatus: "NotSigned" }]
+      })
+    );
+    // No SHA256SUMS.txt
+
+    const { allOk } = runAutomatedReleaseChecks({ artifactsDir: dir });
+    expect(allOk).toBe(false);
+  });
+
+  it("fails allOk when signing-manifest.json is missing", () => {
+    const setup = Buffer.from("setup payload");
+    const dir = makeArtifactsDir(tempDir);
+    writeFileSync(join(dir, "setup.exe"), setup);
+    writeFileSync(
+      join(dir, "release-manifest.json"),
+      JSON.stringify({
+        artifacts: [{ name: "setup.exe", sha256: sha256(setup), sizeBytes: setup.length }]
+      })
+    );
+    writeFileSync(join(dir, "SHA256SUMS.txt"), `${sha256(setup)}  setup.exe\n`);
+    // No signing-manifest.json
+
+    const { allOk } = runAutomatedReleaseChecks({ artifactsDir: dir });
+    expect(allOk).toBe(false);
+  });
+
+  it("fails allOk when an artifact has no signing entry", () => {
+    const setup = Buffer.from("setup payload");
+    const dir = makeArtifactsDir(tempDir);
+    writeFileSync(join(dir, "setup.exe"), setup);
+    writeFileSync(
+      join(dir, "release-manifest.json"),
+      JSON.stringify({
+        artifacts: [{ name: "setup.exe", sha256: sha256(setup), sizeBytes: setup.length }]
+      })
+    );
+    writeFileSync(
+      join(dir, "signing-manifest.json"),
+      JSON.stringify({
+        configuration: { enabled: false },
+        artifacts: [{ path: "other.exe", signed: false, signatureStatus: "NotSigned" }]
+      })
+    );
+    writeFileSync(join(dir, "SHA256SUMS.txt"), `${sha256(setup)}  setup.exe\n`);
+
+    const { allOk } = runAutomatedReleaseChecks({ artifactsDir: dir });
+    expect(allOk).toBe(false);
+  });
+
+  it("fails allOk when SHA256SUMS entry does not match manifest", () => {
+    const setup = Buffer.from("setup payload");
+    const dir = makeArtifactsDir(tempDir);
+    writeFileSync(join(dir, "setup.exe"), setup);
+    writeFileSync(
+      join(dir, "release-manifest.json"),
+      JSON.stringify({
+        artifacts: [{ name: "setup.exe", sha256: sha256(setup), sizeBytes: setup.length }]
+      })
+    );
+    writeFileSync(
+      join(dir, "signing-manifest.json"),
+      JSON.stringify({
+        configuration: { enabled: false },
+        artifacts: [{ path: "setup.exe", signed: false, signatureStatus: "NotSigned" }]
+      })
+    );
+    // Wrong hash in SHA256SUMS
+    writeFileSync(join(dir, "SHA256SUMS.txt"), `${"0".repeat(64)}  setup.exe\n`);
+
+    const { allOk } = runAutomatedReleaseChecks({ artifactsDir: dir });
+    expect(allOk).toBe(false);
   });
 
   it("fails when sha256 does not match", () => {

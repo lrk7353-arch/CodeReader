@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type SetStateAction } from "react";
 import {
   sampleFiles,
   sampleProjectGuide,
@@ -23,7 +23,7 @@ import type {
   ProjectScanResult,
   ReadingState
 } from "../../types/explanation";
-import { errorMessage } from "../appError";
+import { errorAction, errorMessage, type ErrorAction } from "../appError";
 import { useWorkspaceSelection } from "./useWorkspaceSelection";
 import { codeSelectionForExplanation, pickRetainedExplanation } from "./retainExplanation";
 import { seedBrowserHydratedFile, stripUnexplainableFile } from "./hydrateLoadedFile";
@@ -40,7 +40,8 @@ export function useWorkspaceFiles() {
   const [projectGuide, setProjectGuide] = useState<ProjectGuide | undefined>(sampleProjectGuide);
   const [guideFocusToken, setGuideFocusToken] = useState(0);
   const [readingStates, setReadingStates] = useState<Record<string, ReadingState>>({});
-  const [workspaceStatus, setWorkspaceStatus] = useState("示例项目：无需 API Key");
+  const [workspaceStatus, setWorkspaceStatusValue] = useState("示例项目：无需 API Key");
+  const [workspaceAction, setWorkspaceAction] = useState<ErrorAction>("none");
   const [databasePath, setDatabasePath] = useState("");
   const [persistenceStatus, setPersistenceStatus] = useState<PersistenceStatus>(
     isDesktopRuntime() ? "initializing" : "preview"
@@ -71,6 +72,16 @@ export function useWorkspaceFiles() {
   const workspaceName = useMemo(() => {
     return resolveWorkspaceName(files);
   }, [files]);
+
+  const setWorkspaceStatus = useCallback((next: SetStateAction<string>) => {
+    setWorkspaceAction("none");
+    setWorkspaceStatusValue(next);
+  }, []);
+
+  const reportWorkspaceError = useCallback((error: unknown, prefix = "") => {
+    setWorkspaceStatusValue(`${prefix}${errorMessage(error)}`);
+    setWorkspaceAction(errorAction(error));
+  }, []);
 
   useEffect(() => {
     if (!isDesktopRuntime()) {
@@ -104,13 +115,13 @@ export function useWorkspaceFiles() {
           return;
         }
         setPersistenceStatus("error");
-        setWorkspaceStatus(errorMessage(error));
+        reportWorkspaceError(error);
       });
 
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [reportWorkspaceError, setWorkspaceStatus]);
 
   const hydrateLoadedFile = useCallback(async (file: CodeFile) => {
     if (file.capability?.canExplain === false) {
@@ -191,7 +202,7 @@ export function useWorkspaceFiles() {
           hydrated.changeSummary?.summary ?? `已重新读取 ${hydrated.relativePath ?? hydrated.path}`
         );
       } catch (error) {
-        setWorkspaceStatus(`变更检测失败：${errorMessage(error)}`);
+        reportWorkspaceError(error, "变更检测失败：");
       } finally {
         refreshInFlightRef.current = false;
         if (announce) {
@@ -201,8 +212,10 @@ export function useWorkspaceFiles() {
     },
     [
       hydrateLoadedFile,
+      reportWorkspaceError,
       refreshPersistedProjectGuide,
       selectedExplanationId,
+      setWorkspaceStatus,
       setSelectedCodeSelection,
       setSelectedExplanationId,
       setSelectedFileId,
@@ -245,13 +258,20 @@ export function useWorkspaceFiles() {
         }
         setWorkspaceStatus(`已加载 ${file.relativePath ?? file.path}`);
       } catch (error) {
-        setWorkspaceStatus(errorMessage(error));
+        reportWorkspaceError(error);
       } finally {
         setIsWorkspaceBusy(false);
         setLoadingFileId(null);
       }
     },
-    [hydrateLoadedFile, refreshPersistedProjectGuide, setActiveLoadedFile, upsertFile]
+    [
+      hydrateLoadedFile,
+      refreshPersistedProjectGuide,
+      reportWorkspaceError,
+      setActiveLoadedFile,
+      setWorkspaceStatus,
+      upsertFile
+    ]
   );
 
   const selectFile = useCallback(
@@ -278,7 +298,8 @@ export function useWorkspaceFiles() {
       setActiveLoadedFile,
       setSelectedCodeSelection,
       setSelectedExplanationId,
-      setSelectedFileId
+      setSelectedFileId,
+      setWorkspaceStatus
     ]
   );
 
@@ -296,7 +317,7 @@ export function useWorkspaceFiles() {
       setActiveLoadedFile(hydratedSamples[0] ?? sampleFiles[0]);
       setWorkspaceStatus("示例项目已就绪：按推荐路径阅读入口、登录业务和用户数据");
     } catch (error) {
-      setWorkspaceStatus(errorMessage(error));
+      reportWorkspaceError(error);
     } finally {
       setIsWorkspaceBusy(false);
     }
@@ -323,7 +344,7 @@ export function useWorkspaceFiles() {
       setActiveLoadedFile(hydratedFile);
       setWorkspaceStatus(`已加载 ${hydratedFile.path}`);
     } catch (error) {
-      setWorkspaceStatus(errorMessage(error));
+      reportWorkspaceError(error);
     } finally {
       setIsWorkspaceBusy(false);
     }
@@ -386,6 +407,7 @@ export function useWorkspaceFiles() {
         setWorkspaceStatus(
           `项目结构已打开，但初始文件读取失败。可从文件树尝试其他文件：${errorMessage(error)}`
         );
+        setWorkspaceAction(errorAction(error));
         return;
       }
       setFiles(
@@ -399,7 +421,7 @@ export function useWorkspaceFiles() {
         `${project.files.length} 个文件，${previewableFiles.length} 个可预览：${project.rootPath}${projectOpenPlan.scanNote}${guideError ? `；阅读路径生成失败：${guideError}` : ""}`
       );
     } catch (error) {
-      setWorkspaceStatus(errorMessage(error));
+      reportWorkspaceError(error);
     } finally {
       setIsWorkspaceBusy(false);
     }
@@ -426,6 +448,7 @@ export function useWorkspaceFiles() {
     setReadingStates,
     setWorkspaceStatus,
     workspaceName,
+    workspaceAction,
     workspaceStatus
   };
 }

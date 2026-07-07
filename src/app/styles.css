@@ -129,6 +129,37 @@ button {
   white-space: nowrap;
 }
 
+.workspace-status-action,
+.workspace-status-hint {
+  display: inline-flex;
+  align-items: center;
+  flex: 0 0 auto;
+  min-height: 22px;
+  border-radius: 999px;
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.workspace-status-action {
+  border: 1px solid #b88a45;
+  background: #fff7e6;
+  color: #6f4313;
+  cursor: pointer;
+  padding: 0 9px;
+}
+
+.workspace-status-action:hover {
+  border-color: #9a6d2d;
+  background: #f7e2b8;
+}
+
+.workspace-status-hint {
+  border: 1px solid #d3c39d;
+  background: #f7efd9;
+  color: #72562a;
+  padding: 0 8px;
+}
+
 .workspace {
   display: grid;
   grid-template-columns: minmax(220px, 260px) minmax(0, 1fr) minmax(320px, 380px);

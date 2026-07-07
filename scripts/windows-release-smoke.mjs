@@ -45,12 +45,17 @@ export function runAutomatedReleaseChecks({
   artifactsDir = resolve(root, ARTIFACTS_DIR),
   fileExists = existsSync,
   readJsonFile = readJson,
+  readFile = (p) => readFileSync(p, "utf8"),
   hashFile = sha256OfFile
 } = {}) {
   const checks = [];
+  let allOk = true;
 
   function record(name, ok, detail) {
     checks.push({ name, ok, detail: detail ?? "" });
+    if (!ok) {
+      allOk = false;
+    }
   }
 
   const releaseManifestPath = `${artifactsDir}/release-manifest.json`;
@@ -84,14 +89,13 @@ export function runAutomatedReleaseChecks({
     return { checks, allOk: false };
   }
 
-  let signingManifest;
+  let signingManifest = null;
   if (fileExists(signingManifestPath)) {
     try {
       signingManifest = readJsonFile(signingManifestPath);
       record("signing-manifest.json is valid JSON", true);
     } catch (error) {
       record("signing-manifest.json is valid JSON", false, String(error));
-      signingManifest = null;
     }
   }
 
@@ -102,18 +106,27 @@ export function runAutomatedReleaseChecks({
   }
   record("release-manifest has artifacts", true);
 
-  let allHashesOk = true;
+  // Parse SHA256SUMS.txt into a map of name -> sha256 for cross-validation.
+  let sha256sums = new Map();
+  if (fileExists(sha256sumsPath)) {
+    try {
+      const text = readFile(sha256sumsPath);
+      sha256sums = parseSha256sums(text);
+      record("SHA256SUMS.txt parses to entries", sha256sums.size > 0, `${sha256sums.size} entries`);
+    } catch (error) {
+      record("SHA256SUMS.txt parses to entries", false, String(error));
+    }
+  }
+
   for (const entry of artifacts) {
     const fileName = entry.name ?? entry.path;
     if (!fileName) {
       record(`artifact has a name`, false, JSON.stringify(entry));
-      allHashesOk = false;
       continue;
     }
     const fullPath = `${artifactsDir}/${fileName}`;
     if (!fileExists(fullPath)) {
       record(`artifact file exists: ${fileName}`, false, "missing");
-      allHashesOk = false;
       continue;
     }
     record(`artifact file exists: ${fileName}`, true);
@@ -121,7 +134,6 @@ export function runAutomatedReleaseChecks({
     const expectedSha = (entry.sha256 ?? "").toLowerCase();
     if (!expectedSha) {
       record(`manifest has sha256 for ${fileName}`, false, "missing sha256");
-      allHashesOk = false;
       continue;
     }
     const actualSha = hashFile(fullPath);
@@ -133,7 +145,22 @@ export function runAutomatedReleaseChecks({
         false,
         `manifest=${expectedSha} actual=${actualSha}`
       );
-      allHashesOk = false;
+    }
+
+    // Cross-validate against SHA256SUMS.txt if it was parsed.
+    if (sha256sums.size > 0) {
+      const sumEntry = sha256sums.get(fileName);
+      if (!sumEntry) {
+        record(`SHA256SUMS entry for ${fileName}`, false, "not in SHA256SUMS.txt");
+      } else if (sumEntry === expectedSha) {
+        record(`SHA256SUMS matches manifest for ${fileName}`, true);
+      } else {
+        record(
+          `SHA256SUMS matches manifest for ${fileName}`,
+          false,
+          `manifest=${expectedSha} sums=${sumEntry}`
+        );
+      }
     }
 
     if (signingManifest && Array.isArray(signingManifest.artifacts)) {
@@ -149,10 +176,37 @@ export function runAutomatedReleaseChecks({
       } else {
         record(`signing entry for ${fileName}`, false, "not in signing-manifest");
       }
+    } else if (signingManifest) {
+      record(`signing entry for ${fileName}`, false, "signing-manifest has no artifacts array");
     }
   }
 
-  return { checks, allOk: allHashesOk };
+  return { checks, allOk };
+}
+
+/**
+ * Parses a SHA256SUMS.txt file. Each line is `<sha256>  <name>` (two spaces).
+ * Returns a Map of name -> lowercase sha256. Blank lines and lines that do
+ * not match the expected format are skipped.
+ */
+export function parseSha256sums(text) {
+  const map = new Map();
+  for (const line of String(text).split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (!trimmed) {
+      continue;
+    }
+    const match = trimmed.match(/^([0-9a-fA-F]{64})\s+\*?(.+)$/);
+    if (!match) {
+      continue;
+    }
+    const sha = match[1].toLowerCase();
+    const name = match[2].trim();
+    if (name) {
+      map.set(name, sha);
+    }
+  }
+  return map;
 }
 
 export function buildReleaseSmokeTemplate({

@@ -50,16 +50,20 @@ node scripts/verify-authenticode.mjs artifacts/windows-x64/signing-manifest.json
 
 ## 3. 主线状态表
 
+状态定义：`已完成` = 代码+测试+证据齐全；`模板完成` = 文档/脚本骨架就位但无真实执行记录；`manual-required` = 需人工桌面/主机会话，未执行；`外部阻塞` = 依赖外部前置条件（如真实证书）。
+
 | 主线 | 状态 | 证据位置 |
 | --- | --- | --- |
-| 1. Windows release-chain smoke | 未开始 | [Windows release-chain smoke](./Windows-release-chain-smoke.md) |
-| 2. 真实项目验证 | 未开始 | [Beta4 真实项目验证](./Beta4真实项目验证.md) |
-| 3. 内测退出证据包 | 进行中 | 本文档 + [迭代路线图](./迭代路线图.md) |
-| 4. 失败原因统计与诊断 | 未开始 | `src-tauri/src/app_error.rs` + `src/app/appError.ts` + 本文档第 5 节 |
-| 5. 长结构列表与大文件体验 | 未开始 | `src/features/file-explorer/` + 本文档第 6 节 |
-| 6. Linux 桌面 smoke 补全 | 未开始 | `scripts/linux-desktop-smoke.mjs` + [Linux 桌面 smoke](./Beta3-prep-linux.md) |
-| 7. Rust 长模块拆分 | 未开始 | `src-tauri/src/context_builder/` + `src-tauri/src/code_service/` |
-| 8. 文案资源层 | 未开始 | `src/app/copy.ts` + `src/app/copy.test.ts` |
+| 1. Windows release-chain smoke | 模板完成（人工 smoke manual-required） | [Windows release-chain smoke](./Windows-release-chain-smoke.md) + `scripts/windows-release-smoke.mjs` |
+| 2. 真实项目验证 | 模板完成（真实样本记录待填） | [Beta4 真实项目验证](./Beta4真实项目验证.md) |
+| 3. 内测退出证据包 | 已完成（本文档） | 本文档 + [迭代路线图](./迭代路线图.md) |
+| 4. 失败原因统计与诊断 | 已完成（代码+测试+workspace UI 提示） | `src-tauri/src/app_error.rs` + `src/app/appError.ts` + 本文档第 5 节 |
+| 5. 长结构列表与大文件体验 | 已完成（CSS 限高 + 测试） | `src/features/file-explorer/` + 本文档第 6 节 |
+| 6. Linux 桌面 smoke 补全 | 模板完成（manual-required） | `scripts/linux-desktop-smoke.mjs` + [Linux 桌面 smoke](./Beta3-prep-linux.md) |
+| 7. Rust 长模块拆分 | 已完成（首轮拆分，后续可继续） | `src-tauri/src/context_builder/budget.rs` + `src-tauri/src/code_service/language.rs` |
+| 8. 文案资源层 | 已完成（ModelSettings 已迁，其余可后续） | `src/app/copy.ts` + `src/app/copy.test.ts` |
+
+> 诚实说明：主线 1/2/6 的"模板完成"不等于"验收完成"。Windows 安装 smoke、Linux 桌面交互 smoke、真实项目多样本验证都需要人工执行或真实环境，当前只有脚本/文档骨架。这些在状态表里标为 `manual-required` 或 `模板完成`，不伪装为 `已完成`。
 
 ## 4. 平台与版本基线
 

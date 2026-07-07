@@ -13,6 +13,7 @@ import { useExplanationWriteback } from "./hooks/useExplanationWriteback";
 import { usePromptRegistry } from "./hooks/usePromptRegistry";
 import { useWorkspaceFiles } from "./hooks/useWorkspaceFiles";
 import { useModelWorkflow } from "./hooks/useModelWorkflow";
+import type { ErrorAction } from "./appError";
 
 export function App() {
   const copy = getAppCopy();
@@ -42,6 +43,7 @@ export function App() {
     setSelectedExplanationId,
     setWorkspaceStatus,
     updateSelection,
+    workspaceAction,
     workspaceName,
     workspaceStatus
   } = useWorkspaceFiles();
@@ -142,6 +144,10 @@ export function App() {
         </div>
         <div className="topbar-status">
           <span>{workspaceStatus}</span>
+          <WorkspaceStatusAction
+            action={workspaceAction}
+            onOpenModelSettings={modelWorkflow.settings.openDialog}
+          />
           <span>{copy.brand.stageBadge}</span>
         </div>
       </header>
@@ -252,4 +258,30 @@ export function App() {
       ) : null}
     </main>
   );
+}
+
+export function WorkspaceStatusAction({
+  action,
+  onOpenModelSettings
+}: {
+  action: ErrorAction;
+  onOpenModelSettings: () => void;
+}) {
+  if (action === "openModelSettings") {
+    return (
+      <button className="workspace-status-action" type="button" onClick={onOpenModelSettings}>
+        打开模型设置
+      </button>
+    );
+  }
+  if (action === "retry") {
+    return <span className="workspace-status-hint">建议：重试</span>;
+  }
+  if (action === "checkNetwork") {
+    return <span className="workspace-status-hint">建议：检查网络</span>;
+  }
+  if (action === "checkEncoding") {
+    return <span className="workspace-status-hint">建议：检查文件编码</span>;
+  }
+  return null;
 }
