@@ -142,9 +142,11 @@ Linux system dependency set installed.
   rustc 1.96.1, cargo 1.96.1, pkg-config 1.8.1, gcc 13.3.0, all Tauri
   pkg-config libraries present; `xdo` verified via header fallback at
   `/usr/include/xdo.h` because `libxdo-dev` ships no `.pc` file).
-- `npm run verify:linux`: all 7 gates pass on Linux — `cargo:check`,
-  `cargo:clippy`, `cargo:test` (82 Rust tests), `test` (25 files / 184 tests),
-  `lint`, `format:check`, `build`.
+- `npm run verify:linux -- --json`: all 7 gates pass on Linux —
+  `cargo:check`, `cargo:clippy`, `cargo:test` (92 Rust tests), `test`
+  (26 files / 189 tests), `lint`, `format:check`, `build`. Rechecked on
+  2026-07-07 after the Beta 3 promotion commit; the earlier mock TCP provider
+  failures no longer reproduce.
 - `npm run tauri dev`: launches the desktop app on Linux. The
   `target/debug/codereader` binary started on WSL Ubuntu 24.04 with the WSLg
   X server (`DISPLAY=:0`) and remained stable (no crash, no GTK errors) for
