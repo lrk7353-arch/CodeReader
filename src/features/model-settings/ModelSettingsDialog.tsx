@@ -1,5 +1,6 @@
 import { KeyRound, Save, Trash2, X } from "lucide-react";
 import { useEffect, useState, type FormEvent } from "react";
+import { getAppCopy } from "../../app/copy";
 import type { ModelConfig, SaveModelConfigInput } from "../../types/explanation";
 
 interface ModelSettingsDialogProps {
@@ -21,6 +22,8 @@ export function ModelSettingsDialog({
   onResetConfig,
   onSave
 }: ModelSettingsDialogProps) {
+  const copy = getAppCopy();
+  const modelSettings = copy.modelSettings;
   const [endpoint, setEndpoint] = useState("");
   const [model, setModel] = useState("");
   const [timeoutSeconds, setTimeoutSeconds] = useState(60);
@@ -74,55 +77,61 @@ export function ModelSettingsDialog({
       >
         <header className="dialog-header">
           <div>
-            <span className="dialog-eyebrow">OpenAI-compatible</span>
-            <h2 id="model-settings-title">模型设置</h2>
+            <span className="dialog-eyebrow">{modelSettings.eyebrow}</span>
+            <h2 id="model-settings-title">{modelSettings.title}</h2>
           </div>
-          <button className="icon-button" type="button" onClick={onClose} title="关闭模型设置">
+          <button
+            className="icon-button"
+            type="button"
+            onClick={onClose}
+            title={modelSettings.closeTitle}
+          >
             <X size={17} aria-hidden="true" />
           </button>
         </header>
 
         <form className="settings-form" onSubmit={submit}>
           <label>
-            <span>Chat Completions / Responses URL</span>
+            <span>{modelSettings.endpointLabel}</span>
             <input
               type="url"
               autoFocus
               value={endpoint}
               onChange={(event) => setEndpoint(event.target.value)}
-              placeholder="https://api.example.com/v1/chat/completions or /v1/responses"
+              placeholder={modelSettings.endpointPlaceholder}
               required
             />
           </label>
-          <p className="credential-note">
-            Supports Chat Completions, for example /v1/chat/completions, or Responses, for example
-            /v1/responses.
-          </p>
+          <p className="credential-note">{modelSettings.endpointNote}</p>
           <label>
-            <span>模型名称</span>
+            <span>{modelSettings.modelLabel}</span>
             <input
               type="text"
               value={model}
               onChange={(event) => setModel(event.target.value)}
-              placeholder="model-name"
+              placeholder={modelSettings.modelPlaceholder}
               required
             />
           </label>
           <label>
-            <span>API Key</span>
+            <span>{modelSettings.apiKeyLabel}</span>
             <div className="credential-input">
               <KeyRound size={15} aria-hidden="true" />
               <input
                 type="password"
                 value={apiKey}
                 onChange={(event) => setApiKey(event.target.value)}
-                placeholder={config?.hasApiKey ? "已安全保存，留空则保持不变" : "本地模型可留空"}
+                placeholder={
+                  config?.hasApiKey
+                    ? modelSettings.apiKeyPlaceholderConfigured
+                    : modelSettings.apiKeyPlaceholderLocal
+                }
                 autoComplete="off"
               />
             </div>
           </label>
           <label>
-            <span>请求超时（秒）</span>
+            <span>{modelSettings.timeoutLabel}</span>
             <input
               type="number"
               min={10}
@@ -133,7 +142,7 @@ export function ModelSettingsDialog({
             />
           </label>
 
-          <p className="credential-note">密钥保存到系统凭据库，不写入 SQLite、源码或日志。</p>
+          <p className="credential-note">{modelSettings.credentialNote}</p>
           {error ? <p className="dialog-error">{error}</p> : null}
 
           <footer className="dialog-actions">
@@ -145,16 +154,16 @@ export function ModelSettingsDialog({
                 disabled={busy}
               >
                 <Trash2 size={15} aria-hidden="true" />
-                <span>清除配置</span>
+                <span>{modelSettings.clearConfig}</span>
               </button>
             ) : null}
             <span className="dialog-action-spacer" />
             <button type="button" onClick={onClose} disabled={busy}>
-              取消
+              {modelSettings.cancel}
             </button>
             <button className="primary-button" type="submit" disabled={busy}>
               <Save size={15} aria-hidden="true" />
-              <span>{busy ? "保存中" : "保存配置"}</span>
+              <span>{busy ? modelSettings.saving : modelSettings.save}</span>
             </button>
           </footer>
         </form>

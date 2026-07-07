@@ -45,4 +45,25 @@ describe("app copy layer", () => {
       }
     }
   });
+
+  it("covers model settings, generation, and prompt registry copy in both locales", () => {
+    for (const locale of ["zh-CN", "en"] as const) {
+      const copy = getAppCopy(locale);
+      expect(copy.modelSettings.title).toBeTruthy();
+      expect(copy.modelSettings.endpointLabel).toBeTruthy();
+      expect(copy.modelSettings.apiKeyLabel).toBeTruthy();
+      expect(copy.modelSettings.timeoutLabel).toBeTruthy();
+      expect(copy.modelSettings.save).toBeTruthy();
+      expect(copy.modelSettings.saving).toBeTruthy();
+      expect(copy.generation.confirm).toBeTruthy();
+      expect(copy.generation.generating).toBeTruthy();
+      expect(copy.generation.generate).toBeTruthy();
+      expect(copy.promptRegistry.title).toBeTruthy();
+      expect(copy.promptRegistry.rollback).toBeTruthy();
+      expect(copy.promptRegistry.edit).toBeTruthy();
+      expect(copy.promptRegistry.save).toBeTruthy();
+      expect(copy.promptRegistry.templateCustom).toBeTruthy();
+      expect(copy.promptRegistry.templateDefault).toBeTruthy();
+    }
+  });
 });
