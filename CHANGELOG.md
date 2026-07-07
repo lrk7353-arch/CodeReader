@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+### Public repository preparation
+
+- Prepare public README, contribution, security, issue, and PR guidance.
+- Document the GitHub Release checklist for Windows artifacts, Linux evidence, checksums, and signing status.
+- Add low-risk update discovery planning for GitHub Releases without automatic installation.
+
 ### 0.11.0-beta.4
 
 - Promote the internal beta phase to `0.11.0-beta.4` with RC-prep validation and release-chain hardening.
