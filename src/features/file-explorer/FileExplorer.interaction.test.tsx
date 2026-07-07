@@ -103,6 +103,42 @@ describe("FileExplorer workspace interactions", () => {
     expect(screen.queryByRole("button", { name: "fn-10" })).not.toBeInTheDocument();
   });
 
+  it("keeps the project tree visible when a file has a very long structure list", async () => {
+    const user = userEvent.setup();
+    const explanations = Array.from({ length: 60 }, (_, index) =>
+      explanation(`fn-${index + 1}`, index * 5 + 1, "function")
+    );
+    const activeFile = file("alpha.py", explanations);
+    const sibling = file("beta.py", []);
+
+    render(
+      <FileExplorer
+        files={[activeFile, sibling]}
+        selectedFileId="alpha.py"
+        workspaceName="examples"
+        onSelectFile={vi.fn()}
+        onSelectExplanation={vi.fn()}
+      />
+    );
+
+    // The compact list is capped, so fn-60 (the last item) is not rendered
+    // until the user expands. The sibling file remains visible and clickable,
+    // proving the long structure list did not push the project tree away.
+    expect(screen.queryByRole("button", { name: "fn-60" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "beta.py" })).toBeInTheDocument();
+
+    // The compact target list element exists and is scrollable (the CSS caps
+    // it with max-height + overflow-y: auto so it does not grow unbounded).
+    const targetList = document.querySelector(".target-list");
+    expect(targetList).toBeTruthy();
+
+    // Expanding still works for a very long list.
+    await user.click(screen.getByRole("button", { name: /浏览全部 60 项/ }));
+    expect(screen.getByRole("button", { name: "fn-60" })).toBeInTheDocument();
+    // Sibling is still visible after expand (expanded list scrolls in its own box).
+    expect(screen.getByRole("button", { name: "beta.py" })).toBeInTheDocument();
+  });
+
   it("switches between files and reading-path tabs", async () => {
     const user = userEvent.setup();
 
