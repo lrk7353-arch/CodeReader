@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import { BookOpen, FilePlus2, FolderOpen, Settings2, Tags } from "lucide-react";
+import { BookOpen, FilePlus2, FolderOpen, RefreshCw, Settings2, Tags } from "lucide-react";
 import { FileExplorer } from "../features/file-explorer/FileExplorer";
 import { MonacoCodeViewer } from "../features/code-viewer/MonacoCodeViewer";
 import { ExplanationPanel } from "../features/explanation-panel/ExplanationPanel";
@@ -11,6 +11,7 @@ import { useExplanationContext } from "./hooks/useExplanationContext";
 import { useExplanationFeedback } from "./hooks/useExplanationFeedback";
 import { useExplanationWriteback } from "./hooks/useExplanationWriteback";
 import { usePromptRegistry } from "./hooks/usePromptRegistry";
+import { useUpdateCheck, type UpdateCheckState } from "./hooks/useUpdateCheck";
 import { useWorkspaceFiles } from "./hooks/useWorkspaceFiles";
 import { useModelWorkflow } from "./hooks/useModelWorkflow";
 import type { ErrorAction } from "./appError";
@@ -73,6 +74,7 @@ export function App() {
     refreshPersistedProjectGuide
   });
   const promptRegistry = usePromptRegistry({ onWorkspaceStatus: setWorkspaceStatus });
+  const updateCheck = useUpdateCheck();
 
   const fileStatus = useMemo(() => {
     if (selectedFile.capability?.canPreview === false) {
@@ -140,6 +142,23 @@ export function App() {
           <button type="button" onClick={promptRegistry.openDialog} title="Prompt 版本管理">
             <Tags size={16} aria-hidden="true" />
             <span>Prompt 版本</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => void updateCheck.check()}
+            disabled={updateCheck.state.status === "checking"}
+            title={copy.actionTitles.update}
+          >
+            <RefreshCw
+              className={updateCheck.state.status === "checking" ? "spin-icon" : undefined}
+              size={16}
+              aria-hidden="true"
+            />
+            <span>
+              {updateCheck.state.status === "checking"
+                ? copy.updates.checking
+                : copy.actions.update}
+            </span>
           </button>
         </div>
         <div className="topbar-status">
@@ -223,6 +242,7 @@ export function App() {
         <span className={modelWorkflow.config?.configured ? "model-ready" : "model-unconfigured"}>
           {modelWorkflow.config?.configured ? modelWorkflow.config.model : copy.model.unconfigured}
         </span>
+        <UpdateCheckStatus state={updateCheck.state} copy={copy.updates} />
       </footer>
 
       <ModelSettingsDialog
@@ -258,6 +278,33 @@ export function App() {
       ) : null}
     </main>
   );
+}
+
+export function UpdateCheckStatus({
+  state,
+  copy
+}: {
+  state: UpdateCheckState;
+  copy: ReturnType<typeof getAppCopy>["updates"];
+}) {
+  if (state.status === "idle" || state.status === "checking") {
+    return null;
+  }
+  if (state.status === "updateAvailable") {
+    return (
+      <a href={state.releaseUrl} target="_blank" rel="noreferrer">
+        {copy.available}: {state.latestVersion}
+      </a>
+    );
+  }
+  if (state.status === "upToDate") {
+    return (
+      <span>
+        {copy.upToDate}: {state.currentVersion}
+      </span>
+    );
+  }
+  return <span title={state.message}>{copy.unavailable}</span>;
 }
 
 export function WorkspaceStatusAction({

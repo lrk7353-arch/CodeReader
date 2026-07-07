@@ -1316,6 +1316,15 @@ button {
   font-weight: 650;
 }
 
+.statusbar a {
+  min-width: 0;
+  overflow: hidden;
+  color: #1f6d59;
+  font-weight: 650;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .modal-backdrop {
   position: fixed;
   z-index: 20;

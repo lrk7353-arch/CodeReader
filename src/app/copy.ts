@@ -14,12 +14,14 @@ export interface AppCopy {
     openFile: string;
     openProject: string;
     model: string;
+    update: string;
   };
   actionTitles: {
     sample: string;
     openFile: string;
     openProject: string;
     model: string;
+    update: string;
   };
   persistenceLabel: Record<PersistenceStatus, string>;
   persistenceTooltip: Record<PersistenceStatus, string>;
@@ -31,6 +33,13 @@ export interface AppCopy {
   };
   model: {
     unconfigured: string;
+  };
+  updates: {
+    check: string;
+    checking: string;
+    upToDate: string;
+    available: string;
+    unavailable: string;
   };
   modelSettings: {
     title: string;
@@ -104,13 +113,15 @@ const zhCN: AppCopy = {
     sample: "\u4f53\u9a8c\u793a\u4f8b",
     openFile: "\u6253\u5f00\u6587\u4ef6",
     openProject: "\u6253\u5f00\u9879\u76ee",
-    model: "\u6a21\u578b"
+    model: "\u6a21\u578b",
+    update: "\u68c0\u67e5\u66f4\u65b0"
   },
   actionTitles: {
     sample: "\u4f53\u9a8c\u65e0\u9700 API Key \u7684\u4e09\u6587\u4ef6\u793a\u4f8b\u9879\u76ee",
     openFile: "\u6253\u5f00\u5355\u4e2a\u4ee3\u7801\u6587\u4ef6",
     openProject: "\u6253\u5f00\u672c\u5730\u9879\u76ee\u6587\u4ef6\u5939",
-    model: "\u914d\u7f6e LLM"
+    model: "\u914d\u7f6e LLM",
+    update: "\u68c0\u67e5 GitHub Releases \u4e0a\u7684\u6700\u65b0\u7248\u672c"
   },
   persistenceLabel: {
     preview: "\u6d4f\u89c8\u5668\u9884\u89c8",
@@ -139,6 +150,13 @@ const zhCN: AppCopy = {
   },
   model: {
     unconfigured: "\u6a21\u578b\u672a\u914d\u7f6e"
+  },
+  updates: {
+    check: "\u68c0\u67e5\u66f4\u65b0",
+    checking: "\u68c0\u67e5\u4e2d",
+    upToDate: "\u5df2\u662f\u6700\u65b0",
+    available: "\u53d1\u73b0\u65b0\u7248\u672c",
+    unavailable: "\u6682\u65f6\u65e0\u6cd5\u68c0\u67e5\u66f4\u65b0"
   },
   modelSettings: {
     title: "\u6a21\u578b\u8bbe\u7f6e",
@@ -221,13 +239,15 @@ const en: AppCopy = {
     sample: "Try sample",
     openFile: "Open file",
     openProject: "Open project",
-    model: "Model"
+    model: "Model",
+    update: "Check updates"
   },
   actionTitles: {
     sample: "Try the three-file sample project without an API key",
     openFile: "Open a single code file",
     openProject: "Open a local project folder",
-    model: "Configure LLM"
+    model: "Configure LLM",
+    update: "Check the latest version on GitHub Releases"
   },
   persistenceLabel: {
     preview: "Browser preview",
@@ -256,6 +276,13 @@ const en: AppCopy = {
   },
   model: {
     unconfigured: "Model not configured"
+  },
+  updates: {
+    check: "Check updates",
+    checking: "Checking",
+    upToDate: "Up to date",
+    available: "Update available",
+    unavailable: "Update check unavailable"
   },
   modelSettings: {
     title: "Model settings",
