@@ -2,7 +2,7 @@
 
 CodeReader 是一个独立桌面端 AI 代码阅读 IDE，目标是把 AI 生成的代码从黑箱产物转化为可阅读、可解释、可审阅、可持久化、可逐步掌握的认知资产。
 
-`v0.10.0-mvp` 已于 2026 年 6 月 11 日完成 Windows 桌面发行验收。项目从 2026 年 6 月 12 日起进入 `0.11.x` 内测迭代，当前阶段为 `0.11.0-beta.3`，重点从可诊断性与回归保护扩展到执行级 Prompt 灰度、Linux 开发验证和按职责的模块拆分。
+`v0.10.0-mvp` 已于 2026 年 6 月 11 日完成 Windows 桌面发行验收。项目从 2026 年 6 月 12 日起进入 `0.11.x` 内测迭代，当前阶段为 `0.11.0-beta.4`，重点从扩展验证推进到 RC 前真实验收与发布链路硬化：Windows release-chain smoke、失败原因诊断、长结构列表体验、Rust 模块拆分和文案资源层。
 
 ## 文档入口
 
@@ -132,5 +132,6 @@ npm run release:windows
 - `0.11.0-beta.1`：内测工程基线，加入数据库迁移、CI、provider 边界和阶段质量规范。
 - `0.11.0-beta.2`：内测可诊断性与回归保护，落地 `AppError` 分类、关键工作区交互测试、签名验证框架与文案资源层。
 - `0.11.0-beta.3`：执行级 Prompt 灰度与 Linux 开发验证，落地 prompt 版本注册表/模板/灰度/回滚、Linux/Debian `verify:linux` 与 `tauri dev` 验收、`persistence_service` 按职责拆分。
+- `0.11.0-beta.4`：RC 前真实验收与发布链路硬化，落地 Windows release-chain smoke、`fs.*` 稳定错误码与前端 `errorAction`、长结构列表限高、`context_builder/budget` 与 `code_service/language` 拆分、文案资源层扩展。
 
 `v0.10.0-mvp` 是已验证的桌面发行基线；`0.11.x` 是内测迭代线。完整知识图谱、更广泛语言支持、协作与云同步等能力仍按后续路线演进。

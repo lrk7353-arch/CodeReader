@@ -93,16 +93,6 @@ describe("buildReleaseSmokeTemplate", () => {
 describe("runAutomatedReleaseChecks", () => {
   let tempDir;
 
-  function setupArtifacts(entries) {
-    const dir = makeArtifactsDir(tempDir);
-    for (const entry of entries) {
-      if (entry.binary) {
-        writeFileSync(join(dir, entry.name), entry.binary);
-      }
-    }
-    return dir;
-  }
-
   beforeEach(() => {
     tempDir = mkdtempSync(join(tmpdir(), "release-smoke-"));
   });

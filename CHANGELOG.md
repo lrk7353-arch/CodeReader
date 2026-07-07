@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+### 0.11.0-beta.4
+
+- Promote the internal beta phase to `0.11.0-beta.4` with RC-prep validation and release-chain hardening.
+- Add Windows release-chain smoke script (`scripts/windows-release-smoke.mjs`) that auto-verifies manifest/SHA-256/signing-status consistency and writes a manual install evidence template; document the chain in `Windows-release-chain-smoke.md`.
+- Add the Beta4 acceptance document, real-project validation template, and Linux desktop smoke `nonBlockingGenerationProgressVisible` checklist item.
+- Classify workspace failures with stable `fs.*` error codes: `load_code_file` and `scan_project` now return `AppError` so the frontend can branch on the code; add `errorAction()` mapping codes to actionable suggestions (retry, openModelSettings, checkEncoding).
+- Cap long structure lists: compact target lists now scroll inside a `max-height: min(220px, 30vh)` box so a file with many structure entries no longer pushes the project tree out of view; add a 60-item interaction test.
+- Split `context_builder/budget.rs` (context_builder 1735 → 1669 lines) and `code_service/language.rs` (code_service 1383 → 1274 lines), behavior unchanged, all tests pass.
+- Move model-settings, generation, and prompt-registry copy into the resource layer (`copy.ts`) with zh-CN and en entries; `ModelSettingsDialog` now consumes the copy layer instead of inline strings.
+
 ### 0.11.0-beta.3
 
 - Promote the internal beta phase to `0.11.0-beta.3` with execution-level prompt gray rollout and Linux development validation.

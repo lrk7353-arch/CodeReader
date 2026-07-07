@@ -11,7 +11,7 @@ describe("App", () => {
     const markup = renderToStaticMarkup(<App />);
 
     expect(markup).toContain("CodeReader");
-    expect(markup).toContain("内测 · Beta 3");
+    expect(markup).toContain("内测 · Beta 4");
     expect(markup).toContain("体验示例");
   });
 });
