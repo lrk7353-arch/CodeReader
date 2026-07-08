@@ -19,6 +19,7 @@ import { useExplanationContext } from "./hooks/useExplanationContext";
 import { useExplanationFeedback } from "./hooks/useExplanationFeedback";
 import { useExplanationWriteback } from "./hooks/useExplanationWriteback";
 import { useFeedbackReport } from "./hooks/useFeedbackReport";
+import { useProjectProgress } from "./hooks/useProjectProgress";
 import { usePromptRegistry } from "./hooks/usePromptRegistry";
 import { useUpdateCheck, type UpdateCheckState } from "./hooks/useUpdateCheck";
 import { useWorkspaceFiles } from "./hooks/useWorkspaceFiles";
@@ -41,6 +42,7 @@ export function App() {
     openSampleProject,
     persistenceStatus,
     projectNodes,
+    readingStates,
     refreshLoadedFile,
     refreshPersistedProjectGuide,
     selectFile,
@@ -87,6 +89,7 @@ export function App() {
   });
   const promptRegistry = usePromptRegistry({ onWorkspaceStatus: setWorkspaceStatus });
   const updateCheck = useUpdateCheck();
+  const projectProgress = useProjectProgress(filesForExplorer, readingStates);
   const feedbackReport = useFeedbackReport({
     providerType: "openai-compatible",
     providerEndpoint: modelWorkflow.config?.endpoint ?? null,
@@ -205,6 +208,24 @@ export function App() {
           </button>
         </div>
         <div className="topbar-status">
+          {projectProgress.totalExplanations > 0 ? (
+            <span
+              className="project-progress-summary"
+              title={`已解释文件 ${projectProgress.explainedFiles}/${projectProgress.totalFiles}，已读节点 ${projectProgress.readExplanations}/${projectProgress.totalExplanations}，已理解 ${projectProgress.understoodExplanations}`}
+            >
+              <span>进度 {projectProgress.completionPercent}%</span>
+              {projectProgress.lastReadFileId ? (
+                <button
+                  type="button"
+                  className="continue-reading-button"
+                  onClick={() => selectFile(projectProgress.lastReadFileId!)}
+                  title="继续上次阅读"
+                >
+                  继续阅读
+                </button>
+              ) : null}
+            </span>
+          ) : null}
           <span>{workspaceStatus}</span>
           <WorkspaceStatusAction
             action={workspaceAction}

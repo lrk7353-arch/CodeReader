@@ -172,6 +172,30 @@ button {
   background: #dde4e8;
 }
 
+.project-progress-summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+  font-size: 11px;
+  color: #41525b;
+}
+
+.continue-reading-button {
+  border: 1px solid #2f7b67;
+  border-radius: 999px;
+  background: #e8f1ec;
+  color: #1f5a47;
+  font-size: 11px;
+  padding: 1px 8px;
+  cursor: pointer;
+}
+
+.continue-reading-button:hover {
+  border-color: #245a45;
+  background: #d6e8dd;
+}
+
 .workspace-status-hint {
   border: 1px solid #d3c39d;
   background: #f7efd9;
