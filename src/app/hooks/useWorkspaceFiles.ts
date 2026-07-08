@@ -43,6 +43,9 @@ export function useWorkspaceFiles() {
   const [workspaceStatus, setWorkspaceStatusValue] = useState("示例项目：无需 API Key");
   const [workspaceAction, setWorkspaceAction] = useState<ErrorAction>("none");
   const [workspaceErrorDetail, setWorkspaceErrorDetail] = useState<string>("");
+  const [workspaceStatusHistory, setWorkspaceStatusHistory] = useState<string[]>([
+    "示例项目：无需 API Key"
+  ]);
   const [lastProjectPath, setLastProjectPath] = useState<string | null>(null);
   const [lastFilePath, setLastFilePath] = useState<string | null>(null);
   const [databasePath, setDatabasePath] = useState("");
@@ -79,13 +82,19 @@ export function useWorkspaceFiles() {
   const setWorkspaceStatus = useCallback((next: SetStateAction<string>) => {
     setWorkspaceAction("none");
     setWorkspaceErrorDetail("");
-    setWorkspaceStatusValue(next);
+    setWorkspaceStatusValue((current) => {
+      const resolved = typeof next === "function" ? (next as (v: string) => string)(current) : next;
+      setWorkspaceStatusHistory((history) => [...history, resolved].slice(-10));
+      return resolved;
+    });
   }, []);
 
   const reportWorkspaceError = useCallback((error: unknown, prefix = "") => {
     const detail = extractErrorDetail(error);
     setWorkspaceErrorDetail(`${prefix}${detail}`);
-    setWorkspaceStatusValue(`${prefix}${errorMessage(error)}`);
+    const message = `${prefix}${errorMessage(error)}`;
+    setWorkspaceStatusValue(message);
+    setWorkspaceStatusHistory((history) => [...history, message].slice(-10));
     setWorkspaceAction(errorAction(error));
   }, []);
 
@@ -471,7 +480,8 @@ export function useWorkspaceFiles() {
     workspaceAction,
     workspaceErrorDetail,
     workspaceName,
-    workspaceStatus
+    workspaceStatus,
+    workspaceStatusHistory
   };
 }
 

@@ -1,5 +1,13 @@
 import { useMemo } from "react";
-import { BookOpen, FilePlus2, FolderOpen, RefreshCw, Settings2, Tags } from "lucide-react";
+import {
+  BookOpen,
+  FilePlus2,
+  FolderOpen,
+  RefreshCw,
+  Settings2,
+  Tags,
+  ClipboardList
+} from "lucide-react";
 import { FileExplorer } from "../features/file-explorer/FileExplorer";
 import { MonacoCodeViewer } from "../features/code-viewer/MonacoCodeViewer";
 import { ExplanationPanel } from "../features/explanation-panel/ExplanationPanel";
@@ -10,6 +18,7 @@ import { getAppCopy } from "./copy";
 import { useExplanationContext } from "./hooks/useExplanationContext";
 import { useExplanationFeedback } from "./hooks/useExplanationFeedback";
 import { useExplanationWriteback } from "./hooks/useExplanationWriteback";
+import { useFeedbackReport } from "./hooks/useFeedbackReport";
 import { usePromptRegistry } from "./hooks/usePromptRegistry";
 import { useUpdateCheck, type UpdateCheckState } from "./hooks/useUpdateCheck";
 import { useWorkspaceFiles } from "./hooks/useWorkspaceFiles";
@@ -48,7 +57,8 @@ export function App() {
     workspaceAction,
     workspaceErrorDetail,
     workspaceName,
-    workspaceStatus
+    workspaceStatus,
+    workspaceStatusHistory
   } = useWorkspaceFiles();
 
   const explanationContext = useExplanationContext(selectedFile, selectedExplanation);
@@ -77,6 +87,28 @@ export function App() {
   });
   const promptRegistry = usePromptRegistry({ onWorkspaceStatus: setWorkspaceStatus });
   const updateCheck = useUpdateCheck();
+  const feedbackReport = useFeedbackReport({
+    providerType: "openai-compatible",
+    providerEndpoint: modelWorkflow.config?.endpoint ?? null,
+    providerModel: modelWorkflow.config?.model ?? null,
+    providerConfigured: Boolean(modelWorkflow.config?.configured),
+    lastWorkspaceError: workspaceErrorDetail
+      ? {
+          message: workspaceStatus,
+          action: workspaceAction,
+          detail: workspaceErrorDetail
+        }
+      : null,
+    lastGenerationError: modelWorkflow.generation.lastGeneration
+      ? {
+          explanationId: modelWorkflow.generation.lastGeneration.explanationId,
+          status: modelWorkflow.generation.lastGeneration.status,
+          error: modelWorkflow.generation.lastGeneration.error,
+          timestamp: modelWorkflow.generation.lastGeneration.timestamp
+        }
+      : null,
+    recentWorkspaceStatus: workspaceStatusHistory
+  });
 
   const fileStatus = useMemo(() => {
     if (selectedFile.capability?.canPreview === false) {
@@ -144,6 +176,15 @@ export function App() {
           <button type="button" onClick={promptRegistry.openDialog} title="Prompt 版本管理">
             <Tags size={16} aria-hidden="true" />
             <span>Prompt 版本</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => void feedbackReport.copyReport()}
+            disabled={feedbackReport.busy}
+            title="导出脱敏反馈包到剪贴板"
+          >
+            <ClipboardList size={16} aria-hidden="true" />
+            <span>反馈包</span>
           </button>
           <button
             type="button"
