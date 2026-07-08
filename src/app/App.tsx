@@ -19,6 +19,7 @@ import type { ErrorAction } from "./appError";
 export function App() {
   const copy = getAppCopy();
   const {
+    copyErrorDetail,
     databasePath,
     displayedProjectGuide,
     filesForExplorer,
@@ -45,6 +46,7 @@ export function App() {
     setWorkspaceStatus,
     updateSelection,
     workspaceAction,
+    workspaceErrorDetail,
     workspaceName,
     workspaceStatus
   } = useWorkspaceFiles();
@@ -165,7 +167,12 @@ export function App() {
           <span>{workspaceStatus}</span>
           <WorkspaceStatusAction
             action={workspaceAction}
+            hasErrorDetail={Boolean(workspaceErrorDetail)}
+            onCopyErrorDetail={copyErrorDetail}
             onOpenModelSettings={modelWorkflow.settings.openDialog}
+            onReopenFile={openFile}
+            onReopenProject={openProject}
+            onRetry={modelWorkflow.generation.request}
           />
           <span>{copy.brand.stageBadge}</span>
         </div>
@@ -309,10 +316,20 @@ export function UpdateCheckStatus({
 
 export function WorkspaceStatusAction({
   action,
-  onOpenModelSettings
+  hasErrorDetail,
+  onCopyErrorDetail,
+  onOpenModelSettings,
+  onReopenFile,
+  onReopenProject,
+  onRetry
 }: {
   action: ErrorAction;
+  hasErrorDetail: boolean;
+  onCopyErrorDetail: () => void;
   onOpenModelSettings: () => void;
+  onReopenFile: () => void;
+  onReopenProject: () => void;
+  onRetry: () => void;
 }) {
   if (action === "openModelSettings") {
     return (
@@ -322,13 +339,79 @@ export function WorkspaceStatusAction({
     );
   }
   if (action === "retry") {
-    return <span className="workspace-status-hint">建议：重试</span>;
+    return (
+      <span className="workspace-status-actions">
+        <button className="workspace-status-action" type="button" onClick={onRetry}>
+          重试
+        </button>
+        {hasErrorDetail ? (
+          <button
+            className="workspace-status-action secondary"
+            type="button"
+            onClick={onCopyErrorDetail}
+          >
+            复制错误详情
+          </button>
+        ) : null}
+      </span>
+    );
   }
   if (action === "checkNetwork") {
-    return <span className="workspace-status-hint">建议：检查网络</span>;
+    return (
+      <span className="workspace-status-actions">
+        <button className="workspace-status-action" type="button" onClick={onRetry}>
+          重试
+        </button>
+        {hasErrorDetail ? (
+          <button
+            className="workspace-status-action secondary"
+            type="button"
+            onClick={onCopyErrorDetail}
+          >
+            复制错误详情
+          </button>
+        ) : null}
+      </span>
+    );
   }
   if (action === "checkEncoding") {
-    return <span className="workspace-status-hint">建议：检查文件编码</span>;
+    return (
+      <span className="workspace-status-actions">
+        <button className="workspace-status-action" type="button" onClick={onReopenFile}>
+          重新选择文件
+        </button>
+        {hasErrorDetail ? (
+          <button
+            className="workspace-status-action secondary"
+            type="button"
+            onClick={onCopyErrorDetail}
+          >
+            复制错误详情
+          </button>
+        ) : null}
+      </span>
+    );
+  }
+  // For fs.path_resolve_failed / fs.not_a_file / fs.not_a_dir etc., offer
+  // re-selecting the project or file.
+  if (hasErrorDetail) {
+    return (
+      <span className="workspace-status-actions">
+        <button className="workspace-status-action" type="button" onClick={onReopenProject}>
+          重新选择项目
+        </button>
+        <button className="workspace-status-action" type="button" onClick={onReopenFile}>
+          重新选择文件
+        </button>
+        <button
+          className="workspace-status-action secondary"
+          type="button"
+          onClick={onCopyErrorDetail}
+        >
+          复制错误详情
+        </button>
+      </span>
+    );
   }
   return null;
 }

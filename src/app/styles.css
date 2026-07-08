@@ -153,6 +153,25 @@ button {
   background: #f7e2b8;
 }
 
+.workspace-status-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+}
+
+.workspace-status-action.secondary {
+  border-color: #b9c2c7;
+  background: #eef2f4;
+  color: #41525b;
+}
+
+.workspace-status-action.secondary:hover {
+  border-color: #9aa7ad;
+  background: #dde4e8;
+}
+
 .workspace-status-hint {
   border: 1px solid #d3c39d;
   background: #f7efd9;

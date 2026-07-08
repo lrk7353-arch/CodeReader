@@ -16,21 +16,74 @@ describe("App", () => {
   });
 
   it("renders actionable workspace status guidance", () => {
+    const noop = () => {};
     expect(
       renderToStaticMarkup(
-        <WorkspaceStatusAction action="openModelSettings" onOpenModelSettings={vi.fn()} />
+        <WorkspaceStatusAction
+          action="openModelSettings"
+          hasErrorDetail={false}
+          onCopyErrorDetail={noop}
+          onOpenModelSettings={vi.fn()}
+          onReopenFile={noop}
+          onReopenProject={noop}
+          onRetry={noop}
+        />
       )
     ).toContain("打开模型设置");
+    // checkEncoding now renders an actionable "重新选择文件" button, not a hint.
     expect(
       renderToStaticMarkup(
-        <WorkspaceStatusAction action="checkEncoding" onOpenModelSettings={vi.fn()} />
+        <WorkspaceStatusAction
+          action="checkEncoding"
+          hasErrorDetail={false}
+          onCopyErrorDetail={noop}
+          onOpenModelSettings={noop}
+          onReopenFile={noop}
+          onReopenProject={noop}
+          onRetry={noop}
+        />
       )
-    ).toContain("建议：检查文件编码");
+    ).toContain("重新选择文件");
+    // retry now renders an actionable "重试" button.
     expect(
-      renderToStaticMarkup(<WorkspaceStatusAction action="retry" onOpenModelSettings={vi.fn()} />)
-    ).toContain("建议：重试");
+      renderToStaticMarkup(
+        <WorkspaceStatusAction
+          action="retry"
+          hasErrorDetail={false}
+          onCopyErrorDetail={noop}
+          onOpenModelSettings={noop}
+          onReopenFile={noop}
+          onReopenProject={noop}
+          onRetry={noop}
+        />
+      )
+    ).toContain("重试");
+    // When there is an error detail, a "复制错误详情" button appears.
     expect(
-      renderToStaticMarkup(<WorkspaceStatusAction action="none" onOpenModelSettings={vi.fn()} />)
+      renderToStaticMarkup(
+        <WorkspaceStatusAction
+          action="retry"
+          hasErrorDetail={true}
+          onCopyErrorDetail={noop}
+          onOpenModelSettings={noop}
+          onReopenFile={noop}
+          onReopenProject={noop}
+          onRetry={noop}
+        />
+      )
+    ).toContain("复制错误详情");
+    expect(
+      renderToStaticMarkup(
+        <WorkspaceStatusAction
+          action="none"
+          hasErrorDetail={false}
+          onCopyErrorDetail={noop}
+          onOpenModelSettings={noop}
+          onReopenFile={noop}
+          onReopenProject={noop}
+          onRetry={noop}
+        />
+      )
     ).toBe("");
   });
 });

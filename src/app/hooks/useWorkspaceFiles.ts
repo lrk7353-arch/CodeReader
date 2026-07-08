@@ -42,6 +42,9 @@ export function useWorkspaceFiles() {
   const [readingStates, setReadingStates] = useState<Record<string, ReadingState>>({});
   const [workspaceStatus, setWorkspaceStatusValue] = useState("示例项目：无需 API Key");
   const [workspaceAction, setWorkspaceAction] = useState<ErrorAction>("none");
+  const [workspaceErrorDetail, setWorkspaceErrorDetail] = useState<string>("");
+  const [lastProjectPath, setLastProjectPath] = useState<string | null>(null);
+  const [lastFilePath, setLastFilePath] = useState<string | null>(null);
   const [databasePath, setDatabasePath] = useState("");
   const [persistenceStatus, setPersistenceStatus] = useState<PersistenceStatus>(
     isDesktopRuntime() ? "initializing" : "preview"
@@ -75,10 +78,13 @@ export function useWorkspaceFiles() {
 
   const setWorkspaceStatus = useCallback((next: SetStateAction<string>) => {
     setWorkspaceAction("none");
+    setWorkspaceErrorDetail("");
     setWorkspaceStatusValue(next);
   }, []);
 
   const reportWorkspaceError = useCallback((error: unknown, prefix = "") => {
+    const detail = extractErrorDetail(error);
+    setWorkspaceErrorDetail(`${prefix}${detail}`);
     setWorkspaceStatusValue(`${prefix}${errorMessage(error)}`);
     setWorkspaceAction(errorAction(error));
   }, []);
@@ -427,8 +433,23 @@ export function useWorkspaceFiles() {
     }
   }
 
+  const copyErrorDetail = useCallback(async () => {
+    if (!workspaceErrorDetail) {
+      return false;
+    }
+    try {
+      await navigator.clipboard.writeText(workspaceErrorDetail);
+      setWorkspaceStatusValue(`已复制错误详情（${workspaceErrorDetail.length} 字符）`);
+      return true;
+    } catch {
+      setWorkspaceStatusValue("复制失败：剪贴板不可用");
+      return false;
+    }
+  }, [workspaceErrorDetail]);
+
   return {
     ...selection,
+    copyErrorDetail,
     databasePath,
     displayedProjectGuide,
     filesForExplorer,
@@ -447,10 +468,28 @@ export function useWorkspaceFiles() {
     setFiles,
     setReadingStates,
     setWorkspaceStatus,
-    workspaceName,
     workspaceAction,
+    workspaceErrorDetail,
+    workspaceName,
     workspaceStatus
   };
+}
+
+function extractErrorDetail(error: unknown): string {
+  if (typeof error === "string") {
+    return error;
+  }
+  if (error instanceof Error) {
+    return `${error.name}: ${error.message}`;
+  }
+  if (error && typeof error === "object") {
+    try {
+      return JSON.stringify(error);
+    } catch {
+      return String(error);
+    }
+  }
+  return String(error ?? "");
 }
 
 async function loadFirstAvailableProjectFile(
