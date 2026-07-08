@@ -127,4 +127,61 @@
 }
 ```
 
-> 诚实说明：本记录的 `fileCount`/`previewable`/`unpreviewable`/`skipReasons` 来自 `git ls-files` 静态统计，未经桌面端 `scan_project` 命令实时验证。`scanSeconds`/`firstFileStable`/`structureListUsable`/`longListSqueezesProjectTree`/`generationSuccess`/`generationFailed`/`refreshMigrationCorrect` 需在桌面端真实执行后填入。中型/压力样本未填，需后续真实执行。
+> 诚实说明：本记录的 `fileCount`/`previewable`/`unpreviewable`/`skipReasons` 来自 `git ls-files` 静态统计，未经桌面端 `scan_project` 命令实时验证。`scanSeconds`/`firstFileStable`/`structureListUsable`/`longListSqueezesProjectTree`/`generationSuccess`/`generationFailed`/`refreshMigrationCorrect` 需在桌面端真实执行后填入。中型/压力样本使用合成 fixture（见下），真实项目验证需后续真实执行。
+
+### 样本 2：中型项目（合成 fixture）
+
+合成 fixture，非真实第三方源码。`src/data/syntheticProjectFixtures.ts` 的 `mediumProjectFixture`。
+
+```json
+{
+  "sample": "中型（合成）",
+  "projectName": "medium-multilang（合成 fixture）",
+  "fileCount": 120,
+  "scanSeconds": null,
+  "previewable": 120,
+  "unpreviewable": 0,
+  "skipReasons": {},
+  "truncated": false,
+  "firstFileStable": null,
+  "structureListUsable": null,
+  "longListSqueezesProjectTree": null,
+  "generationSuccess": 0,
+  "generationFailed": 0,
+  "failureCodes": {},
+  "overwriteOnFailure": null,
+  "refreshMigrationCorrect": null,
+  "notes": "合成 fixture：60 个 TS + 30 个 Python + 15 个 SQL + 10 个 Markdown + 5 个 JSON。部分文件 800+ 行。用于测试多语言结构和中等规模扫描。真实 scanSeconds/structureListUsable 需桌面端执行。"
+}
+```
+
+### 样本 3：压力项目（合成 fixture）
+
+合成 fixture，非真实第三方源码。`src/data/syntheticProjectFixtures.ts` 的 `stressProjectFixture`。
+
+```json
+{
+  "sample": "压力（合成）",
+  "projectName": "stress-longfiles-deepdirs（合成 fixture）",
+  "fileCount": 13,
+  "scanSeconds": null,
+  "previewable": 11,
+  "unpreviewable": 2,
+  "skipReasons": {
+    "binary": 1,
+    "invalid_utf8": 1
+  },
+  "truncated": false,
+  "firstFileStable": null,
+  "structureListUsable": null,
+  "longListSqueezesProjectTree": null,
+  "generationSuccess": 0,
+  "generationFailed": 0,
+  "failureCodes": {},
+  "overwriteOnFailure": null,
+  "refreshMigrationCorrect": null,
+  "notes": "合成 fixture：1 个 3000 行文件、1 个 200+ 结构节点文件、1 个二进制、1 个非 UTF-8、8 层深目录。用于测试大文件边界、长结构列表、跳过原因、深目录。真实 scanSeconds/structureListUsable/longListSqueezesProjectTree 需桌面端执行。"
+}
+```
+
+> 合成 fixture 覆盖自动化测试边界（文件数/语言/大小/跳过原因/深目录），但不替代真实项目验证。真实中型/压力项目的 `scanSeconds`/`firstFileStable`/`structureListUsable`/`longListSqueezesProjectTree`/`generationSuccess`/`generationFailed`/`refreshMigrationCorrect` 仍需在桌面端用真实项目执行后填入。
