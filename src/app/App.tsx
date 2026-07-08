@@ -213,6 +213,7 @@ export function App() {
           explanation={selectedExplanation}
           generationError={modelWorkflow.generation.error}
           generationStatus={modelWorkflow.generation.status}
+          onCopyGenerationError={modelWorkflow.generation.copyError}
           onFeedback={feedback.onFeedback}
           onGenerate={modelWorkflow.generation.request}
           onSelectAffected={() => {

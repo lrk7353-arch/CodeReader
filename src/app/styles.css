@@ -1264,6 +1264,31 @@ button {
   line-height: 1.5;
 }
 
+.generation-error-block {
+  margin: 0 12px 12px;
+}
+
+.generation-error-block .generation-error {
+  margin: 0 0 6px;
+}
+
+.generation-error-copy {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid #b9c2c7;
+  border-radius: 999px;
+  background: #eef2f4;
+  color: #41525b;
+  font-size: 11px;
+  padding: 2px 9px;
+  cursor: pointer;
+}
+
+.generation-error-copy:hover {
+  border-color: #9aa7ad;
+  background: #dde4e8;
+}
+
 .state-button,
 .action-row button {
   display: inline-flex;

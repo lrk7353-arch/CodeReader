@@ -43,6 +43,13 @@ export function useModelWorkflow({
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [generationStatus, setGenerationStatus] = useState<GenerationStatus>("idle");
   const [generationError, setGenerationError] = useState("");
+  const [lastGeneration, setLastGeneration] = useState<{
+    explanationId: string;
+    status: GenerationStatus;
+    error: string;
+    errorDetail: string;
+    timestamp: string;
+  } | null>(null);
 
   useEffect(() => {
     if (!isDesktopRuntime()) {
@@ -99,17 +106,34 @@ export function useModelWorkflow({
     setConfirmOpen(false);
     setGenerationStatus("generating");
     setGenerationError("");
+    const explanationId = explanation.id;
+    const timestamp = new Date().toISOString();
     try {
       const result = await generateExplanation(file, explanation);
       onGenerated(result);
       setGenerationStatus("idle");
+      setLastGeneration({
+        explanationId,
+        status: "idle",
+        error: "",
+        errorDetail: "",
+        timestamp
+      });
       onWorkspaceStatus(
         `解释已生成并保存：${result.model}${result.attempts > 1 ? "（结构修复后通过）" : ""}`
       );
     } catch (cause) {
       const message = errorMessage(cause);
+      const detail = extractGenerationErrorDetail(cause);
       setGenerationStatus("error");
       setGenerationError(message);
+      setLastGeneration({
+        explanationId,
+        status: "error",
+        error: message,
+        errorDetail: detail,
+        timestamp
+      });
       onWorkspaceStatus(message);
     }
   }, [config, contextBundle, explanation, file, onGenerated, onWorkspaceStatus]);
@@ -166,14 +190,31 @@ export function useModelWorkflow({
     setGenerationError("");
   }, []);
 
+  const copyGenerationError = useCallback(async () => {
+    if (!lastGeneration || !lastGeneration.errorDetail) {
+      return false;
+    }
+    const summary = formatGenerationErrorSummary(lastGeneration);
+    try {
+      await navigator.clipboard.writeText(summary);
+      onWorkspaceStatus("已复制错误摘要到剪贴板，可粘贴到反馈包。");
+      return true;
+    } catch {
+      onWorkspaceStatus("复制失败：剪贴板不可用。");
+      return false;
+    }
+  }, [lastGeneration, onWorkspaceStatus]);
+
   return {
     config,
     generation: {
       confirmOpen,
       error: generationError,
+      lastGeneration,
       status: generationStatus,
       cancel: cancelGeneration,
       confirm: confirmGeneration,
+      copyError: copyGenerationError,
       request: requestGeneration
     },
     settings: {
@@ -186,4 +227,40 @@ export function useModelWorkflow({
       save: persistConfig
     }
   };
+}
+
+function extractGenerationErrorDetail(error: unknown): string {
+  if (typeof error === "string") {
+    return error;
+  }
+  if (error instanceof Error) {
+    return `${error.name}: ${error.message}`;
+  }
+  if (error && typeof error === "object") {
+    try {
+      return JSON.stringify(error);
+    } catch {
+      return String(error);
+    }
+  }
+  return String(error ?? "");
+}
+
+function formatGenerationErrorSummary(entry: {
+  explanationId: string;
+  status: GenerationStatus;
+  error: string;
+  errorDetail: string;
+  timestamp: string;
+}): string {
+  return [
+    "CodeReader 解释生成错误摘要",
+    `时间: ${entry.timestamp}`,
+    `目标: ${entry.explanationId}`,
+    `状态: ${entry.status}`,
+    `错误: ${entry.error}`,
+    "",
+    "错误详情:",
+    entry.errorDetail
+  ].join("\n");
 }

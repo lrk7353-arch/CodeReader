@@ -29,6 +29,7 @@ interface ExplanationPanelProps {
   explanation?: Explanation;
   generationError?: string;
   generationStatus: "idle" | "generating" | "error";
+  onCopyGenerationError?: () => void;
   onFeedback: (feedbackType: ExplanationFeedbackType) => void;
   onGenerate: () => void;
   onSelectAffected: () => void;
@@ -44,6 +45,7 @@ export function ExplanationPanel({
   explanation,
   generationError,
   generationStatus,
+  onCopyGenerationError,
   onFeedback,
   onGenerate,
   onSelectAffected,
@@ -170,7 +172,21 @@ export function ExplanationPanel({
 
       <ContextPreview bundle={contextBundle} error={contextError} status={contextStatus} />
 
-      {generationError ? <p className="generation-error">{generationError}</p> : null}
+      {generationError ? (
+        <div className="generation-error-block">
+          <p className="generation-error">{generationError}</p>
+          {onCopyGenerationError ? (
+            <button
+              type="button"
+              className="generation-error-copy"
+              onClick={onCopyGenerationError}
+              title="复制错误摘要到剪贴板，用于反馈"
+            >
+              复制错误摘要
+            </button>
+          ) : null}
+        </div>
+      ) : null}
 
       <ReadingStateControls
         currentState={explanation.readingState}
