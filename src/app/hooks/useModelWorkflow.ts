@@ -5,7 +5,8 @@ import {
   getModelConfig,
   isDesktopRuntime,
   resetModelConfig,
-  saveModelConfig
+  saveModelConfig,
+  testModelConnection
 } from "../../services/desktopWorkspace";
 import type {
   CodeFile,
@@ -40,6 +41,8 @@ export function useModelWorkflow({
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsBusy, setSettingsBusy] = useState(false);
   const [settingsError, setSettingsError] = useState("");
+  const [connectionTesting, setConnectionTesting] = useState(false);
+  const [connectionResult, setConnectionResult] = useState<string>("");
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [generationStatus, setGenerationStatus] = useState<GenerationStatus>("idle");
   const [generationError, setGenerationError] = useState("");
@@ -175,6 +178,22 @@ export function useModelWorkflow({
     }
   }, [onWorkspaceStatus]);
 
+  const testConnection = useCallback(async () => {
+    setConnectionTesting(true);
+    setConnectionResult("");
+    try {
+      const result = await testModelConnection();
+      setConnectionResult(`连接成功：${result.model} 返回 "${result.echo.slice(0, 40)}"`);
+      onWorkspaceStatus(`模型连接测试通过：${result.model}`);
+    } catch (cause) {
+      const message = errorMessage(cause);
+      setConnectionResult(`连接失败：${message}`);
+      onWorkspaceStatus(`模型连接测试失败：${message}`);
+    } finally {
+      setConnectionTesting(false);
+    }
+  }, [onWorkspaceStatus]);
+
   const openSettings = useCallback(() => {
     if (!isDesktopRuntime()) {
       onWorkspaceStatus("模型配置需要在 Tauri 桌面端运行。");
@@ -219,12 +238,15 @@ export function useModelWorkflow({
     },
     settings: {
       busy: settingsBusy,
+      connectionResult,
+      connectionTesting,
       error: settingsError,
       open: settingsOpen,
       close: () => setSettingsOpen(false),
       clear: clearConfig,
       openDialog: openSettings,
-      save: persistConfig
+      save: persistConfig,
+      testConnection
     }
   };
 }

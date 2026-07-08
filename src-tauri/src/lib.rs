@@ -23,6 +23,7 @@ pub fn run() {
             explanation_service::get_model_config,
             explanation_service::reset_model_config,
             explanation_service::save_model_config,
+            explanation_service::test_model_connection,
             persistence_service::hydrate_code_file_persistence,
             persistence_service::initialize_persistence,
             persistence_service::list_prompt_versions,

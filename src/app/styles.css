@@ -1313,6 +1313,46 @@ button {
   background: #dde4e8;
 }
 
+.model-connection-test {
+  margin: 0 0 8px;
+}
+
+.model-connection-button {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid #2f7b67;
+  border-radius: 999px;
+  background: #e8f1ec;
+  color: #1f5a47;
+  font-size: 12px;
+  padding: 3px 12px;
+  cursor: pointer;
+}
+
+.model-connection-button:hover:not(:disabled) {
+  border-color: #245a45;
+  background: #d6e8dd;
+}
+
+.model-connection-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.model-connection-result {
+  margin: 6px 0 0;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.model-connection-result.ok {
+  color: #1f5a47;
+}
+
+.model-connection-result.error {
+  color: #8a3f31;
+}
+
 .state-button,
 .action-row button {
   display: inline-flex;

@@ -6,21 +6,27 @@ import type { ModelConfig, SaveModelConfigInput } from "../../types/explanation"
 interface ModelSettingsDialogProps {
   busy: boolean;
   config?: ModelConfig;
+  connectionResult?: string;
+  connectionTesting?: boolean;
   error?: string;
   open: boolean;
   onClose: () => void;
   onResetConfig: () => void;
   onSave: (input: SaveModelConfigInput) => void;
+  onTestConnection?: () => void;
 }
 
 export function ModelSettingsDialog({
   busy,
   config,
+  connectionResult,
+  connectionTesting,
   error,
   open,
   onClose,
   onResetConfig,
-  onSave
+  onSave,
+  onTestConnection
 }: ModelSettingsDialogProps) {
   const copy = getAppCopy();
   const modelSettings = copy.modelSettings;
@@ -143,6 +149,30 @@ export function ModelSettingsDialog({
           </label>
 
           <p className="credential-note">{modelSettings.credentialNote}</p>
+          {onTestConnection ? (
+            <div className="model-connection-test">
+              <button
+                type="button"
+                className="model-connection-button"
+                onClick={onTestConnection}
+                disabled={busy || connectionTesting || !config?.configured}
+                title="向当前配置的模型端点发送最小请求，验证连通性"
+              >
+                {connectionTesting ? "测试中..." : "测试连接"}
+              </button>
+              {connectionResult ? (
+                <p
+                  className={
+                    connectionResult.startsWith("连接成功")
+                      ? "model-connection-result ok"
+                      : "model-connection-result error"
+                  }
+                >
+                  {connectionResult}
+                </p>
+              ) : null}
+            </div>
+          ) : null}
           {error ? <p className="dialog-error">{error}</p> : null}
 
           <footer className="dialog-actions">

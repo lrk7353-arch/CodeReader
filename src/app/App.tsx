@@ -318,11 +318,14 @@ export function App() {
       <ModelSettingsDialog
         busy={modelWorkflow.settings.busy}
         config={modelWorkflow.config}
+        connectionResult={modelWorkflow.settings.connectionResult}
+        connectionTesting={modelWorkflow.settings.connectionTesting}
         error={modelWorkflow.settings.error}
         open={modelWorkflow.settings.open}
         onClose={modelWorkflow.settings.close}
         onResetConfig={modelWorkflow.settings.clear}
         onSave={modelWorkflow.settings.save}
+        onTestConnection={modelWorkflow.settings.testConnection}
       />
       <PromptRegistryDialog
         busy={promptRegistry.busy}

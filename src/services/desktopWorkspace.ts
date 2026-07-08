@@ -167,6 +167,18 @@ export async function resetModelConfig(): Promise<ModelConfig> {
   return invoke<ModelConfig>("reset_model_config");
 }
 
+export interface ModelConnectionResult {
+  ok: boolean;
+  model: string;
+  endpoint: string;
+  echo: string;
+}
+
+export async function testModelConnection(): Promise<ModelConnectionResult> {
+  ensureDesktopRuntime();
+  return invoke<ModelConnectionResult>("test_model_connection");
+}
+
 export async function listPromptVersions(): Promise<PromptVersionInfo[]> {
   ensureDesktopRuntime();
   return invoke<PromptVersionInfo[]>("list_prompt_versions");

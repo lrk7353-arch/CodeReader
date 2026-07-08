@@ -199,6 +199,58 @@ pub fn reset_model_config(app: AppHandle) -> Result<ModelConfigPayload, AppError
     model_config_payload(None)
 }
 
+/// Tests the configured model connection by sending a minimal chat completion
+/// request. Returns ok=true with the model echo if the provider responds with
+/// any non-empty content; returns a stable AppError code on failure so the
+/// frontend can branch (retry / openModelSettings).
+#[cfg(not(test))]
+#[tauri::command]
+pub async fn test_model_connection(app: AppHandle) -> Result<ModelConnectionResult, AppError> {
+    let database_path = persistence_service::database_path(&app).map_err(AppError::database)?;
+    let stored = persistence_service::load_model_config(&database_path)
+        .map_err(AppError::database)?
+        .ok_or_else(|| AppError::configuration("尚未配置 LLM。请先在模型设置中填写端点和模型名称。"))?;
+    let endpoint = normalize_endpoint(&stored.endpoint)?;
+    let api_key = read_api_key()?;
+    if api_key.is_none() && !endpoint_allows_keyless(&endpoint)? {
+        return Err(AppError::credential_not_set(
+            "当前远程模型端点没有可用的 API Key。",
+        ));
+    }
+    let provider = OpenAiCompatibleProvider::new(stored.timeout_seconds).map_err(AppError::from)?;
+    let result = provider
+        .complete(CompletionRequest {
+            endpoint: &endpoint,
+            model: &stored.model,
+            api_key: api_key.as_deref(),
+            messages: vec![
+                ProviderMessage::system("Reply with the single word: ok"),
+                ProviderMessage::user("ping"),
+            ],
+        })
+        .await
+        .map_err(AppError::from)?;
+    let echoed = result.trim();
+    if echoed.is_empty() {
+        return Err(AppError::llm_invalid_response("模型返回空响应。"));
+    }
+    Ok(ModelConnectionResult {
+        ok: true,
+        model: stored.model.clone(),
+        endpoint: endpoint.clone(),
+        echo: echoed.to_string(),
+    })
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ModelConnectionResult {
+    ok: bool,
+    model: String,
+    endpoint: String,
+    echo: String,
+}
+
 #[cfg(not(test))]
 #[tauri::command]
 pub async fn generate_explanation(
