@@ -120,7 +120,7 @@ export function redactErrorForReport(
   }
   const message = errorMessage(error);
   const action = errorAction(error);
-  let detail = "";
+  let detail: string;
   if (typeof error === "string") {
     detail = error;
   } else if (error instanceof Error) {
@@ -129,10 +129,10 @@ export function redactErrorForReport(
     try {
       detail = JSON.stringify(error);
     } catch {
-      detail = String(error);
+      detail = "<unserializable error>";
     }
   } else {
-    detail = String(error ?? "");
+    detail = "<unknown error>";
   }
   return { message, action, detail };
 }

@@ -23,7 +23,7 @@ export function computeProjectProgress(
   files: CodeFile[],
   readingStateOverrides: Record<string, ReadingState> = {}
 ): ProjectProgress {
-  let totalFiles = files.length;
+  const totalFiles = files.length;
   let explainedFiles = 0;
   let totalExplanations = 0;
   let readExplanations = 0;

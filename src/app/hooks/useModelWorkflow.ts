@@ -262,10 +262,10 @@ function extractGenerationErrorDetail(error: unknown): string {
     try {
       return JSON.stringify(error);
     } catch {
-      return String(error);
+      return "<unserializable error>";
     }
   }
-  return String(error ?? "");
+  return "<unknown error>";
 }
 
 function formatGenerationErrorSummary(entry: {

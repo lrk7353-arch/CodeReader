@@ -46,8 +46,6 @@ export function useWorkspaceFiles() {
   const [workspaceStatusHistory, setWorkspaceStatusHistory] = useState<string[]>([
     "示例项目：无需 API Key"
   ]);
-  const [lastProjectPath, setLastProjectPath] = useState<string | null>(null);
-  const [lastFilePath, setLastFilePath] = useState<string | null>(null);
   const [databasePath, setDatabasePath] = useState("");
   const [persistenceStatus, setPersistenceStatus] = useState<PersistenceStatus>(
     isDesktopRuntime() ? "initializing" : "preview"
@@ -83,7 +81,7 @@ export function useWorkspaceFiles() {
     setWorkspaceAction("none");
     setWorkspaceErrorDetail("");
     setWorkspaceStatusValue((current) => {
-      const resolved = typeof next === "function" ? (next as (v: string) => string)(current) : next;
+      const resolved = typeof next === "function" ? next(current) : next;
       setWorkspaceStatusHistory((history) => [...history, resolved].slice(-10));
       return resolved;
     });
@@ -496,10 +494,10 @@ function extractErrorDetail(error: unknown): string {
     try {
       return JSON.stringify(error);
     } catch {
-      return String(error);
+      return "<unserializable error>";
     }
   }
-  return String(error ?? "");
+  return "<unknown error>";
 }
 
 async function loadFirstAvailableProjectFile(

@@ -8,6 +8,15 @@
 - Document the GitHub Release checklist for Windows artifacts, Linux evidence, checksums, and signing status.
 - Add low-risk update discovery planning for GitHub Releases without automatic installation.
 
+### Beta 4 hardening (post-beta.4)
+
+- Make workspace error actions executable: retry/checkNetwork now render a 重试 button, checkEncoding renders 重新选择文件, and fs.* path errors render 重新选择项目/重新选择文件 plus a 复制错误详情 button that copies the redacted error detail to the clipboard.
+- Retain generation error summary: useModelWorkflow tracks lastGeneration (explanationId, status, error, errorDetail, timestamp); ExplanationPanel renders a 复制错误摘要 button for feedback.
+- Add redacted feedback report export: useFeedbackReport builds a JSON report (app version, platform, provider endpoint host only, last workspace/generation error, recent workspace status history) with no API key/source/prompt; a 反馈包 toolbar button copies it to the clipboard.
+- Add project-level reading progress: useProjectProgress computes totalFiles/explainedFiles/totalExplanations/readExplanations/understoodExplanations/completionPercent and the most recently updated explanation as a continue-reading target; the topbar shows 进度 N% plus a 继续阅读 button.
+- Add model connection test: test_model_connection Tauri command sends a minimal ping and returns {ok, model, endpoint, echo}; ModelSettingsDialog has a 测试连接 button. Ollama works via http://localhost:11434/v1/chat/completions with no extra code.
+- Add medium and stress synthetic project fixtures for real-project validation boundaries (120-file multilang; 3000-line file, 200+ node file, binary, non-UTF-8, deep dirs).
+
 ### 0.11.0-beta.4
 
 - Promote the internal beta phase to `0.11.0-beta.4` with RC-prep validation and release-chain hardening.
