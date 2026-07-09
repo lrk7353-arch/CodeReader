@@ -102,16 +102,39 @@ describe("redactErrorForReport", () => {
     expect(redactErrorForReport("")).toBeNull();
   });
 
-  it("extracts message, action, and detail from a structured error", () => {
+  it("extracts message, action, and stable code from a structured error", () => {
     const result = redactErrorForReport({ code: "llm.timeout", message: "timed out" });
     expect(result).not.toBeNull();
     expect(result?.action).toBe("retry");
     expect(result?.message).toBe("timed out");
+    expect(result?.detail).toBe("code: llm.timeout");
   });
 
-  it("handles bare string errors", () => {
-    const result = redactErrorForReport("something failed");
-    expect(result?.message).toBe("something failed");
-    expect(result?.detail).toBe("something failed");
+  it("does not serialize the full error object into detail", () => {
+    const result = redactErrorForReport({
+      code: "llm.http",
+      message: "failed",
+      body: { secret: "sk-leaked", internal: "response" }
+    });
+    expect(result?.detail).not.toContain("secret");
+    expect(result?.detail).not.toContain("sk-leaked");
+    expect(result?.detail).not.toContain("internal");
+    expect(result?.detail).toBe("code: llm.http");
+  });
+
+  it("redacts absolute paths in the message to basename only", () => {
+    const result = redactErrorForReport({
+      code: "fs.read_failed",
+      message: "Failed to read file /home/user/secret-project/src/main.ts"
+    });
+    expect(result?.message).not.toContain("/home/user/secret-project");
+    expect(result?.message).toContain("<path:main.ts>");
+  });
+
+  it("handles bare string errors with path redaction", () => {
+    const result = redactErrorForReport("failed at C:\\Users\\admin\\project\\file.ts");
+    expect(result?.message).not.toContain("C:\\Users");
+    expect(result?.message).toContain("<path:file.ts>");
+    expect(result?.detail).toBe("<no stable code>");
   });
 });

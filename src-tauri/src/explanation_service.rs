@@ -199,30 +199,71 @@ pub fn reset_model_config(app: AppHandle) -> Result<ModelConfigPayload, AppError
     model_config_payload(None)
 }
 
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TestConnectionRequest {
+    endpoint: Option<String>,
+    model: Option<String>,
+    api_key: Option<String>,
+}
+
 /// Tests the configured model connection by sending a minimal chat completion
-/// request. Returns ok=true with the model echo if the provider responds with
-/// any non-empty content; returns a stable AppError code on failure so the
-/// frontend can branch (retry / openModelSettings).
+/// request. When `request` is provided, uses the form values (endpoint/model/
+/// apiKey) so the user can test before saving; otherwise falls back to the
+/// persisted config. Returns ok=true with the model echo on success.
 #[cfg(not(test))]
 #[tauri::command]
-pub async fn test_model_connection(app: AppHandle) -> Result<ModelConnectionResult, AppError> {
-    let database_path = persistence_service::database_path(&app).map_err(AppError::database)?;
-    let stored = persistence_service::load_model_config(&database_path)
-        .map_err(AppError::database)?
-        .ok_or_else(|| AppError::configuration("尚未配置 LLM。请先在模型设置中填写端点和模型名称。"))?;
-    let endpoint = normalize_endpoint(&stored.endpoint)?;
-    let api_key = read_api_key()?;
-    if api_key.is_none() && !endpoint_allows_keyless(&endpoint)? {
+pub async fn test_model_connection(
+    app: AppHandle,
+    request: Option<TestConnectionRequest>,
+) -> Result<ModelConnectionResult, AppError> {
+    let (endpoint, model, api_key, timeout_seconds) = match request {
+        Some(form) => {
+            let endpoint = normalize_endpoint(&form.endpoint.unwrap_or_default())?;
+            let model = form.model.unwrap_or_default();
+            if model.trim().is_empty() {
+                return Err(AppError::configuration("模型名称不能为空。"));
+            }
+            let api_key = form
+                .api_key
+                .map(|k| k.trim().to_string())
+                .filter(|k| !k.is_empty())
+                .unwrap_or_default();
+            // Use the saved timeout if available, otherwise default.
+            let timeout_seconds = persistence_service::load_model_config(
+                &persistence_service::database_path(&app).map_err(AppError::database)?,
+            )
+            .ok()
+            .flatten()
+            .map(|s| s.timeout_seconds)
+            .unwrap_or(DEFAULT_TIMEOUT_SECONDS);
+            (endpoint, model, api_key, timeout_seconds)
+        }
+        None => {
+            let database_path =
+                persistence_service::database_path(&app).map_err(AppError::database)?;
+            let stored = persistence_service::load_model_config(&database_path)
+                .map_err(AppError::database)?
+                .ok_or_else(|| {
+                    AppError::configuration("尚未配置 LLM。请先在模型设置中填写端点和模型名称。")
+                })?;
+            let endpoint = normalize_endpoint(&stored.endpoint)?;
+            let api_key = read_api_key()?;
+            (endpoint, stored.model, api_key.unwrap_or_default(), stored.timeout_seconds)
+        }
+    };
+
+    if api_key.is_empty() && !endpoint_allows_keyless(&endpoint)? {
         return Err(AppError::credential_not_set(
             "当前远程模型端点没有可用的 API Key。",
         ));
     }
-    let provider = OpenAiCompatibleProvider::new(stored.timeout_seconds).map_err(AppError::from)?;
+    let provider = OpenAiCompatibleProvider::new(timeout_seconds).map_err(AppError::from)?;
     let result = provider
         .complete(CompletionRequest {
             endpoint: &endpoint,
-            model: &stored.model,
-            api_key: api_key.as_deref(),
+            model: &model,
+            api_key: if api_key.is_empty() { None } else { Some(&api_key) },
             messages: vec![
                 ProviderMessage::system("Reply with the single word: ok"),
                 ProviderMessage::user("ping"),
@@ -236,8 +277,8 @@ pub async fn test_model_connection(app: AppHandle) -> Result<ModelConnectionResu
     }
     Ok(ModelConnectionResult {
         ok: true,
-        model: stored.model.clone(),
-        endpoint: endpoint.clone(),
+        model,
+        endpoint,
         echo: echoed.to_string(),
     })
 }

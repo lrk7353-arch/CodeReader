@@ -83,4 +83,24 @@ describe("computeProjectProgress", () => {
     expect(progress.lastReadExplanationId).toBe("e2");
     expect(progress.lastReadAt).toBe("2026-07-07T12:00:00.000Z");
   });
+
+  it("does not pick an unread/newly-generated node as continue-reading target", () => {
+    // e1 is read (old), e2 is unread but has a newer timestamp. The continue
+    // target should stay on e1, not jump to the unread e2.
+    const progress = computeProjectProgress([
+      file("a.ts", [explanation("e1", "read", "2026-01-01T00:00:00.000Z")]),
+      file("b.ts", [explanation("e2", "unread", "2026-07-07T12:00:00.000Z")])
+    ]);
+    expect(progress.lastReadFileId).toBe("a.ts");
+    expect(progress.lastReadExplanationId).toBe("e1");
+  });
+
+  it("falls back to the first unread explanation when nothing has been read", () => {
+    const progress = computeProjectProgress([
+      file("a.ts", [explanation("e1", "unread", "2026-01-01T00:00:00.000Z")]),
+      file("b.ts", [explanation("e2", "unread", "2026-07-07T12:00:00.000Z")])
+    ]);
+    expect(progress.lastReadFileId).toBe("a.ts");
+    expect(progress.lastReadExplanationId).toBe("e1");
+  });
 });

@@ -13,7 +13,7 @@ interface ModelSettingsDialogProps {
   onClose: () => void;
   onResetConfig: () => void;
   onSave: (input: SaveModelConfigInput) => void;
-  onTestConnection?: () => void;
+  onTestConnection?: (input: { endpoint?: string; model?: string; apiKey?: string }) => void;
 }
 
 export function ModelSettingsDialog({
@@ -154,9 +154,15 @@ export function ModelSettingsDialog({
               <button
                 type="button"
                 className="model-connection-button"
-                onClick={onTestConnection}
-                disabled={busy || connectionTesting || !config?.configured}
-                title="向当前配置的模型端点发送最小请求，验证连通性"
+                onClick={() =>
+                  onTestConnection({
+                    endpoint: endpoint || undefined,
+                    model: model || undefined,
+                    apiKey: apiKey.trim() || undefined
+                  })
+                }
+                disabled={busy || connectionTesting}
+                title="用当前表单内容向模型端点发送最小请求，验证连通性"
               >
                 {connectionTesting ? "测试中..." : "测试连接"}
               </button>

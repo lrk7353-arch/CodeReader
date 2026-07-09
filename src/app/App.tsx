@@ -182,7 +182,15 @@ export function App() {
           </button>
           <button
             type="button"
-            onClick={() => void feedbackReport.copyReport()}
+            onClick={() => {
+              void feedbackReport.copyReport().then((ok) => {
+                setWorkspaceStatus(
+                  ok
+                    ? "反馈包已复制到剪贴板（脱敏，可粘贴到反馈）。"
+                    : "反馈包复制失败：剪贴板不可用，请重试。"
+                );
+              });
+            }}
             disabled={feedbackReport.busy}
             title="导出脱敏反馈包到剪贴板"
           >

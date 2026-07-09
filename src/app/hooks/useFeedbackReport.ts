@@ -110,7 +110,10 @@ export function useFeedbackReport(options: UseFeedbackReportOptions) {
 
 /**
  * Convert an unknown error into a redacted {message, action, detail} triple
- * for inclusion in a feedback report.
+ * for inclusion in a feedback report. Strict field whitelist: only the stable
+ * code and message are kept; paths in messages are reduced to basename; no
+ * raw object JSON is serialized to avoid leaking provider bodies, internal
+ * responses, or absolute paths.
  */
 export function redactErrorForReport(
   error: unknown
@@ -118,21 +121,33 @@ export function redactErrorForReport(
   if (!error) {
     return null;
   }
-  const message = errorMessage(error);
+  const message = redactPaths(errorMessage(error));
   const action = errorAction(error);
-  let detail: string;
-  if (typeof error === "string") {
-    detail = error;
-  } else if (error instanceof Error) {
-    detail = `${error.name}: ${error.message}`;
-  } else if (error && typeof error === "object") {
-    try {
-      detail = JSON.stringify(error);
-    } catch {
-      detail = "<unserializable error>";
+  // Extract a stable code if present, but never serialize the full object.
+  let code = "";
+  if (error && typeof error === "object" && "code" in error) {
+    const raw = (error as { code?: unknown }).code;
+    if (typeof raw === "string") {
+      code = raw;
     }
-  } else {
-    detail = "<unknown error>";
   }
+  const detail = code ? `code: ${code}` : "<no stable code>";
   return { message, action, detail };
+}
+
+/**
+ * Redact absolute paths in a string to basename only. Matches common path
+ * patterns: Unix (/home/..., /Users/..., /tmp/..., /var/..., /opt/...),
+ * Windows (C:\...), and UNC (\\...\...). This prevents feedback reports from
+ * leaking full filesystem paths.
+ */
+function redactPaths(text: string): string {
+  return text.replace(
+    /(?:[A-Za-z]:[\\/]|[\\/]{2}|~\/|\/(?:home|Users|tmp|var|opt|etc|root|mnt|srv|data)\/)[^\s"'<>]*/g,
+    (match) => {
+      const segments = match.split(/[\\/]/).filter(Boolean);
+      const basename = segments[segments.length - 1] ?? match;
+      return `<path:${basename}>`;
+    }
+  );
 }

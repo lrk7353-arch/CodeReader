@@ -178,21 +178,24 @@ export function useModelWorkflow({
     }
   }, [onWorkspaceStatus]);
 
-  const testConnection = useCallback(async () => {
-    setConnectionTesting(true);
-    setConnectionResult("");
-    try {
-      const result = await testModelConnection();
-      setConnectionResult(`连接成功：${result.model} 返回 "${result.echo.slice(0, 40)}"`);
-      onWorkspaceStatus(`模型连接测试通过：${result.model}`);
-    } catch (cause) {
-      const message = errorMessage(cause);
-      setConnectionResult(`连接失败：${message}`);
-      onWorkspaceStatus(`模型连接测试失败：${message}`);
-    } finally {
-      setConnectionTesting(false);
-    }
-  }, [onWorkspaceStatus]);
+  const testConnection = useCallback(
+    async (input?: { endpoint?: string; model?: string; apiKey?: string }) => {
+      setConnectionTesting(true);
+      setConnectionResult("");
+      try {
+        const result = await testModelConnection(input);
+        setConnectionResult(`连接成功：${result.model} 返回 "${result.echo.slice(0, 40)}"`);
+        onWorkspaceStatus(`模型连接测试通过：${result.model}`);
+      } catch (cause) {
+        const message = errorMessage(cause);
+        setConnectionResult(`连接失败：${message}`);
+        onWorkspaceStatus(`模型连接测试失败：${message}`);
+      } finally {
+        setConnectionTesting(false);
+      }
+    },
+    [onWorkspaceStatus]
+  );
 
   const openSettings = useCallback(() => {
     if (!isDesktopRuntime()) {

@@ -174,9 +174,19 @@ export interface ModelConnectionResult {
   echo: string;
 }
 
-export async function testModelConnection(): Promise<ModelConnectionResult> {
+export interface TestConnectionInput {
+  endpoint?: string;
+  model?: string;
+  apiKey?: string;
+}
+
+export async function testModelConnection(
+  input?: TestConnectionInput
+): Promise<ModelConnectionResult> {
   ensureDesktopRuntime();
-  return invoke<ModelConnectionResult>("test_model_connection");
+  return invoke<ModelConnectionResult>("test_model_connection", {
+    request: input ?? null
+  });
 }
 
 export async function listPromptVersions(): Promise<PromptVersionInfo[]> {

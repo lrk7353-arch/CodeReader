@@ -31,6 +31,8 @@ export function computeProjectProgress(
   let lastReadFileId: string | null = null;
   let lastReadExplanationId: string | null = null;
   let lastReadAt: string | null = null;
+  let firstUnreadFileId: string | null = null;
+  let firstUnreadExplanationId: string | null = null;
 
   for (const file of files) {
     const explanations = file.explanations ?? [];
@@ -40,21 +42,34 @@ export function computeProjectProgress(
     for (const explanation of explanations) {
       totalExplanations += 1;
       const state = readingStateOverrides[explanation.id] ?? explanation.readingState;
-      if (state === "read" || state === "understood") {
+      const isRead = state === "read" || state === "understood";
+      if (isRead) {
         readExplanations += 1;
       }
       if (state === "understood") {
         understoodExplanations += 1;
       }
-      // Track the most recently updated explanation as the "continue reading" target.
-      const updatedAt = explanation.updatedAt ?? "";
-      if (updatedAt && (!lastReadAt || updatedAt > lastReadAt)) {
-        lastReadAt = updatedAt;
-        lastReadFileId = file.id;
-        lastReadExplanationId = explanation.id;
+      // "Continue reading" should target the most recently read explanation,
+      // not a freshly generated/migrated one. Only read/understood count.
+      if (isRead) {
+        const updatedAt = explanation.updatedAt ?? "";
+        if (updatedAt && (!lastReadAt || updatedAt > lastReadAt)) {
+          lastReadAt = updatedAt;
+          lastReadFileId = file.id;
+          lastReadExplanationId = explanation.id;
+        }
+      } else if (!firstUnreadFileId) {
+        // Fallback: first unread explanation if nothing has been read yet.
+        firstUnreadFileId = file.id;
+        firstUnreadExplanationId = explanation.id;
       }
     }
   }
+
+  // Prefer the last read target; fall back to the first unread so the user
+  // always has a "continue reading" entry point.
+  const continueFileId = lastReadFileId ?? firstUnreadFileId;
+  const continueExplanationId = lastReadExplanationId ?? firstUnreadExplanationId;
 
   const completionPercent =
     totalExplanations === 0 ? 0 : Math.round((understoodExplanations / totalExplanations) * 100);
@@ -65,8 +80,8 @@ export function computeProjectProgress(
     totalExplanations,
     readExplanations,
     understoodExplanations,
-    lastReadFileId,
-    lastReadExplanationId,
+    lastReadFileId: continueFileId,
+    lastReadExplanationId: continueExplanationId,
     lastReadAt,
     completionPercent
   };
