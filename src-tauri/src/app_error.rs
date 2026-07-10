@@ -124,7 +124,10 @@ mod tests {
     fn fs_error_constructors_keep_stable_codes() {
         assert_eq!(AppError::fs_not_a_file("x").code, "fs.not_a_file");
         assert_eq!(AppError::fs_not_a_dir("x").code, "fs.not_a_dir");
-        assert_eq!(AppError::fs_path_resolve_failed("x").code, "fs.path_resolve_failed");
+        assert_eq!(
+            AppError::fs_path_resolve_failed("x").code,
+            "fs.path_resolve_failed"
+        );
         assert_eq!(AppError::fs_read_failed("x").code, "fs.read_failed");
         assert_eq!(AppError::fs_too_large("x").code, "fs.too_large");
         assert_eq!(AppError::fs_invalid_utf8("x").code, "fs.invalid_utf8");

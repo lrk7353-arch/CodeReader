@@ -36,7 +36,7 @@ fn run_migration(conn: &Connection, version: i64) -> Result<(), String> {
         3 => migrate_to_v3(conn),
         _ => Err(format!(
             "No SQLite migration is registered for version {version}."
-        ))
+        )),
     }
     .and_then(|_| {
         conn.pragma_update(None, "user_version", version)
@@ -53,18 +53,8 @@ fn run_migration(conn: &Connection, version: i64) -> Result<(), String> {
 }
 
 fn migrate_to_v3(conn: &Connection) -> Result<(), String> {
-    ensure_column(
-        conn,
-        "prompt_versions",
-        "system_prompt_template",
-        "TEXT",
-    )?;
-    ensure_column(
-        conn,
-        "prompt_versions",
-        "user_prompt_template",
-        "TEXT",
-    )?;
+    ensure_column(conn, "prompt_versions", "system_prompt_template", "TEXT")?;
+    ensure_column(conn, "prompt_versions", "user_prompt_template", "TEXT")?;
 
     // Backfill the seed version with the built-in default templates so the
     // default active version carries its prompt content (not just a label).
@@ -503,7 +493,10 @@ mod tests {
                 |row| Ok((row.get(0)?, row.get(1)?)),
             )
             .expect("seed version templates query");
-        assert!(system.is_some(), "seed system template should be backfilled");
+        assert!(
+            system.is_some(),
+            "seed system template should be backfilled"
+        );
         assert!(user.is_some(), "seed user template should be backfilled");
         assert!(system.unwrap().contains("CodeReader"));
         assert!(user.unwrap().contains("{payload}"));

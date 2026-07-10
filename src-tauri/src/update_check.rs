@@ -98,18 +98,9 @@ fn parse_version(value: &str) -> (u64, u64, u64, u8, u64) {
     let core = split.next().unwrap_or_default();
     let prerelease = split.next();
     let mut parts = core.split('.');
-    let major = parts
-        .next()
-        .and_then(|part| part.parse().ok())
-        .unwrap_or(0);
-    let minor = parts
-        .next()
-        .and_then(|part| part.parse().ok())
-        .unwrap_or(0);
-    let patch = parts
-        .next()
-        .and_then(|part| part.parse().ok())
-        .unwrap_or(0);
+    let major = parts.next().and_then(|part| part.parse().ok()).unwrap_or(0);
+    let minor = parts.next().and_then(|part| part.parse().ok()).unwrap_or(0);
+    let patch = parts.next().and_then(|part| part.parse().ok()).unwrap_or(0);
     let prerelease_rank = if prerelease.is_some() { 0 } else { 1 };
     let beta_number = prerelease
         .and_then(|part| part.strip_prefix("beta."))

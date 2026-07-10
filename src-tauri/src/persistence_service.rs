@@ -1,8 +1,8 @@
 #![cfg_attr(test, allow(dead_code))]
 
-use rusqlite::Connection;
 #[cfg(test)]
 use rusqlite::params;
+use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -30,9 +30,7 @@ mod change_tracking;
 mod explanation_hydration;
 
 #[allow(unused_imports)]
-pub(crate) use explanation_hydration::{
-    hydrate_code_file_at_path, save_generated_explanation,
-};
+pub(crate) use explanation_hydration::{hydrate_code_file_at_path, save_generated_explanation};
 
 #[allow(unused_imports)]
 pub(crate) use model_config::{
@@ -80,8 +78,7 @@ pub(crate) use prompt_registry::{
 };
 #[allow(unused_imports)]
 pub(crate) use prompt_registry::{
-    DEFAULT_GENERATION_PROMPT_VERSION, DEFAULT_SYSTEM_PROMPT_TEMPLATE,
-    DEFAULT_USER_PROMPT_TEMPLATE,
+    DEFAULT_GENERATION_PROMPT_VERSION, DEFAULT_SYSTEM_PROMPT_TEMPLATE, DEFAULT_USER_PROMPT_TEMPLATE,
 };
 #[cfg(not(test))]
 #[doc(hidden)]
