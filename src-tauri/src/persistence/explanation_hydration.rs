@@ -2,17 +2,17 @@ use rusqlite::{params, Connection};
 use std::collections::HashSet;
 use std::path::Path;
 
+use super::change_tracking::{
+    apply_change_detection, load_change_summary, load_covered_code_node_ids,
+    load_current_code_nodes, load_explanation_anchors, load_previous_snapshot,
+    snapshot_nodes_from_input, ChangeDetectionPersistence,
+};
 use super::{
     database_error, display_path, join_notes, line_count, now_timestamp, open_database,
     optional_i64_to_usize, optional_usize_to_i64, parse_line_numbers, reading_state_id,
     serialize_line_fingerprints, serialize_line_numbers, snapshot_node_id, stable_project_id,
     CodeNodeInput, ExplanationInput, ExplanationPayload, GeneratedExplanationInput,
     HydrateCodeFileRequest, HydratedCodeFilePayload, EXPLANATION_SCHEMA_VERSION, PROMPT_VERSION,
-};
-use super::change_tracking::{
-    apply_change_detection, load_change_summary, load_covered_code_node_ids,
-    load_current_code_nodes, load_explanation_anchors, load_previous_snapshot,
-    snapshot_nodes_from_input, ChangeDetectionPersistence,
 };
 use crate::change_detection::detect_changes;
 use crate::utils::sha256_hex;

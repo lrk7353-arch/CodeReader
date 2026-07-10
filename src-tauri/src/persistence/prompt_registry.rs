@@ -39,7 +39,8 @@ schema:
 /// Default user prompt template. Placeholders `{display_mode}`,
 /// `{prompt_version}`, and `{payload}` are substituted by the explanation
 /// service at generation time.
-pub(crate) const DEFAULT_USER_PROMPT_TEMPLATE: &str = "请根据下列经过授权的 Context Bundle 解释目标代码。\n\
+pub(crate) const DEFAULT_USER_PROMPT_TEMPLATE: &str =
+    "请根据下列经过授权的 Context Bundle 解释目标代码。\n\
          你只能使用此 Bundle 中的信息；缺少项目上下文时必须明确降低可信标签，不得猜测。\n\
          目标展示模式：{display_mode}\n\
          本次解释使用的 Prompt 版本：{prompt_version}\n\
@@ -494,7 +495,6 @@ pub(crate) fn rollback_prompt_version_at_path(
     Ok((target, failed))
 }
 
-
 fn load_prompt_version(conn: &Connection, version: &str) -> Result<PromptVersionRecord, String> {
     conn.query_row(
         "SELECT version, status, rollout_percent, rollback_from, notes,
@@ -544,7 +544,7 @@ fn validate_prompt_version(input: &PromptVersionRegistration) -> Result<(), Stri
             return Err(
                 "User prompt template must include the {payload} placeholder so the Context \
                  Bundle is sent to the model."
-                    .to_string()
+                    .to_string(),
             );
         }
     }
@@ -730,7 +730,10 @@ mod tests {
             },
         )
         .expect("template with {payload} should be accepted");
-        assert_eq!(with_payload.user_prompt_template.as_deref(), Some("custom user {payload}"));
+        assert_eq!(
+            with_payload.user_prompt_template.as_deref(),
+            Some("custom user {payload}")
+        );
 
         // Empty/whitespace templates are normalized to None and should be accepted.
         let empty_template = upsert_prompt_version_at_path(
@@ -774,14 +777,12 @@ mod tests {
             "code-explanation-v0.2-rc1"
         );
         assert_eq!(
-            pick_prompt_version(&database_path, "fallback-v0", 0.3)
-                .expect("at threshold → active"),
+            pick_prompt_version(&database_path, "fallback-v0", 0.3).expect("at threshold → active"),
             DEFAULT_GENERATION_PROMPT_VERSION,
             "sample at/above threshold should pick active"
         );
         assert_eq!(
-            pick_prompt_version(&database_path, "fallback-v0", 0.99)
-                .expect("high sample → active"),
+            pick_prompt_version(&database_path, "fallback-v0", 0.99).expect("high sample → active"),
             DEFAULT_GENERATION_PROMPT_VERSION
         );
 
@@ -1086,10 +1087,9 @@ mod tests {
             Some("CUSTOM USER PROMPT {payload}")
         );
 
-        let templates =
-            load_prompt_templates(&database_path, "code-explanation-v0.2-rc1")
-                .expect("templates load")
-                .expect("version exists");
+        let templates = load_prompt_templates(&database_path, "code-explanation-v0.2-rc1")
+            .expect("templates load")
+            .expect("version exists");
         assert_eq!(templates.system, "CUSTOM SYSTEM PROMPT");
         assert_eq!(templates.user, "CUSTOM USER PROMPT {payload}");
 
@@ -1154,10 +1154,9 @@ mod tests {
         let database_path = temp_database_path("prompt-templates-seed");
         super::super::open_database(&database_path).expect("database initializes");
 
-        let templates =
-            load_prompt_templates(&database_path, DEFAULT_GENERATION_PROMPT_VERSION)
-                .expect("templates load")
-                .expect("seed version exists");
+        let templates = load_prompt_templates(&database_path, DEFAULT_GENERATION_PROMPT_VERSION)
+            .expect("templates load")
+            .expect("seed version exists");
         assert!(templates.system.contains("CodeReader"));
         assert!(templates.user.contains("{payload}"));
 
@@ -1175,7 +1174,6 @@ mod tests {
 
         let _ = std::fs::remove_file(database_path);
     }
-
 
     fn prompt_registration(
         version: &str,

@@ -249,7 +249,12 @@ pub async fn test_model_connection(
                 })?;
             let endpoint = normalize_endpoint(&stored.endpoint)?;
             let api_key = read_api_key()?;
-            (endpoint, stored.model, api_key.unwrap_or_default(), stored.timeout_seconds)
+            (
+                endpoint,
+                stored.model,
+                api_key.unwrap_or_default(),
+                stored.timeout_seconds,
+            )
         }
     };
 
@@ -263,7 +268,11 @@ pub async fn test_model_connection(
         .complete(CompletionRequest {
             endpoint: &endpoint,
             model: &model,
-            api_key: if api_key.is_empty() { None } else { Some(&api_key) },
+            api_key: if api_key.is_empty() {
+                None
+            } else {
+                Some(&api_key)
+            },
             messages: vec![
                 ProviderMessage::system("Reply with the single word: ok"),
                 ProviderMessage::user("ping"),
@@ -929,7 +938,7 @@ mod tests {
             &context,
             "plain",
             "test-prompt-v1",
-            persistence_service::DEFAULT_USER_PROMPT_TEMPLATE
+            persistence_service::DEFAULT_USER_PROMPT_TEMPLATE,
         )
         .expect("prompt should build");
         let embedded_bundle = prompt
@@ -1175,10 +1184,7 @@ mod tests {
 
         fn messages(&self) -> Vec<ProviderMessage> {
             // ProviderMessage is Clone, so we can return owned copies.
-            self.captured
-                .lock()
-                .expect("capture lock")
-                .clone()
+            self.captured.lock().expect("capture lock").clone()
         }
     }
 

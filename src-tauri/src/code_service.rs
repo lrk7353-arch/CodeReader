@@ -171,8 +171,8 @@ pub struct ProjectTreeNodePayload {
 
 #[cfg_attr(not(test), tauri::command)]
 pub fn load_code_file(path: String) -> Result<CodeFilePayload, AppError> {
-    let path = canonicalize_input_path(&path, "file path")
-        .map_err(AppError::fs_path_resolve_failed)?;
+    let path =
+        canonicalize_input_path(&path, "file path").map_err(AppError::fs_path_resolve_failed)?;
     if !path.is_file() {
         return Err(AppError::fs_not_a_file(
             "The selected path is not a readable file.",
@@ -194,8 +194,8 @@ pub fn load_project_code_file(
         ));
     }
 
-    let path = canonicalize_input_path(&path, "file path")
-        .map_err(AppError::fs_path_resolve_failed)?;
+    let path =
+        canonicalize_input_path(&path, "file path").map_err(AppError::fs_path_resolve_failed)?;
     if !path.is_file() {
         return Err(AppError::fs_not_a_file(
             "The selected path is not a readable file.",
@@ -230,8 +230,8 @@ fn fs_error_for_load(message: String) -> AppError {
 
 #[cfg_attr(not(test), tauri::command)]
 pub fn scan_project(path: String) -> Result<ProjectScanPayload, AppError> {
-    let root = canonicalize_input_path(&path, "project path")
-        .map_err(AppError::fs_path_resolve_failed)?;
+    let root =
+        canonicalize_input_path(&path, "project path").map_err(AppError::fs_path_resolve_failed)?;
     if !root.is_dir() {
         return Err(AppError::fs_not_a_dir(
             "The selected path is not a project folder.",
@@ -1246,8 +1246,8 @@ WHERE created_at < CURRENT_DATE;
             .expect_err("missing path should error");
         assert_eq!(missing.code(), "fs.path_resolve_failed");
 
-        let not_a_file = load_code_file("/tmp".to_string())
-            .expect_err("directory should not load as a file");
+        let not_a_file =
+            load_code_file("/tmp".to_string()).expect_err("directory should not load as a file");
         assert_eq!(not_a_file.code(), "fs.not_a_file");
     }
 
@@ -1257,8 +1257,8 @@ WHERE created_at < CURRENT_DATE;
             .expect_err("missing path should error");
         assert_eq!(missing.code(), "fs.path_resolve_failed");
 
-        let not_a_dir = scan_project("/dev/null".to_string())
-            .expect_err("file should not scan as a project");
+        let not_a_dir =
+            scan_project("/dev/null".to_string()).expect_err("file should not scan as a project");
         assert_eq!(not_a_dir.code(), "fs.not_a_dir");
     }
 

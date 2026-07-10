@@ -70,7 +70,11 @@ pub(super) fn language_for_path(path: &Path) -> Option<CodeLanguage> {
     }
 }
 
-pub(super) fn classify_file(path: &Path, size_bytes: u64, is_symlink: bool) -> FileCapabilityPayload {
+pub(super) fn classify_file(
+    path: &Path,
+    size_bytes: u64,
+    is_symlink: bool,
+) -> FileCapabilityPayload {
     if is_symlink {
         return unavailable_capability(
             size_bytes,
