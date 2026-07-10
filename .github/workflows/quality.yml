@@ -4,11 +4,10 @@ on:
   push:
     branches:
       - main
-      - dev
-      - "codex/**"
-      - "feature/**"
-      - "fix/**"
+      - "release/**"
   pull_request:
+    branches:
+      - main
 
 permissions:
   contents: read
