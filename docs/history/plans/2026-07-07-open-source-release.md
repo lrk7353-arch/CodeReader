@@ -1,6 +1,8 @@
 # Open Source Release Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> Historical record: this plan reflects the workflow used for the first public
+> repository release. Its former tool-specific execution instructions are not
+> current project policy. Follow the maintainer's request and root `AGENTS.md`.
 
 **Goal:** Prepare CodeReader for a first public GitHub open source release with contributor-facing docs, repeatable release management, source push hygiene, and non-installing update discovery.
 
@@ -1214,4 +1216,3 @@ Use:
 
 This prepares CodeReader for first public GitHub hosting and manual release distribution. Automatic update installation remains out of scope.
 ```
-

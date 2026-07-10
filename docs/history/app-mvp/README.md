@@ -1,6 +1,6 @@
 # CodeReader 项目文档包
 
-> 本目录记录 `v0.10.0-mvp` 的产品与发行基线。当前 `0.11.x` 内测标准、架构入口和路线图见 [`../内测阶段文档/README.md`](../内测阶段文档/README.md)。
+> 本目录记录 `v0.10.0-mvp` 的产品与发行基线。后续 `0.11.x` 内测记录见 [`../beta/README.md`](../beta/README.md)；当前生产方向以 `docs/architecture/` 为准。
 
 版本：v0.10.0
 更新重点：在“独立桌面端 AI 代码阅读 IDE”路线基础上，完成 MVP 功能闭环、Windows 桌面发行与总验收；这些收束只定义当前可交付基线，不削弱全量产品目标。
@@ -54,9 +54,9 @@ CodeReader 的核心目标是把 AI 生成代码从黑箱产物转化为：
 | [变更说明_v0.3.md](./变更说明_v0.3.md) | 本次对解释质量、用户引导、上下文构造、变更摘要和开发顺序的增强说明。 |
 | [启动前检查报告_v0.4.md](./启动前检查报告_v0.4.md) | 对 MVP 实现边界、解释锚点、持久化、首次体验和开发顺序的最终收束检查。 |
 
-旧版 VS Code 插件方向已归档至 `../archive/for VS Code Extension/`，仅作为历史参考，不再作为 MVP 或主产品路线。
+旧版 VS Code 插件方向已归档至 `../vscode-extension/specification/`，仅作为历史参考，不再作为 MVP 或主产品路线。
 
-补充资料：`../完善文档与prompt整理/CodeReader_MVP开发任务Prompt_v0.4.md` 可作为后续交给 coding agent 的 MVP 开发任务提示词。
+补充资料：`../legacy-planning/CodeReader_MVP开发任务Prompt_v0.4.md` 保留了当时交给 coding agent 的 MVP 开发任务提示词。
 
 ## 5. 推荐技术主线
 

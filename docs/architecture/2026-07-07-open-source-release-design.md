@@ -1,5 +1,8 @@
 # Open Source Release Design
 
+> Status: historical baseline, superseded by
+> `2026-07-10-production-readiness-design.md`.
+
 ## Goal
 
 Move CodeReader from internal beta into a public GitHub-hosted open source project that people can understand, download, build, and contribute to, while keeping the first public release low-risk.

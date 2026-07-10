@@ -67,7 +67,7 @@
 
 交付：
 
-- `内测阶段文档` 下新增 Beta4 真实项目验证文档。
+- 当前归档目录下新增 Beta4 真实项目验证文档。
 - 如果新增自动化 fixture，必须不含第三方项目源码或敏感数据。
 
 ### 3. 内测退出证据包
@@ -280,8 +280,8 @@ Beta4 不做这些事：
 
 完成 Beta4 后，至少应有：
 
-- 更新后的 `内测阶段文档/迭代路线图.md`。
-- `内测阶段文档/Beta4验收.md` 或等价验收文档。
+- 更新后的 `docs/history/beta/迭代路线图.md`。
+- `docs/history/beta/Beta4验收.md` 或等价验收文档。
 - Windows release-chain smoke 文档/模板/脚本。
 - Linux desktop smoke 补全证据。
 - 真实项目验证模板和至少一份可脱敏记录。

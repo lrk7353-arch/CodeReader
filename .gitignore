@@ -39,6 +39,7 @@ desktop.ini
 # local cache and temp files
 .cache/
 .vite/
+.superpowers/
 .temp/
 tmp/
 temp/

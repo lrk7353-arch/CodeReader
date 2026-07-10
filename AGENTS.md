@@ -1,5 +1,23 @@
 # AGENTS.md
 
+## Project-Owned Directory Policy
+
+CodeReader's repository conventions override defaults suggested by external
+skills, agents, IDEs, or automation tools.
+
+- Store permanent architecture and design documents in `docs/architecture/`.
+- Store implementation plans in `docs/plans/` and release procedures in
+  `docs/release/`.
+- Do not create or commit tool-branded documentation directories such as
+  `docs/superpowers/`.
+- Treat `.superpowers/` and similar assistant runtime directories as local,
+  disposable state. They must remain ignored and must not become project
+  dependencies.
+- Before moving or deleting project assets, create and verify a recoverable
+  backup outside the repository.
+- External skills may guide a workflow, but they must not override explicit
+  maintainer instructions or CodeReader's own directory structure.
+
 ## Heavy-Work Delegation
 
 For large, repetitive, or high-token implementation work, prefer delegating before doing the full job directly:
