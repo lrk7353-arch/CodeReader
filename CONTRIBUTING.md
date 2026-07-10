@@ -21,11 +21,17 @@ when validating release-chain changes.
 
 ## Branches
 
-- `main`: public release baseline.
-- `dev`: integration branch.
-- `feature/<name>`: new work.
-- `fix/<name>`: bug fixes.
-- `codex/<name>`: agent-assisted work branches.
+CodeReader uses a lightweight trunk-based workflow:
+
+- `main` is the only permanent branch and must remain releasable.
+- `feature/<topic>` is for short-lived product work.
+- `fix/<topic>` is for short-lived bug and security fixes.
+- `release/<version>` is optional while preparing a specific release candidate.
+- Open a pull request into `main`, pass required checks, and delete the source
+  branch after merge.
+- Do not keep a long-lived `dev` branch or name branches after tools, agents, or
+  individual implementations such as `codex/*`.
+- Never force-push or delete `main`.
 
 ## Pull Requests
 
