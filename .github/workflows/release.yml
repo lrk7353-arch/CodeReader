@@ -131,6 +131,7 @@ jobs:
         with:
           workspaces: src-tauri
           key: release-${{ matrix.target }}
+          cache-targets: false
 
       - run: npm ci
 

@@ -13,7 +13,7 @@ const markdownFile: SampleFile = {
   name: "notes.md",
   path: "/notes.md",
   language: "markdown",
-  code: "# Notes\n\n<script>alert('x')</script>\n\n[bad](javascript:alert(1))",
+  code: "# Notes\n\n<script>alert('x')</script>\n\n<script\n\n[bad](javascript:alert(1))",
   explanations: [],
   capability: {
     previewKind: "text",
@@ -36,6 +36,7 @@ describe("ReadableFileViewer", () => {
 
     expect(screen.getByRole("heading", { name: "Notes" })).toBeInTheDocument();
     expect(container.querySelector("script")).toBeNull();
+    expect(container.textContent).not.toContain("<script");
     expect(screen.getByText("bad").closest("a")).toBeNull();
     expect(screen.getByText("bad")).toHaveAttribute("title", "Unsafe link removed");
   });

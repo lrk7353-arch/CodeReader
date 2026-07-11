@@ -61,6 +61,7 @@ jobs:
         uses: rustsec/audit-check@v2.0.0
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
+          working-directory: src-tauri
 
   dependency-review:
     if: github.event_name == 'pull_request'

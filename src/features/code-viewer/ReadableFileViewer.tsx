@@ -153,7 +153,33 @@ function parseMarkdown(source: string): MarkdownBlock[] {
 }
 
 function stripRawHtml(text: string) {
-  return text.replace(/<[^>]*>/g, "");
+  let output = "";
+  let insideTag = false;
+  for (let index = 0; index < text.length; index += 1) {
+    const character = text[index];
+    if (character === "<") {
+      const next = text[index + 1] ?? "";
+      const code = next.charCodeAt(0);
+      const startsTag =
+        next === "/" ||
+        next === "!" ||
+        next === "?" ||
+        (code >= 65 && code <= 90) ||
+        (code >= 97 && code <= 122);
+      if (!startsTag) {
+        output += character;
+        continue;
+      }
+      insideTag = true;
+      continue;
+    }
+    if (insideTag) {
+      if (character === ">") insideTag = false;
+      continue;
+    }
+    output += character;
+  }
+  return output;
 }
 
 function renderBlock(block: MarkdownBlock): ReactNode {
