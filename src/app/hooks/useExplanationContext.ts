@@ -15,6 +15,7 @@ export function useExplanationContext(file: CodeFile, explanation?: Explanation)
     if (
       !isDesktopRuntime() ||
       !explanation ||
+      !file.grantId ||
       !file.code ||
       file.capability?.canExplain === false
     ) {

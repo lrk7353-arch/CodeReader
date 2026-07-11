@@ -2,7 +2,7 @@ use rusqlite::{params, Connection};
 
 use super::database_error;
 
-pub(super) const LATEST_DATABASE_VERSION: i64 = 3;
+pub(super) const LATEST_DATABASE_VERSION: i64 = 4;
 
 pub(super) fn migrate(conn: &Connection) -> Result<(), String> {
     conn.execute_batch("PRAGMA foreign_keys = ON;")
@@ -21,7 +21,7 @@ pub(super) fn migrate(conn: &Connection) -> Result<(), String> {
     Ok(())
 }
 
-fn database_version(conn: &Connection) -> Result<i64, String> {
+pub(super) fn database_version(conn: &Connection) -> Result<i64, String> {
     conn.query_row("PRAGMA user_version", [], |row| row.get(0))
         .map_err(database_error)
 }
@@ -34,6 +34,7 @@ fn run_migration(conn: &Connection, version: i64) -> Result<(), String> {
         1 => migrate_to_v1(conn),
         2 => migrate_to_v2(conn),
         3 => migrate_to_v3(conn),
+        4 => migrate_to_v4(conn),
         _ => Err(format!(
             "No SQLite migration is registered for version {version}."
         )),
@@ -50,6 +51,22 @@ fn run_migration(conn: &Connection, version: i64) -> Result<(), String> {
             Err(error)
         }
     }
+}
+
+fn migrate_to_v4(conn: &Connection) -> Result<(), String> {
+    conn.execute_batch(
+        "UPDATE prompt_versions
+         SET status = 'retired', rollout_percent = 0, updated_at = datetime('now')
+         WHERE status = 'active'
+           AND version <> (
+             SELECT version FROM prompt_versions
+             WHERE status = 'active'
+             ORDER BY updated_at DESC, version DESC LIMIT 1
+           );
+         CREATE UNIQUE INDEX IF NOT EXISTS uq_prompt_versions_single_active
+           ON prompt_versions(status) WHERE status = 'active';",
+    )
+    .map_err(database_error)
 }
 
 fn migrate_to_v3(conn: &Connection) -> Result<(), String> {
@@ -500,6 +517,42 @@ mod tests {
         assert!(user.is_some(), "seed user template should be backfilled");
         assert!(system.unwrap().contains("CodeReader"));
         assert!(user.unwrap().contains("{payload}"));
+    }
+
+    #[test]
+    fn legacy_duplicate_active_prompts_are_deduplicated_and_constrained() {
+        let conn = Connection::open_in_memory().expect("database opens");
+        run_migration(&conn, 1).expect("v1 migration succeeds");
+        run_migration(&conn, 2).expect("v2 migration succeeds");
+        conn.execute(
+            "INSERT INTO prompt_versions
+             (version, status, rollout_percent, created_at, updated_at)
+             VALUES ('new-active', 'active', 100, '2026-01-02', '2026-01-02')",
+            [],
+        )
+        .expect("legacy schema permits duplicate active prompts");
+        run_migration(&conn, 3).expect("v3 migration succeeds");
+
+        run_migration(&conn, 4).expect("v4 migration succeeds");
+
+        let active_count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM prompt_versions WHERE status = 'active'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("active count queries");
+        assert_eq!(active_count, 1);
+        let duplicate = conn.execute(
+            "INSERT INTO prompt_versions
+             (version, status, rollout_percent, created_at, updated_at)
+             VALUES ('another-active', 'active', 100, '2026-01-03', '2026-01-03')",
+            [],
+        );
+        assert!(
+            duplicate.is_err(),
+            "database enforces a single active prompt"
+        );
     }
 
     fn column_names(conn: &Connection, table: &str) -> Vec<String> {

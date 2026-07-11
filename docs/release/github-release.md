@@ -1,89 +1,140 @@
-# GitHub Release Checklist
+# CodeReader Production Release Runbook
 
-This checklist publishes a public CodeReader release through GitHub Releases.
+This runbook is the release authority for CodeReader `1.x`. A release is not ready merely because the application builds locally.
 
-## 1. Version
+## Supported production matrix
 
-Update the version in:
+| Operating system | Architecture | Required packages |
+| --- | --- | --- |
+| Windows 10 22H2 / Windows 11 | x64 | NSIS `.exe`, MSI |
+| Windows 10 22H2 / Windows 11 | ARM64 | NSIS `.exe`, MSI |
+| Linux, glibc 2.35+ | x64 | AppImage, `.deb`, `.rpm` |
+| Linux, glibc 2.35+ | ARM64 | AppImage, `.deb`, `.rpm` |
 
-- `package.json`
-- `package-lock.json`
-- `src-tauri/Cargo.toml`
-- `src-tauri/tauri.conf.json`
+Ubuntu 22.04+, Debian 12+, and Fedora 39+ are the officially documented Linux families. Other modern glibc-based distributions are community-compatible until verified. macOS is planned for the next version and has no `1.0.0` assets.
 
-For MSI builds, keep `bundle.windows.wix.version` compatible with MSI version rules.
+Document Microsoft Edge WebView2 Evergreen Runtime as required on Windows and WebKitGTK 4.1 as required on Linux. The `.deb` and `.rpm` metadata must declare the Linux runtime dependency; AppImage release notes must state that the host provides it.
 
-## 2. Quality Gates
+Exactly ten installer/package assets are required.
 
-Run:
+## One-time GitHub repository setup
 
-```bash
-npm ci
-npm test
-npm run lint
-npm run format:check
-npm run build
-npm run cargo:test
-npm run cargo:clippy
-npm run cargo:check
-```
+1. Protect `main` or apply an equivalent ruleset:
+   - require a pull request;
+   - require the `Quality`, platform compile, and security checks;
+   - require the branch to be up to date before merge;
+   - block force pushes and deletion;
+   - do not allow bypass except documented incident recovery.
+2. Create a `production-release` environment.
+3. Add the maintainer as a required reviewer for that environment. The release assembly job must pause for this approval.
+4. Keep Actions permissions restricted to the workflow declarations. Do not grant repository-wide write permissions by default.
 
-Linux validation:
+## Candidate preparation
 
-```bash
-npm run doctor:linux
-npm run verify:linux
-```
+1. Start from a clean `main` checkout.
+2. Set the same version in:
+   - `package.json` and `package-lock.json`;
+   - `src-tauri/Cargo.toml` and `Cargo.lock`;
+   - `src-tauri/tauri.conf.json`;
+   - the Windows MSI numeric bundle version.
+3. Use `1.0.0-rc.N` while validating release candidates. The final public release is `1.0.0`.
+4. Update `CHANGELOG.md`, README system requirements, known issues, and data-migration notes.
+5. Run:
 
-## 3. Windows Artifacts
+   ```bash
+   npm ci
+   node scripts/release-assets.mjs verify-version
+   npm run verify:linux
+   ```
 
-On Windows PowerShell:
+6. Rehearse supported beta database upgrades and confirm backup, integrity verification, reopen, and read-only recovery evidence.
 
-```powershell
-npm run release:windows
-npm run smoke:windows-release
-```
+## Create the candidate tag
 
-Upload from `artifacts/windows-x64/`:
-
-- `CodeReader_*_x64-setup.exe`
-- `CodeReader_*_x64_zh-CN.msi`
-- `release-manifest.json`
-- `signing-manifest.json`
-- `SHA256SUMS.txt`
-
-If artifacts are unsigned, state that clearly in the release notes.
-
-## 4. Linux Evidence
-
-Run:
+Create an annotated, signed tag when a signing identity is available:
 
 ```bash
-npm run evidence:linux
-npm run smoke:linux-desktop
+git tag -a v1.0.0-rc.1 -m "CodeReader 1.0.0-rc.1"
+git push origin v1.0.0-rc.1
 ```
 
-Upload Linux evidence files when they are useful for the release:
+Pushing a `v1.*` tag starts `.github/workflows/release.yml`. A manual run may be used only with an existing tag.
 
-- `artifacts/linux-evidence/verify-linux.json`
-- `artifacts/linux-evidence/desktop-smoke.json`
+## Automated build and assembly
 
-Linux binary packages are optional until packaging is stable.
+The workflow must:
 
-## 5. Tag And Release
+1. Verify the tag and all project versions match.
+2. Run the complete Linux production quality gate on Ubuntu 22.04.
+3. Build on native Windows/Linux x64/ARM64 runners.
+4. Normalize package names to include version, OS, architecture, and format.
+5. Reject fewer or more than ten package assets.
+6. Generate:
+   - `SHA256SUMS`;
+   - `CodeReader.spdx.json` (SPDX 2.3 SBOM);
+   - `release-metadata.json`;
+   - `RELEASE-NOTES.md`.
+7. Generate GitHub artifact attestations with Actions OIDC.
+8. Pause at the protected `production-release` environment.
+9. Create a draft GitHub Release. Automation must not publish it directly.
 
-Create a tag:
+## Native smoke evidence
 
-```bash
-git tag v0.11.0-beta.4
-git push origin v0.11.0-beta.4
-```
+Before publishing, verify each of the four platform/architecture combinations on native hardware or its GitHub-hosted native runner:
 
-Create the GitHub Release from that tag. Use `CHANGELOG.md` as the source for release notes.
+- install the package;
+- launch the application;
+- migrate a supported beta fixture or initialize a fresh database;
+- select an arbitrary test directory through the native picker;
+- confirm the full tree, lazy heavy directories, code reading, and Markdown reading;
+- execute a mocked or local-model explanation flow;
+- persist reading state across restart;
+- close cleanly;
+- verify uninstall/package removal behavior.
 
-## 6. Post-Release Checks
+Do not substitute cross-compilation for native smoke evidence.
 
-- Download uploaded artifacts from GitHub.
-- Verify SHA-256 checksums.
-- Install on a clean Windows user profile when publishing Windows installers.
-- Confirm the in-app update check sees the new release.
+## Windows signature policy
+
+Until Authenticode signing is configured:
+
+- release metadata must say `windowsAuthenticodeSigned: false`;
+- README and Release notes must conspicuously warn about SmartScreen and unknown-publisher prompts;
+- checksums, SPDX SBOM, and GitHub artifact attestations are mandatory;
+- provenance must not be described as an Authenticode replacement.
+
+When Azure Trusted Signing, SignPath, or a conventional certificate is configured, signing and signature verification become mandatory gates. The release must fail rather than silently falling back to unsigned packages.
+
+## Verify the draft
+
+1. Download every draft asset into a clean directory.
+2. Verify checksums:
+
+   ```bash
+   sha256sum -c SHA256SUMS
+   ```
+
+3. Verify each package's GitHub attestation:
+
+   ```bash
+   gh attestation verify <asset> -R lrk7353-arch/CodeReader
+   ```
+
+4. Confirm there are exactly ten platform packages plus the four release metadata files.
+5. Confirm Release notes contain:
+   - supported OS and architecture matrix;
+   - package-selection instructions;
+   - database backup/migration statement;
+   - unsigned Windows warning when applicable;
+   - macOS-next-version statement;
+   - known limitations.
+6. Confirm there are no open P0/P1 release issues.
+
+## Publish and post-release checks
+
+1. Publish the reviewed draft manually.
+2. Install again from the public Release assets, not workflow artifacts.
+3. Confirm the in-app update checker sees the correct channel/version and official Release URL.
+4. Verify checksums and attestations using the public URLs.
+5. Monitor GitHub issues and security reports for migration, installer, and startup failures.
+6. If a severe issue is found, mark the release and affected assets clearly, publish recovery instructions, and cut a patched release. Never replace an existing asset silently.

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { errorMessage, errorAction, parseAppError } from "./appError";
+import { errorMessage, errorAction, parseAppError, safeErrorDetail } from "./appError";
 
 describe("errorMessage", () => {
   it("reads native and serialized application errors", () => {
@@ -26,6 +26,27 @@ describe("errorMessage", () => {
 });
 
 describe("parseAppError", () => {
+  it("redacts secrets and absolute paths before display", () => {
+    const parsed = parseAppError({
+      code: "fs.read_failed",
+      message: "failed /home/alice/private/main.ts token=sk-super-secret"
+    });
+    expect(parsed.message).toContain("<path:main.ts>");
+    expect(parsed.message).toContain("<secret>");
+    expect(parsed.message).not.toContain("alice");
+    expect(parsed.message).not.toContain("sk-super-secret");
+  });
+
+  it("creates a stable clipboard detail without serializing response bodies", () => {
+    const detail = safeErrorDetail({
+      code: "llm.http",
+      message: "request failed",
+      body: { response: "MODEL_RESPONSE_CANARY", apiKey: "sk-secret-value" }
+    });
+    expect(detail).toBe("code: llm.http; message: 模型服务返回错误");
+    expect(detail).not.toContain("MODEL_RESPONSE_CANARY");
+    expect(detail).not.toContain("sk-secret-value");
+  });
   it("reads a native Error message", () => {
     expect(parseAppError(new Error("native failure"))).toEqual({ message: "native failure" });
   });

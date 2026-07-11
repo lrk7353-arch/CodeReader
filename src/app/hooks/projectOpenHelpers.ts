@@ -10,6 +10,7 @@ export interface ProjectOpenPlan {
 export function buildProjectFilePlaceholders(project: ProjectScanResult): CodeFile[] {
   return project.files.map((file) => ({
     ...file,
+    grantId: project.grantId,
     projectRoot: project.rootPath,
     code: "",
     explanations: [],

@@ -371,11 +371,13 @@ dependencies = [
 
 [[package]]
 name = "codereader"
-version = "0.11.0-beta.4"
+version = "1.0.0-rc.1"
 dependencies = [
+ "base64 0.22.1",
  "keyring",
  "reqwest",
  "rusqlite",
+ "semver",
  "serde",
  "serde_json",
  "sha2 0.11.0",

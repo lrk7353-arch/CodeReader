@@ -1,7 +1,7 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "CodeReader",
-  "version": "0.11.0-beta.4",
+  "version": "1.0.0-rc.1",
   "identifier": "com.codereader.desktop",
   "build": {
     "beforeDevCommand": "npm run dev",
@@ -16,8 +16,8 @@
         "title": "CodeReader",
         "width": 1280,
         "height": 820,
-        "minWidth": 960,
-        "minHeight": 680
+        "minWidth": 720,
+        "minHeight": 560
       }
     ],
     "security": {
@@ -43,16 +43,13 @@
   },
   "bundle": {
     "active": true,
-    "targets": [
-      "nsis",
-      "msi"
-    ],
+    "targets": "all",
     "useLocalToolsDir": true,
     "publisher": "CodeReader Project",
     "category": "DeveloperTool",
     "copyright": "Copyright 2026 CodeReader contributors",
-    "shortDescription": "Independent desktop IDE for structured code reading.",
-    "longDescription": "CodeReader turns local JavaScript, TypeScript, Python, and SQL into persistent, reviewable explanation layers with reading progress and change awareness.",
+    "shortDescription": "Local-first AI-assisted code and Markdown reader.",
+    "longDescription": "CodeReader helps people inspect local source trees, read code and Markdown, generate bounded reviewable explanations, retain reading progress, and detect stale explanations after files change.",
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
@@ -78,7 +75,7 @@
         "uninstallerIcon": "icons/icon.ico"
       },
       "wix": {
-        "version": "0.11.0",
+        "version": "1.0.0",
         "upgradeCode": "9cd436e5-1c0f-592b-bc46-2b507e245b2d",
         "language": "zh-CN"
       }

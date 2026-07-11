@@ -2,13 +2,16 @@
 
 #[cfg(test)]
 use rusqlite::params;
-use rusqlite::Connection;
+use rusqlite::{Connection, MAIN_DB};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 use std::time::{SystemTime, UNIX_EPOCH};
 #[cfg(not(test))]
 use tauri::{AppHandle, Manager};
 
+#[cfg(not(test))]
+use crate::app_error::AppError;
 use crate::utils::sha256_hex;
 
 #[path = "persistence/schema.rs"]
@@ -193,6 +196,9 @@ pub struct ChangeSummaryPayload {
 pub struct PersistenceStatusPayload {
     database_path: String,
     initialized: bool,
+    read_only_recovery: bool,
+    backup_path: Option<String>,
+    recovery_message: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -266,20 +272,31 @@ pub(crate) struct GeneratedExplanationInput {
 pub fn hydrate_code_file_persistence(
     app: AppHandle,
     request: HydrateCodeFileRequest,
-) -> Result<HydratedCodeFilePayload, String> {
-    let database_path = database_path(&app)?;
-    hydrate_code_file_at_path(&database_path, request)
+) -> Result<HydratedCodeFilePayload, AppError> {
+    let database_path = database_path(&app).map_err(AppError::database)?;
+    hydrate_code_file_at_path(&database_path, request).map_err(AppError::database)
 }
 
 #[cfg(not(test))]
 #[tauri::command]
-pub fn initialize_persistence(app: AppHandle) -> Result<PersistenceStatusPayload, String> {
-    let database_path = database_path(&app)?;
-    open_database(&database_path)?;
-    Ok(PersistenceStatusPayload {
-        database_path: display_path(&database_path),
-        initialized: true,
-    })
+pub fn initialize_persistence(app: AppHandle) -> Result<PersistenceStatusPayload, AppError> {
+    let database_path = database_path(&app).map_err(AppError::database)?;
+    match open_database(&database_path) {
+        Ok(_) => Ok(PersistenceStatusPayload {
+            database_path: display_path(&database_path),
+            initialized: true,
+            read_only_recovery: false,
+            backup_path: latest_backup_path(&database_path).map(|path| display_path(&path)),
+            recovery_message: None,
+        }),
+        Err(_) => Ok(PersistenceStatusPayload {
+            database_path: display_path(&database_path),
+            initialized: false,
+            read_only_recovery: true,
+            backup_path: latest_backup_path(&database_path).map(|path| display_path(&path)),
+            recovery_message: Some("The local database could not be upgraded safely. The original data and latest backup were preserved for recovery.".to_string()),
+        }),
+    }
 }
 
 pub(crate) fn open_database(path: &Path) -> Result<Connection, String> {
@@ -287,9 +304,179 @@ pub(crate) fn open_database(path: &Path) -> Result<Connection, String> {
         std::fs::create_dir_all(parent)
             .map_err(|error| format!("Failed to create database directory: {error}"))?;
     }
-    let conn = Connection::open(path).map_err(database_error)?;
-    schema::migrate(&conn)?;
+    let existed = path
+        .metadata()
+        .map(|metadata| metadata.len() > 0)
+        .unwrap_or(false);
+    let conn = match Connection::open(path) {
+        Ok(conn) => conn,
+        Err(error) => {
+            if existed {
+                let _ = create_raw_backup(path);
+            }
+            return Err(database_error(error));
+        }
+    };
+    if let Err(error) = configure_connection(&conn) {
+        drop(conn);
+        if existed {
+            let _ = create_raw_backup(path);
+        }
+        return Err(error);
+    }
+    if let Err(error) = verify_integrity(&conn) {
+        drop(conn);
+        if existed {
+            let _ = create_raw_backup(path);
+        }
+        return Err(error);
+    }
+
+    let version = schema::database_version(&conn)?;
+    let backup_path = if existed && version != schema::LATEST_DATABASE_VERSION {
+        Some(create_database_backup(&conn, path)?)
+    } else {
+        None
+    };
+    let counts_before = table_row_counts(&conn)?;
+    if let Err(error) = schema::migrate(&conn).and_then(|_| verify_database(&conn, &counts_before))
+    {
+        drop(conn);
+        if let Some(backup_path) = backup_path.as_deref() {
+            restore_database_backup(backup_path, path)?;
+        }
+        return Err(error);
+    }
     Ok(conn)
+}
+
+fn restore_database_backup(backup_path: &Path, database_path: &Path) -> Result<(), String> {
+    for suffix in ["-wal", "-shm"] {
+        let mut sidecar = database_path.as_os_str().to_os_string();
+        sidecar.push(suffix);
+        match std::fs::remove_file(PathBuf::from(sidecar)) {
+            Ok(()) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(format!("Failed to remove SQLite recovery sidecar: {error}")),
+        }
+    }
+    std::fs::copy(backup_path, database_path)
+        .map(|_| ())
+        .map_err(|error| format!("Database migration failed and backup restore failed: {error}"))
+}
+
+fn configure_connection(conn: &Connection) -> Result<(), String> {
+    conn.busy_timeout(Duration::from_secs(5))
+        .map_err(database_error)?;
+    let journal_mode: String = conn
+        .query_row("PRAGMA journal_mode", [], |row| row.get(0))
+        .map_err(database_error)?;
+    if !journal_mode.eq_ignore_ascii_case("wal") {
+        conn.pragma_update(None, "journal_mode", "WAL")
+            .map_err(database_error)?;
+    }
+    conn.execute_batch(
+        "PRAGMA foreign_keys = ON;
+         PRAGMA synchronous = NORMAL;",
+    )
+    .map_err(database_error)
+}
+
+fn verify_integrity(conn: &Connection) -> Result<(), String> {
+    let result: String = conn
+        .query_row("PRAGMA integrity_check", [], |row| row.get(0))
+        .map_err(database_error)?;
+    if result == "ok" {
+        Ok(())
+    } else {
+        Err("SQLite integrity verification failed".to_string())
+    }
+}
+
+fn verify_database(conn: &Connection, counts_before: &[(String, i64)]) -> Result<(), String> {
+    verify_integrity(conn)?;
+    let foreign_key_errors: i64 = conn
+        .query_row("SELECT COUNT(*) FROM pragma_foreign_key_check", [], |row| {
+            row.get(0)
+        })
+        .map_err(database_error)?;
+    if foreign_key_errors != 0 {
+        return Err("SQLite foreign-key verification failed".to_string());
+    }
+    let counts_after = table_row_counts(conn)?;
+    for (table, before) in counts_before {
+        if let Some((_, after)) = counts_after.iter().find(|(name, _)| name == table) {
+            if after < before {
+                return Err(format!("SQLite row-count verification failed for {table}"));
+            }
+        }
+    }
+    Ok(())
+}
+
+fn table_row_counts(conn: &Connection) -> Result<Vec<(String, i64)>, String> {
+    let mut statement = conn
+        .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'")
+        .map_err(database_error)?;
+    let names = statement
+        .query_map([], |row| row.get::<_, String>(0))
+        .map_err(database_error)?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(database_error)?;
+    names
+        .into_iter()
+        .map(|name| {
+            let escaped = name.replace('"', "\"\"");
+            let count = conn
+                .query_row(&format!("SELECT COUNT(*) FROM \"{escaped}\""), [], |row| {
+                    row.get(0)
+                })
+                .map_err(database_error)?;
+            Ok((name, count))
+        })
+        .collect()
+}
+
+fn create_database_backup(conn: &Connection, path: &Path) -> Result<PathBuf, String> {
+    let backup_path = backup_path(path);
+    conn.backup(MAIN_DB, &backup_path, None)
+        .map_err(database_error)?;
+    let backup = Connection::open(&backup_path).map_err(database_error)?;
+    verify_integrity(&backup)?;
+    Ok(backup_path)
+}
+
+fn create_raw_backup(path: &Path) -> Result<PathBuf, String> {
+    let backup_path = backup_path(path);
+    std::fs::copy(path, &backup_path)
+        .map_err(|error| format!("Failed to preserve unreadable database: {error}"))?;
+    Ok(backup_path)
+}
+
+fn backup_path(path: &Path) -> PathBuf {
+    let millis = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_millis())
+        .unwrap_or_default();
+    path.with_extension(format!("sqlite.backup-{millis}"))
+}
+
+fn latest_backup_path(path: &Path) -> Option<PathBuf> {
+    let parent = path.parent()?;
+    let prefix = format!("{}.", path.file_name()?.to_string_lossy());
+    let mut backups = std::fs::read_dir(parent)
+        .ok()?
+        .filter_map(Result::ok)
+        .map(|entry| entry.path())
+        .filter(|candidate| {
+            candidate.file_name().is_some_and(|name| {
+                let name = name.to_string_lossy();
+                name.starts_with(&prefix) && name.contains("backup-")
+            })
+        })
+        .collect::<Vec<_>>();
+    backups.sort();
+    backups.pop()
 }
 
 #[cfg(not(test))]
@@ -425,6 +612,79 @@ mod tests {
         assert!(error.contains("SQLite persistence error"));
         assert_eq!(contents, b"not a sqlite database");
 
+        let backup = latest_backup_path(&database_path).expect("corrupt database is preserved");
+        assert_eq!(std::fs::read(&backup).expect("backup reads"), contents);
+        let _ = std::fs::remove_file(backup);
+        let _ = std::fs::remove_file(database_path);
+    }
+
+    #[test]
+    fn legacy_database_is_backed_up_and_rows_survive_migration() {
+        let database_path = temp_database_path("legacy-backup");
+        let conn = open_database(&database_path).expect("current database opens");
+        conn.execute(
+            "INSERT INTO projects (id, root_path, created_at, updated_at)
+             VALUES ('project:fixture', '/fixture', 'before', 'before')",
+            [],
+        )
+        .expect("fixture row inserts");
+        conn.execute_batch(
+            "DROP INDEX uq_prompt_versions_single_active;
+             PRAGMA user_version = 3;",
+        )
+        .expect("database is converted to a v3 fixture");
+        drop(conn);
+
+        let migrated = open_database(&database_path).expect("legacy database migrates");
+        let count: i64 = migrated
+            .query_row(
+                "SELECT COUNT(*) FROM projects WHERE id = 'project:fixture'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("fixture row queries");
+        assert_eq!(count, 1);
+        assert_eq!(
+            schema::database_version(&migrated).expect("version reads"),
+            schema::LATEST_DATABASE_VERSION
+        );
+        drop(migrated);
+
+        let backup = latest_backup_path(&database_path).expect("migration backup exists");
+        let backup_conn = Connection::open(&backup).expect("backup opens");
+        assert_eq!(
+            schema::database_version(&backup_conn).expect("backup version reads"),
+            3
+        );
+        drop(backup_conn);
+        let _ = std::fs::remove_file(backup);
+        let _ = std::fs::remove_file(database_path);
+    }
+
+    #[test]
+    fn newer_database_is_preserved_with_a_recovery_backup() {
+        let database_path = temp_database_path("future-backup");
+        let conn = open_database(&database_path).expect("current database opens");
+        conn.pragma_update(None, "user_version", schema::LATEST_DATABASE_VERSION + 1)
+            .expect("future version writes");
+        drop(conn);
+
+        let error = open_database(&database_path).expect_err("future database is rejected");
+        assert!(error.contains("newer than this CodeReader build supports"));
+        let preserved = Connection::open(&database_path).expect("original remains readable");
+        assert_eq!(
+            schema::database_version(&preserved).expect("preserved version reads"),
+            schema::LATEST_DATABASE_VERSION + 1
+        );
+        drop(preserved);
+        let backup = latest_backup_path(&database_path).expect("recovery backup exists");
+        let backup_conn = Connection::open(&backup).expect("backup opens");
+        assert_eq!(
+            schema::database_version(&backup_conn).expect("backup version reads"),
+            schema::LATEST_DATABASE_VERSION + 1
+        );
+        drop(backup_conn);
+        let _ = std::fs::remove_file(backup);
         let _ = std::fs::remove_file(database_path);
     }
 

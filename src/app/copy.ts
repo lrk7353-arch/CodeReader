@@ -1,5 +1,6 @@
 import type { Explanation } from "../types/explanation";
 import type { PersistenceStatus } from "./hooks/useWorkspaceFiles";
+import packageJson from "../../package.json";
 
 export type CopyLocale = "zh-CN" | "en";
 
@@ -107,7 +108,7 @@ const zhCN: AppCopy = {
   brand: {
     title: "CodeReader",
     tagline: "\u72ec\u7acb\u684c\u9762\u4ee3\u7801\u9605\u8bfb IDE",
-    stageBadge: "\u5185\u6d4b \u00b7 Beta 4"
+    stageBadge: `发布候选 · ${packageJson.version}`
   },
   actions: {
     sample: "\u4f53\u9a8c\u793a\u4f8b",
@@ -233,7 +234,7 @@ const en: AppCopy = {
   brand: {
     title: "CodeReader",
     tagline: "Standalone desktop code-reading IDE",
-    stageBadge: "Internal \u00b7 Beta 4"
+    stageBadge: `Release candidate · ${packageJson.version}`
   },
   actions: {
     sample: "Try sample",

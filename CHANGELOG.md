@@ -1,5 +1,32 @@
 # Changelog
 
+## 1.0.0-rc.1 - 2026-07-11
+
+### Production safety and data durability
+
+- Replace renderer-authoritative file paths with native registered grants and opaque project/file identifiers; revalidate canonical containment, symlinks, and snapshots before access.
+- Bind file loading, refresh, and explanation generation to operation/target identities so stale background results cannot replace the active document or state.
+- Apply strict feedback and error redaction, privacy canary tests, and an explicit preview/approval step before copying diagnostics.
+- Expand the public `AppError` contract and remove raw string errors from Tauri command boundaries.
+- Add backup-first SQLite migration, integrity/foreign-key/count verification, WAL and busy timeout configuration, destructive-failure recovery, and read-only recovery metadata.
+- Add keyring/database compensation and a database-enforced single-active-prompt invariant.
+- Harden update discovery with semantic-version parsing, bounded responses, timeouts, release channels, redirect policy, and official GitHub origin validation.
+
+### Complete reading workspace
+
+- Keep ordinary unsupported files visible with metadata instead of replacing the current readable document.
+- Add lazy, bounded expansion for heavy dependency/generated directories.
+- Add safe Markdown preview/source navigation and bounded local image preview.
+- Add responsive production workspace states, background-task visibility, and accessibility-focused interaction updates.
+
+### Production distribution
+
+- Add native Windows/Linux x64/ARM64 quality and release matrices.
+- Require two Windows formats and three Linux formats per architecture, for exactly ten platform packages.
+- Add release-set verification, normalized filenames, SHA-256 checksums, SPDX SBOM generation, GitHub artifact attestations, and a manually approved draft Release.
+- Add native Linux and Windows ARM64 release entry points while retaining the verified Windows x64 path.
+- Document Windows 10 22H2/Windows 11 and glibc 2.35+ requirements, unsigned Windows behavior, package selection, migration recovery, and macOS deferral.
+
 ## Unreleased
 
 ### Public repository preparation

@@ -5,12 +5,15 @@ export interface AppErrorInfo {
 
 const FALLBACK_MESSAGE = "未知错误";
 const MAX_DEPTH = 3;
+const MAX_SAFE_MESSAGE_LENGTH = 320;
 
 export function parseAppError(error: unknown): AppErrorInfo {
   const extracted = extract(error, 0);
   return {
     code: extracted?.code,
-    message: extracted?.message || FALLBACK_MESSAGE
+    message:
+      publicMessageForCode(extracted?.code) ??
+      (extracted?.message ? sanitizeErrorText(extracted.message) : FALLBACK_MESSAGE)
   };
 }
 
@@ -97,4 +100,57 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 function readOptionalString(record: Record<string, unknown>, key: string): string | undefined {
   const raw = record[key];
   return typeof raw === "string" && raw.length > 0 ? raw : undefined;
+}
+
+/**
+ * Error messages cross a trust boundary before reaching the UI or clipboard.
+ * Keep the useful human-readable summary while removing common credentials,
+ * absolute paths and provider payloads, and cap its size.
+ */
+export function sanitizeErrorText(value: string): string {
+  const sanitized = value
+    .replace(/\b(?:sk|rk|pk)-[A-Za-z0-9_-]{8,}\b/gi, "<secret>")
+    .replace(
+      /\b(?:api[_-]?key|authorization|bearer|token|secret|password)\b\s*[:=]\s*[^\s,;]+/gi,
+      (match) => `${match.split(/[:=]/, 1)[0]}: <secret>`
+    )
+    .replace(
+      /(?:[A-Za-z]:[\\/]|[\\/]{2}|~\/|\/(?:home|Users|tmp|var|opt|etc|root|mnt|srv|data)\/)[^\s"'<>]*/g,
+      (match) => {
+        const segments = match.split(/[\\/]/).filter(Boolean);
+        return `<path:${segments.at(-1) ?? "redacted"}>`;
+      }
+    )
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!sanitized) {
+    return FALLBACK_MESSAGE;
+  }
+  return sanitized.length > MAX_SAFE_MESSAGE_LENGTH
+    ? `${sanitized.slice(0, MAX_SAFE_MESSAGE_LENGTH)}…`
+    : sanitized;
+}
+
+export function safeErrorDetail(error: unknown): string {
+  const parsed = parseAppError(error);
+  return parsed.code
+    ? `code: ${parsed.code}; message: ${parsed.message}`
+    : `message: ${parsed.message}`;
+}
+
+function publicMessageForCode(code?: string): string | undefined {
+  switch (code) {
+    case "llm.timeout":
+      return "模型请求超时";
+    case "llm.connection":
+      return "无法连接模型服务";
+    case "llm.http":
+      return "模型服务返回错误";
+    case "llm.invalid_response":
+      return "模型响应格式无效";
+    case "llm.empty_response":
+      return "模型服务返回了空响应";
+    default:
+      return undefined;
+  }
 }

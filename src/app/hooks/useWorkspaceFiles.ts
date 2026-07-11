@@ -9,6 +9,7 @@ import { buildSelectableExplanations } from "../../features/explanations/selecta
 import { deriveGuideProgress } from "../../features/project-guide/projectGuide";
 import {
   generateProjectGuide,
+  expandGrantedDirectory,
   hydrateCodeFilePersistence,
   initializePersistence,
   isDesktopRuntime,
@@ -23,7 +24,7 @@ import type {
   ProjectScanResult,
   ReadingState
 } from "../../types/explanation";
-import { errorAction, errorMessage, type ErrorAction } from "../appError";
+import { errorAction, errorMessage, safeErrorDetail, type ErrorAction } from "../appError";
 import { useWorkspaceSelection } from "./useWorkspaceSelection";
 import { codeSelectionForExplanation, pickRetainedExplanation } from "./retainExplanation";
 import { seedBrowserHydratedFile, stripUnexplainableFile } from "./hydrateLoadedFile";
@@ -31,6 +32,7 @@ import { upsertFileInList } from "./workspaceFileList";
 import { canRefreshLoadedFile } from "./workspaceRefreshController";
 import { buildProjectOpenPlan } from "./projectOpenHelpers";
 import { resolveWorkspaceName } from "../utils/workspacePaths";
+import { createOperationGate, type OperationToken } from "./operationGate";
 
 export type PersistenceStatus = "preview" | "initializing" | "ready" | "error";
 
@@ -54,6 +56,13 @@ export function useWorkspaceFiles() {
   const [loadingFileId, setLoadingFileId] = useState<string | null>(null);
   const workspaceTouchedRef = useRef(false);
   const refreshInFlightRef = useRef(false);
+  const operationGateRef = useRef(createOperationGate());
+
+  const invalidateWorkspaceOperation = useCallback((targetId: string) => {
+    operationGateRef.current.invalidate(targetId);
+    setIsWorkspaceBusy(false);
+    setLoadingFileId(null);
+  }, []);
 
   const selection = useWorkspaceSelection({ files, readingStates });
   const {
@@ -107,13 +116,21 @@ export function useWorkspaceFiles() {
     let cancelled = false;
     void initializePersistence()
       .then(async (status) => {
+        if (cancelled) return;
+        setDatabasePath(status.databasePath);
+        setPersistenceStatus(status.initialized ? "ready" : "error");
+        if (!status.initialized) {
+          const backupHint = status.backupPath ? ` 备份位置：${status.backupPath}` : "";
+          setWorkspaceStatus(
+            `本地数据库未能安全打开，已停止持久化写入并保留原始数据。${backupHint}`
+          );
+          return;
+        }
         const hydratedSamples = await Promise.all(
           sampleFiles.map((file) =>
             hydrateCodeFilePersistence(file, buildSelectableExplanations(file))
           )
         );
-        setDatabasePath(status.databasePath);
-        setPersistenceStatus(status.initialized ? "ready" : "error");
         if (!shouldApplyInitialWorkspaceHydration(cancelled, workspaceTouchedRef.current)) {
           return;
         }
@@ -152,15 +169,18 @@ export function useWorkspaceFiles() {
     return hydratedFile;
   }, []);
 
-  const refreshPersistedProjectGuide = useCallback(async (projectId: string) => {
-    if (!isDesktopRuntime() || projectId === sampleProjectId) {
-      return;
-    }
-    const guide = await loadProjectGuide(projectId);
-    if (guide) {
-      setProjectGuide(guide);
-    }
-  }, []);
+  const refreshPersistedProjectGuide = useCallback(
+    async (projectId: string, shouldApply: () => boolean = () => true) => {
+      if (!isDesktopRuntime() || projectId === sampleProjectId) {
+        return;
+      }
+      const guide = await loadProjectGuide(projectId);
+      if (guide && shouldApply()) {
+        setProjectGuide(guide);
+      }
+    },
+    []
+  );
 
   const upsertFile = useCallback((file: CodeFile) => {
     setFiles((current) => upsertFileInList(current, file));
@@ -177,13 +197,18 @@ export function useWorkspaceFiles() {
       ) {
         return;
       }
+      const operation = operationGateRef.current.begin(file.id);
       refreshInFlightRef.current = true;
       if (announce) {
         setIsWorkspaceBusy(true);
         setWorkspaceStatus(`正在检查 ${file.relativePath ?? file.path}`);
       }
       try {
-        const reloaded = await loadCodeFile(file.path, file.projectRoot);
+        if (!file.grantId) {
+          throw new Error("The file authorization has expired. Reopen the file or folder.");
+        }
+        const reloaded = await loadCodeFile(file.id, file.grantId);
+        if (!operationGateRef.current.isCurrent(operation)) return;
         if (reloaded.fileHash === file.fileHash) {
           if (announce) {
             setWorkspaceStatus(`文件未变化：${file.relativePath ?? file.path}`);
@@ -195,10 +220,14 @@ export function useWorkspaceFiles() {
           projectRoot: file.projectRoot ?? reloaded.projectRoot,
           relativePath: file.relativePath ?? reloaded.relativePath
         });
+        if (!operationGateRef.current.isCurrent(operation)) return;
         upsertFile(hydrated);
         setSelectedFileId(hydrated.id);
         if (hydrated.projectId) {
-          await refreshPersistedProjectGuide(hydrated.projectId);
+          await refreshPersistedProjectGuide(hydrated.projectId, () =>
+            operationGateRef.current.isCurrent(operation)
+          );
+          if (!operationGateRef.current.isCurrent(operation)) return;
         }
         const explanations = buildSelectableExplanations(hydrated);
         const retained = pickRetainedExplanation(
@@ -215,10 +244,12 @@ export function useWorkspaceFiles() {
           hydrated.changeSummary?.summary ?? `已重新读取 ${hydrated.relativePath ?? hydrated.path}`
         );
       } catch (error) {
-        reportWorkspaceError(error, "变更检测失败：");
+        if (operationGateRef.current.isCurrent(operation)) {
+          reportWorkspaceError(error, "变更检测失败：");
+        }
       } finally {
         refreshInFlightRef.current = false;
-        if (announce) {
+        if (announce && operationGateRef.current.isCurrent(operation)) {
           setIsWorkspaceBusy(false);
         }
       }
@@ -253,28 +284,43 @@ export function useWorkspaceFiles() {
   }, [isWorkspaceBusy, refreshLoadedFile, selectedFile]);
 
   const loadAndSelectFile = useCallback(
-    async (path: string, relativePath?: string, placeholderId?: string, projectRoot?: string) => {
+    async (
+      fileId: string,
+      grantId: string,
+      relativePath?: string,
+      projectRoot?: string,
+      existingOperation?: OperationToken
+    ) => {
+      const path = fileId;
+      const operation = existingOperation ?? operationGateRef.current.begin(fileId, true);
       setIsWorkspaceBusy(true);
-      setLoadingFileId(placeholderId ?? null);
+      setLoadingFileId(fileId);
       setWorkspaceStatus(`正在加载 ${relativePath ?? path}`);
       try {
-        const loadedFile = await loadCodeFile(path, projectRoot);
+        const loadedFile = await loadCodeFile(fileId, grantId);
+        if (!operationGateRef.current.isCurrent(operation)) return;
         const file = await hydrateLoadedFile({
           ...loadedFile,
           projectRoot: projectRoot ?? loadedFile.projectRoot,
           relativePath: relativePath ?? loadedFile.relativePath
         });
+        if (!operationGateRef.current.isCurrent(operation)) return;
         upsertFile(file);
         setActiveLoadedFile(file);
         if (file.projectId) {
-          await refreshPersistedProjectGuide(file.projectId);
+          await refreshPersistedProjectGuide(file.projectId, () =>
+            operationGateRef.current.isCurrent(operation)
+          );
+          if (!operationGateRef.current.isCurrent(operation)) return;
         }
         setWorkspaceStatus(`已加载 ${file.relativePath ?? file.path}`);
       } catch (error) {
-        reportWorkspaceError(error);
+        if (operationGateRef.current.isCurrent(operation)) reportWorkspaceError(error);
       } finally {
-        setIsWorkspaceBusy(false);
-        setLoadingFileId(null);
+        if (operationGateRef.current.isCurrent(operation)) {
+          setIsWorkspaceBusy(false);
+          setLoadingFileId(null);
+        }
       }
     },
     [
@@ -291,37 +337,98 @@ export function useWorkspaceFiles() {
     (fileId: string) => {
       const file = files.find((item) => item.id === fileId) ?? files[0] ?? sampleFiles[0];
       if (file.capability?.canPreview === false) {
+        invalidateWorkspaceOperation(file.id);
         workspaceTouchedRef.current = true;
-        setSelectedFileId(file.id);
-        setSelectedExplanationId("");
-        setSelectedCodeSelection({ startLine: 1, endLine: 1 });
         setWorkspaceStatus(file.capability.reason ?? "该文件暂不支持预览。");
         return;
       }
       if (file.source === "local" && !file.isLoaded) {
         workspaceTouchedRef.current = true;
-        void loadAndSelectFile(file.path, file.relativePath, file.id, file.projectRoot);
+        const operation = operationGateRef.current.begin(file.id, true);
+        if (!file.grantId) {
+          setWorkspaceStatus("File authorization expired. Reopen the folder.");
+          return;
+        }
+        void loadAndSelectFile(
+          file.id,
+          file.grantId,
+          file.relativePath,
+          file.projectRoot,
+          operation
+        );
         return;
       }
+      invalidateWorkspaceOperation(file.id);
       setActiveLoadedFile(file);
     },
     [
       files,
+      invalidateWorkspaceOperation,
       loadAndSelectFile,
       setActiveLoadedFile,
-      setSelectedCodeSelection,
-      setSelectedExplanationId,
-      setSelectedFileId,
       setWorkspaceStatus
     ]
   );
 
+  const expandDirectory = useCallback(
+    async (directoryId: string) => {
+      const grantId = files.find((file) => file.grantId)?.grantId;
+      if (!grantId) {
+        setWorkspaceStatus("Folder authorization expired. Reopen the folder.");
+        return;
+      }
+      try {
+        const expanded = await expandGrantedDirectory(grantId, directoryId);
+        const directoryPrefix = projectNodes.find((node) => node.id === directoryId)?.relativePath;
+        const qualify = (relativePath: string) =>
+          directoryPrefix ? `${directoryPrefix}/${relativePath}` : relativePath;
+        const childNodes = expanded.nodes.map((node) => ({
+          ...node,
+          relativePath: qualify(node.relativePath),
+          parentId: node.parentId ?? directoryId
+        }));
+        setProjectNodes((current) => {
+          const byId = new Map(current.map((node) => [node.id, node]));
+          byId.set(directoryId, {
+            ...byId.get(directoryId)!,
+            lazy: false,
+            truncated: expanded.truncated
+          });
+          childNodes.forEach((node) => byId.set(node.id, node));
+          return [...byId.values()];
+        });
+        setFiles((current) => {
+          const byId = new Map(current.map((file) => [file.id, file]));
+          const projectRoot = current.find((file) => file.grantId === grantId)?.projectRoot;
+          const expandedForWorkspace = {
+            ...expanded,
+            grantId,
+            rootPath: projectRoot ?? expanded.rootPath,
+            files: expanded.files.map((file) => ({
+              ...file,
+              relativePath: qualify(file.relativePath)
+            }))
+          };
+          buildProjectOpenPlan(expandedForWorkspace).placeholders.forEach((file) =>
+            byId.set(file.id, file)
+          );
+          return [...byId.values()];
+        });
+      } catch (error) {
+        reportWorkspaceError(error);
+      }
+    },
+    [files, projectNodes, reportWorkspaceError, setWorkspaceStatus]
+  );
+
   async function openSampleProject() {
+    const operation = operationGateRef.current.begin("sample-project", true);
     workspaceTouchedRef.current = true;
     setIsWorkspaceBusy(true);
     setWorkspaceStatus("正在恢复无 API Key 示例项目");
     try {
       const hydratedSamples = await Promise.all(sampleFiles.map((file) => hydrateLoadedFile(file)));
+      if (!operationGateRef.current.isCurrent(operation)) return;
       setReadingStates({});
       setProjectNodes(sampleProjectNodes);
       setProjectGuide(deriveGuideProgress(sampleProjectGuide, hydratedSamples));
@@ -330,9 +437,9 @@ export function useWorkspaceFiles() {
       setActiveLoadedFile(hydratedSamples[0] ?? sampleFiles[0]);
       setWorkspaceStatus("示例项目已就绪：按推荐路径阅读入口、登录业务和用户数据");
     } catch (error) {
-      reportWorkspaceError(error);
+      if (operationGateRef.current.isCurrent(operation)) reportWorkspaceError(error);
     } finally {
-      setIsWorkspaceBusy(false);
+      if (operationGateRef.current.isCurrent(operation)) setIsWorkspaceBusy(false);
     }
   }
 
@@ -341,15 +448,18 @@ export function useWorkspaceFiles() {
       setWorkspaceStatus("本地文件打开需要在 Tauri 桌面端运行。");
       return;
     }
+    const operation = operationGateRef.current.begin("open-file", true);
     workspaceTouchedRef.current = true;
     setIsWorkspaceBusy(true);
     try {
       const file = await pickAndLoadCodeFile();
+      if (!operationGateRef.current.isCurrent(operation)) return;
       if (!file) {
         setWorkspaceStatus("已取消打开文件");
         return;
       }
       const hydratedFile = await hydrateLoadedFile(file);
+      if (!operationGateRef.current.isCurrent(operation)) return;
       setProjectNodes([]);
       setProjectGuide(undefined);
       setReadingStates({});
@@ -357,9 +467,9 @@ export function useWorkspaceFiles() {
       setActiveLoadedFile(hydratedFile);
       setWorkspaceStatus(`已加载 ${hydratedFile.path}`);
     } catch (error) {
-      reportWorkspaceError(error);
+      if (operationGateRef.current.isCurrent(operation)) reportWorkspaceError(error);
     } finally {
-      setIsWorkspaceBusy(false);
+      if (operationGateRef.current.isCurrent(operation)) setIsWorkspaceBusy(false);
     }
   }
 
@@ -368,10 +478,12 @@ export function useWorkspaceFiles() {
       setWorkspaceStatus("本地项目打开需要在 Tauri 桌面端运行。");
       return;
     }
+    const operation = operationGateRef.current.begin("open-project", true);
     workspaceTouchedRef.current = true;
     setIsWorkspaceBusy(true);
     try {
       const project = await pickAndScanProject();
+      if (!operationGateRef.current.isCurrent(operation)) return;
       if (!project) {
         setWorkspaceStatus("已取消打开项目");
         return;
@@ -388,7 +500,9 @@ export function useWorkspaceFiles() {
       let guideError = "";
       try {
         guide = await generateProjectGuide(project);
+        if (!operationGateRef.current.isCurrent(operation)) return;
       } catch (error) {
+        if (!operationGateRef.current.isCurrent(operation)) return;
         guideError = errorMessage(error);
       }
       setProjectGuide(guide);
@@ -411,7 +525,9 @@ export function useWorkspaceFiles() {
         activeFirstFile = await hydrateLoadedFile(
           await loadFirstAvailableProjectFile(project, projectOpenPlan.preferredFileId)
         );
+        if (!operationGateRef.current.isCurrent(operation)) return;
       } catch (error) {
+        if (!operationGateRef.current.isCurrent(operation)) return;
         const fallbackFileId = projectOpenPlan.preferredFileId ?? placeholders[0]?.id ?? "";
         setFiles(placeholders);
         setSelectedFileId(fallbackFileId);
@@ -428,15 +544,18 @@ export function useWorkspaceFiles() {
       );
       setActiveLoadedFile(activeFirstFile);
       if (guide && activeFirstFile.projectId) {
-        await refreshPersistedProjectGuide(activeFirstFile.projectId);
+        await refreshPersistedProjectGuide(activeFirstFile.projectId, () =>
+          operationGateRef.current.isCurrent(operation)
+        );
+        if (!operationGateRef.current.isCurrent(operation)) return;
       }
       setWorkspaceStatus(
         `${project.files.length} 个文件，${previewableFiles.length} 个可预览：${project.rootPath}${projectOpenPlan.scanNote}${guideError ? `；阅读路径生成失败：${guideError}` : ""}`
       );
     } catch (error) {
-      reportWorkspaceError(error);
+      if (operationGateRef.current.isCurrent(operation)) reportWorkspaceError(error);
     } finally {
-      setIsWorkspaceBusy(false);
+      if (operationGateRef.current.isCurrent(operation)) setIsWorkspaceBusy(false);
     }
   }
 
@@ -459,6 +578,7 @@ export function useWorkspaceFiles() {
     copyErrorDetail,
     databasePath,
     displayedProjectGuide,
+    expandDirectory,
     filesForExplorer,
     guideFocusToken,
     isWorkspaceBusy,
@@ -484,20 +604,7 @@ export function useWorkspaceFiles() {
 }
 
 function extractErrorDetail(error: unknown): string {
-  if (typeof error === "string") {
-    return error;
-  }
-  if (error instanceof Error) {
-    return `${error.name}: ${error.message}`;
-  }
-  if (error && typeof error === "object") {
-    try {
-      return JSON.stringify(error);
-    } catch {
-      return "<unserializable error>";
-    }
-  }
-  return "<unknown error>";
+  return safeErrorDetail(error);
 }
 
 async function loadFirstAvailableProjectFile(
@@ -514,9 +621,13 @@ async function loadFirstAvailableProjectFile(
     : previewableFiles;
   for (const file of orderedFiles) {
     try {
-      const loadedFile = await loadCodeFile(file.path, project.rootPath);
+      if (!project.grantId) {
+        throw new Error("The folder authorization has expired. Reopen the folder.");
+      }
+      const loadedFile = await loadCodeFile(file.id, project.grantId);
       return {
         ...loadedFile,
+        grantId: project.grantId,
         projectRoot: project.rootPath,
         relativePath: file.relativePath
       };

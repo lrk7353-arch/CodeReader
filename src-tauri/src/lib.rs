@@ -3,6 +3,7 @@ mod change_detection;
 mod code_service;
 mod context_builder;
 mod explanation_service;
+mod file_authority;
 mod llm_provider;
 mod persistence_service;
 mod project_guidance;
@@ -15,11 +16,15 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
-            code_service::load_code_file,
-            code_service::load_project_code_file,
-            code_service::scan_project,
-            context_builder::build_explanation_context,
+            code_service::register_file_grant,
+            code_service::register_directory_grant,
+            code_service::load_granted_file,
+            code_service::load_granted_project_file,
+            code_service::rescan_granted_project,
+            code_service::expand_granted_directory,
+            context_builder::build_granted_explanation_context,
             explanation_service::generate_explanation,
+            explanation_service::cancel_generation,
             explanation_service::get_model_config,
             explanation_service::reset_model_config,
             explanation_service::save_model_config,

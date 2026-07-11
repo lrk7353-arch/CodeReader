@@ -1,0 +1,207 @@
+name: Production Release
+
+on:
+  push:
+    tags:
+      - "v1.*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing v1.x tag to build
+        required: true
+        type: string
+
+permissions:
+  contents: write
+  id-token: write
+  attestations: write
+
+concurrency:
+  group: production-release-${{ github.ref }}-${{ inputs.tag }}
+  cancel-in-progress: false
+
+env:
+  RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+
+jobs:
+  validate:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ env.RELEASE_TAG }}
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - name: Install Tauri system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            build-essential \
+            curl \
+            wget \
+            file \
+            pkg-config \
+            libxdo-dev \
+            libssl-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            patchelf
+      - run: npm ci
+      - name: Verify tag and project versions
+        run: node scripts/release-assets.mjs verify-version --tag "$RELEASE_TAG"
+      - name: Run production quality gate
+        run: npm run verify:linux
+
+  build:
+    needs: validate
+    name: Package ${{ matrix.platform }} ${{ matrix.arch }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: windows
+            arch: x64
+            runner: windows-2022
+            target: x86_64-pc-windows-msvc
+            bundles: nsis,msi
+            linux: false
+          - platform: windows
+            arch: arm64
+            runner: windows-11-arm
+            target: aarch64-pc-windows-msvc
+            bundles: nsis,msi
+            linux: false
+          - platform: linux
+            arch: x64
+            runner: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+            bundles: appimage,deb,rpm
+            linux: true
+          - platform: linux
+            arch: arm64
+            runner: ubuntu-22.04-arm
+            target: aarch64-unknown-linux-gnu
+            bundles: appimage,deb,rpm
+            linux: true
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 90
+    env:
+      APPIMAGE_EXTRACT_AND_RUN: "1"
+
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ env.RELEASE_TAG }}
+
+      - name: Install Tauri system dependencies
+        if: matrix.linux
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            build-essential \
+            curl \
+            wget \
+            file \
+            pkg-config \
+            libxdo-dev \
+            libssl-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            patchelf \
+            rpm
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+          key: release-${{ matrix.target }}
+
+      - run: npm ci
+
+      - name: Build native packages
+        run: node scripts/tauri.mjs build --target ${{ matrix.target }} --bundles ${{ matrix.bundles }}
+
+      - name: Normalize release asset names
+        shell: bash
+        run: |
+          VERSION="${RELEASE_TAG#v}"
+          node scripts/release-assets.mjs collect \
+            --source "src-tauri/target/${{ matrix.target }}/release/bundle" \
+            --output "artifacts/${{ matrix.platform }}-${{ matrix.arch }}" \
+            --platform "${{ matrix.platform }}" \
+            --arch "${{ matrix.arch }}" \
+            --version "$VERSION"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: packages-${{ matrix.platform }}-${{ matrix.arch }}
+          path: artifacts/${{ matrix.platform }}-${{ matrix.arch }}/*
+          if-no-files-found: error
+          retention-days: 14
+
+  assemble:
+    needs: build
+    runs-on: ubuntu-22.04
+    timeout-minutes: 20
+    environment: production-release
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ env.RELEASE_TAG }}
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+      - uses: actions/download-artifact@v5
+        with:
+          pattern: packages-*
+          path: downloaded-assets
+          merge-multiple: true
+      - name: Assemble and verify the ten release packages
+        run: |
+          VERSION="${RELEASE_TAG#v}"
+          node scripts/release-assets.mjs assemble \
+            --input downloaded-assets \
+            --output release-assets \
+            --version "$VERSION"
+      - name: Generate dependency SBOM
+        uses: anchore/sbom-action@v0
+        with:
+          path: .
+          format: spdx-json
+          output-file: release-assets/CodeReader.spdx.json
+          upload-artifact: false
+          upload-release-assets: false
+      - name: Attest package build provenance
+        uses: actions/attest@v4
+        with:
+          subject-path: release-assets/CodeReader_*
+      - name: Attest package SBOM
+        uses: actions/attest@v4
+        with:
+          subject-path: release-assets/CodeReader_*
+          sbom-path: release-assets/CodeReader.spdx.json
+      - name: Create draft GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.RELEASE_TAG }}
+          name: CodeReader ${{ env.RELEASE_TAG }}
+          body_path: release-assets/RELEASE-NOTES.md
+          draft: true
+          prerelease: ${{ contains(env.RELEASE_TAG, '-rc.') }}
+          files: release-assets/*

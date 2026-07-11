@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
-import { describe, expect, it } from "vitest";
-import { buildFeedbackReport, redactErrorForReport } from "./useFeedbackReport";
+import { act, renderHook } from "@testing-library/react";
+import { describe, expect, it, vi } from "vitest";
+import { buildFeedbackReport, redactErrorForReport, useFeedbackReport } from "./useFeedbackReport";
 
 describe("buildFeedbackReport", () => {
   it("redacts the provider endpoint to scheme + host", () => {
@@ -43,7 +44,7 @@ describe("buildFeedbackReport", () => {
     expect(badReport.providerEndpoint).toBe("<unparseable>");
   });
 
-  it("caps recent workspace status to last 10", () => {
+  it("excludes free-form workspace status text", () => {
     const report = buildFeedbackReport({
       providerType: "openai-compatible",
       providerEndpoint: null,
@@ -53,9 +54,7 @@ describe("buildFeedbackReport", () => {
       lastGenerationError: null,
       recentWorkspaceStatus: Array.from({ length: 25 }, (_, i) => `status-${i}`)
     });
-    expect(report.recentWorkspaceStatus).toHaveLength(10);
-    expect(report.recentWorkspaceStatus[0]).toBe("status-15");
-    expect(report.recentWorkspaceStatus[9]).toBe("status-24");
+    expect(report.recentWorkspaceStatus).toEqual([]);
   });
 
   it("includes last workspace and generation errors", () => {
@@ -74,7 +73,7 @@ describe("buildFeedbackReport", () => {
       recentWorkspaceStatus: []
     });
     expect(report.lastWorkspaceError?.action).toBe("retry");
-    expect(report.lastGenerationError?.error).toBe("timeout");
+    expect(report.lastGenerationError?.error).toBe("generation failed (details redacted)");
   });
 
   it("never includes API key or full source", () => {
@@ -93,6 +92,42 @@ describe("buildFeedbackReport", () => {
     expect(json).not.toContain("API_KEY");
     expect(report.notes).toContain("redacted");
   });
+
+  it("removes privacy canaries from every free-form input", () => {
+    const report = buildFeedbackReport({
+      providerType: "openai-compatible",
+      providerEndpoint: "https://api.example.com/v1?token=sk-endpoint-secret",
+      providerModel: "model-safe",
+      providerConfigured: true,
+      lastWorkspaceError: {
+        message: "C:\\Users\\alice\\private\\main.ts sk-workspace-secret",
+        action: "retry",
+        detail: "SOURCE_CANARY=proprietary source"
+      },
+      lastGenerationError: {
+        explanationId: "exp-1",
+        status: "error",
+        error: "MODEL_RESPONSE_CANARY proprietary answer sk-model-secret",
+        timestamp: "2026-07-07T00:00:00.000Z"
+      },
+      recentWorkspaceStatus: [
+        "/home/alice/secret/project.ts",
+        "SOURCE_CANARY=proprietary source",
+        "MODEL_RESPONSE_CANARY proprietary answer"
+      ]
+    });
+    const json = JSON.stringify(report);
+    for (const canary of [
+      "alice",
+      "SOURCE_CANARY",
+      "MODEL_RESPONSE_CANARY",
+      "sk-workspace-secret",
+      "sk-model-secret",
+      "proprietary"
+    ]) {
+      expect(json).not.toContain(canary);
+    }
+  });
 });
 
 describe("redactErrorForReport", () => {
@@ -106,7 +141,7 @@ describe("redactErrorForReport", () => {
     const result = redactErrorForReport({ code: "llm.timeout", message: "timed out" });
     expect(result).not.toBeNull();
     expect(result?.action).toBe("retry");
-    expect(result?.message).toBe("timed out");
+    expect(result?.message).toBe("Error details redacted");
     expect(result?.detail).toBe("code: llm.timeout");
   });
 
@@ -127,14 +162,47 @@ describe("redactErrorForReport", () => {
       code: "fs.read_failed",
       message: "Failed to read file /home/user/secret-project/src/main.ts"
     });
-    expect(result?.message).not.toContain("/home/user/secret-project");
-    expect(result?.message).toContain("<path:main.ts>");
+    expect(result?.message).toBe("Error details redacted");
   });
 
   it("handles bare string errors with path redaction", () => {
     const result = redactErrorForReport("failed at C:\\Users\\admin\\project\\file.ts");
-    expect(result?.message).not.toContain("C:\\Users");
-    expect(result?.message).toContain("<path:file.ts>");
+    expect(result?.message).toBe("Error details redacted");
     expect(result?.detail).toBe("<no stable code>");
   });
 });
+
+describe("useFeedbackReport preview approval", () => {
+  it("does not write to the clipboard until a prepared preview is approved", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText } });
+    const { result } = renderHook(() => useFeedbackReport(feedbackOptions()));
+
+    await act(async () => {
+      expect(await result.current.copyPreparedReport()).toBe(false);
+    });
+    expect(writeText).not.toHaveBeenCalled();
+
+    act(() => {
+      result.current.preparePreview();
+    });
+    expect(result.current.previewOpen).toBe(true);
+    await act(async () => {
+      expect(await result.current.copyPreparedReport()).toBe(true);
+    });
+    expect(writeText).toHaveBeenCalledTimes(1);
+    expect(result.current.previewOpen).toBe(false);
+  });
+});
+
+function feedbackOptions() {
+  return {
+    providerType: "openai-compatible",
+    providerEndpoint: null,
+    providerModel: null,
+    providerConfigured: false,
+    lastWorkspaceError: null,
+    lastGenerationError: null,
+    recentWorkspaceStatus: []
+  };
+}

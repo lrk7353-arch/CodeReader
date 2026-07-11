@@ -7,11 +7,11 @@ vi.mock("../features/code-viewer/MonacoCodeViewer", () => ({
 }));
 
 describe("App", () => {
-  it("renders the browser-preview shell with the internal beta identity", () => {
+  it("renders the browser-preview shell with the release-candidate identity", () => {
     const markup = renderToStaticMarkup(<App />);
 
     expect(markup).toContain("CodeReader");
-    expect(markup).toContain("内测 · Beta 4");
+    expect(markup).toContain("1.0.0-rc.1");
     expect(markup).toContain("体验示例");
   });
 
@@ -30,7 +30,6 @@ describe("App", () => {
         />
       )
     ).toContain("打开模型设置");
-    // checkEncoding now renders an actionable "重新选择文件" button, not a hint.
     expect(
       renderToStaticMarkup(
         <WorkspaceStatusAction
@@ -44,7 +43,6 @@ describe("App", () => {
         />
       )
     ).toContain("重新选择文件");
-    // retry now renders an actionable "重试" button.
     expect(
       renderToStaticMarkup(
         <WorkspaceStatusAction
@@ -58,7 +56,6 @@ describe("App", () => {
         />
       )
     ).toContain("重试");
-    // When there is an error detail, a "复制错误详情" button appears.
     expect(
       renderToStaticMarkup(
         <WorkspaceStatusAction

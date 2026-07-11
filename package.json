@@ -1,6 +1,6 @@
 {
   "name": "codereader",
-  "version": "0.11.0-beta.4",
+  "version": "1.0.0-rc.1",
   "private": true,
   "type": "module",
   "scripts": {
@@ -20,6 +20,9 @@
     "repair:native": "node scripts/repair-native-deps.mjs",
     "icons:generate": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/generate-icons.ps1",
     "release:windows": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/release-windows.ps1",
+    "release:windows:arm64": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/release-windows.ps1 -Architecture arm64",
+    "release:linux": "node scripts/release-linux.mjs",
+    "release:verify": "node scripts/release-assets.mjs verify-version",
     "verify:signature": "node scripts/verify-authenticode.mjs",
     "verify:linux": "node scripts/verify-linux-dev.mjs",
     "evidence:linux": "node scripts/verify-linux-dev.mjs --json --output artifacts/linux-evidence/verify-linux.json",
@@ -28,7 +31,6 @@
   },
   "dependencies": {
     "@tauri-apps/api": "2.11.0",
-    "@tauri-apps/plugin-dialog": "^2.7.1",
     "lucide-react": "1.17.0",
     "monaco-editor": "0.53.0",
     "react": "19.2.7",

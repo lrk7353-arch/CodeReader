@@ -1,5 +1,4 @@
 import { invoke } from "@tauri-apps/api/core";
-import { open } from "@tauri-apps/plugin-dialog";
 import type {
   CodeFile,
   ChangeSummary,
@@ -24,45 +23,46 @@ export function isDesktopRuntime() {
 
 export async function pickAndLoadCodeFile(): Promise<CodeFile | null> {
   ensureDesktopRuntime();
-  const selectedPath = await open({
-    directory: false,
-    multiple: false
-  });
-  if (typeof selectedPath !== "string") {
-    return null;
-  }
-  return loadCodeFile(selectedPath);
+  const grant = await invoke<{ grantId: string; fileId: string } | null>("register_file_grant");
+  if (!grant) return null;
+  return loadCodeFile(grant.fileId, grant.grantId);
 }
 
 export async function pickAndScanProject(): Promise<ProjectScanResult | null> {
   ensureDesktopRuntime();
-  const selectedPath = await open({
-    directory: true,
-    multiple: false
-  });
-  if (typeof selectedPath !== "string") {
-    return null;
-  }
-  return scanProject(selectedPath);
+  const project = await invoke<ProjectScanResult | null>("register_directory_grant");
+  if (!project) return null;
+  return normalizeProjectScan(project);
 }
 
-export async function loadCodeFile(path: string, projectRoot?: string): Promise<CodeFile> {
+export async function expandGrantedDirectory(
+  grantId: string,
+  directoryId: string
+): Promise<ProjectScanResult> {
   ensureDesktopRuntime();
-  const file = projectRoot
-    ? await invoke<CodeFile>("load_project_code_file", { path, projectRoot })
-    : await invoke<CodeFile>("load_code_file", { path });
+  return normalizeProjectScan(
+    await invoke<ProjectScanResult>("expand_granted_directory", {
+      grantId,
+      directoryIdValue: directoryId
+    })
+  );
+}
+
+export async function loadCodeFile(fileId: string, grantId: string): Promise<CodeFile> {
+  ensureDesktopRuntime();
+  const file = await invoke<CodeFile>("load_granted_file", { fileId, grantId });
   const explanations = Array.isArray(file.explanations) ? file.explanations : [];
   const codeNodes = Array.isArray(file.codeNodes) ? file.codeNodes : [];
   if (import.meta.env.DEV && file.capability?.canExplain !== false && codeNodes.length === 0) {
     console.warn(
-      `[CodeReader] codeNodes empty for ${path} - parse may have failed or payload changed.`
+      `[CodeReader] codeNodes empty for ${fileId} - parse may have failed or payload changed.`
     );
   }
   return {
     ...file,
     explanations,
     codeNodes,
-    projectRoot: file.projectRoot ?? projectRoot,
+    grantId,
     isLoaded: true,
     source: "local"
   };
@@ -81,6 +81,7 @@ export async function hydrateCodeFilePersistence(
   }>("hydrate_code_file_persistence", {
     request: {
       file: {
+        grantId: file.grantId,
         ...file,
         codeNodes: file.codeNodes ?? []
       },
@@ -98,7 +99,13 @@ export async function hydrateCodeFilePersistence(
 
 export async function initializePersistence() {
   ensureDesktopRuntime();
-  return invoke<{ databasePath: string; initialized: boolean }>("initialize_persistence");
+  return invoke<{
+    databasePath: string;
+    initialized: boolean;
+    readOnlyRecovery: boolean;
+    backupPath: string | null;
+    recoveryMessage: string | null;
+  }>("initialize_persistence");
 }
 
 export async function generateProjectGuide(project: ProjectScanResult): Promise<ProjectGuide> {
@@ -131,14 +138,14 @@ export async function buildExplanationContext(
   explanation: Explanation
 ): Promise<ContextBundle> {
   ensureDesktopRuntime();
-  return invoke<ContextBundle>("build_explanation_context", {
+  if (!file.grantId || !file.snapshotId) {
+    throw new Error("The authorized file snapshot is unavailable. Reopen the file or folder.");
+  }
+  return invoke<ContextBundle>("build_granted_explanation_context", {
     request: {
-      file: {
-        path: file.path,
-        language: file.language,
-        code: file.code,
-        codeNodes: file.codeNodes ?? []
-      },
+      grantId: file.grantId,
+      fileId: file.id,
+      snapshotId: file.snapshotId,
       target: {
         targetType: explanation.targetType,
         targetName: explanation.targetName,
@@ -211,21 +218,22 @@ export async function rollbackPromptVersion(
 export async function generateExplanation(
   file: CodeFile,
   explanation: Explanation,
+  operationId: string,
   displayMode: "plain" | "detailed" = "plain"
 ): Promise<GenerateExplanationResult> {
   ensureDesktopRuntime();
   return invoke<GenerateExplanationResult>("generate_explanation", {
+    operationId,
     request: {
       file: {
+        grantId: file.grantId,
         id: file.id,
-        path: file.path,
+        path: "",
         projectId: file.projectId,
-        projectRoot: file.projectRoot,
-        language: file.language,
-        code: file.code,
-        fileHash: file.fileHash,
+        language: "plaintext",
+        code: "",
         snapshotId: file.snapshotId,
-        codeNodes: file.codeNodes ?? []
+        codeNodes: []
       },
       target: {
         id: explanation.id,
@@ -242,6 +250,11 @@ export async function generateExplanation(
       codeTransmissionApproved: true
     }
   });
+}
+
+export async function cancelGeneration(operationId: string): Promise<boolean> {
+  ensureDesktopRuntime();
+  return invoke<boolean>("cancel_generation", { operationId });
 }
 
 export async function persistReadingState(
@@ -282,9 +295,7 @@ export async function persistExplanationFeedback(
   });
 }
 
-async function scanProject(path: string): Promise<ProjectScanResult> {
-  ensureDesktopRuntime();
-  const project = await invoke<ProjectScanResult>("scan_project", { path });
+function normalizeProjectScan(project: ProjectScanResult): ProjectScanResult {
   return {
     ...project,
     files: Array.isArray(project.files) ? project.files : [],

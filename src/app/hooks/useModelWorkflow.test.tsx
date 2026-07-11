@@ -11,6 +11,7 @@ import type {
 import { useModelWorkflow } from "./useModelWorkflow";
 
 const mocks = vi.hoisted(() => ({
+  cancelGeneration: vi.fn(),
   generateExplanation: vi.fn(),
   getModelConfig: vi.fn(),
   isDesktopRuntime: vi.fn(() => true),
@@ -19,6 +20,7 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock("../../services/desktopWorkspace", () => ({
+  cancelGeneration: mocks.cancelGeneration,
   generateExplanation: mocks.generateExplanation,
   getModelConfig: mocks.getModelConfig,
   isDesktopRuntime: mocks.isDesktopRuntime,
@@ -28,6 +30,7 @@ vi.mock("../../services/desktopWorkspace", () => ({
 
 describe("useModelWorkflow generation flow", () => {
   beforeEach(() => {
+    mocks.cancelGeneration.mockReset();
     mocks.generateExplanation.mockReset();
     mocks.getModelConfig.mockReset();
     mocks.isDesktopRuntime.mockReset();
@@ -36,6 +39,7 @@ describe("useModelWorkflow generation flow", () => {
 
     mocks.isDesktopRuntime.mockReturnValue(true);
     mocks.getModelConfig.mockResolvedValue(modelConfig());
+    mocks.cancelGeneration.mockResolvedValue(true);
   });
 
   it("closes the confirmation dialog before waiting for model generation", async () => {
@@ -76,7 +80,11 @@ describe("useModelWorkflow generation flow", () => {
       expect(current(latest).generation.confirmOpen).toBe(false);
       expect(current(latest).generation.status).toBe("generating");
     });
-    expect(mocks.generateExplanation).toHaveBeenCalledWith(codeFile(), explanation());
+    expect(mocks.generateExplanation).toHaveBeenCalledWith(
+      codeFile(),
+      explanation(),
+      expect.stringMatching(/^generation:/)
+    );
 
     await act(async () => {
       deferred.resolve(generationResult());
@@ -87,6 +95,93 @@ describe("useModelWorkflow generation flow", () => {
       expect(current(latest).generation.status).toBe("idle");
     });
     expect(onGenerated).toHaveBeenCalledWith(generationResult());
+  });
+
+  it("ignores a generation result after the selected snapshot changes", async () => {
+    const deferred = createDeferred<GenerateExplanationResult>();
+    mocks.generateExplanation.mockReturnValue(deferred.promise);
+    const onGenerated = vi.fn();
+    const onWorkspaceStatus = vi.fn();
+    let latest: ReturnType<typeof useModelWorkflow> | undefined;
+
+    function Probe({ target }: { target: "first" | "second" }) {
+      const nextFile = {
+        ...codeFile(),
+        id: `file-${target}`,
+        fileHash: `hash-${target}`
+      };
+      const nextExplanation = {
+        ...explanation(),
+        id: `exp-${target}`,
+        filePath: nextFile.path
+      };
+      const nextContext = {
+        ...contextBundle(),
+        contextId: `ctx-${target}`
+      };
+      latest = useModelWorkflow({
+        file: nextFile,
+        explanation: nextExplanation,
+        contextBundle: nextContext,
+        contextStatus: "ready",
+        onGenerated,
+        onWorkspaceStatus
+      });
+      return null;
+    }
+
+    const view = render(<Probe target="first" />);
+    await waitFor(() => expect(current(latest).config?.configured).toBe(true));
+    act(() => current(latest).generation.request());
+    act(() => void current(latest).generation.confirm());
+    await waitFor(() => expect(current(latest).generation.status).toBe("generating"));
+
+    view.rerender(<Probe target="second" />);
+    await waitFor(() => expect(current(latest).generation.status).toBe("idle"));
+
+    await act(async () => {
+      deferred.resolve(generationResult());
+      await deferred.promise;
+    });
+
+    expect(onGenerated).not.toHaveBeenCalled();
+    expect(current(latest).generation.status).toBe("idle");
+    expect(onWorkspaceStatus).not.toHaveBeenCalledWith(expect.stringContaining("解释已生成"));
+  });
+
+  it("aborts the native request and suppresses a late result when cancelled", async () => {
+    const deferred = createDeferred<GenerateExplanationResult>();
+    mocks.generateExplanation.mockReturnValue(deferred.promise);
+    const onGenerated = vi.fn();
+    let latest: ReturnType<typeof useModelWorkflow> | undefined;
+
+    function Probe() {
+      latest = useModelWorkflow({
+        file: codeFile(),
+        explanation: explanation(),
+        contextBundle: contextBundle(),
+        contextStatus: "ready",
+        onGenerated,
+        onWorkspaceStatus: vi.fn()
+      });
+      return null;
+    }
+
+    render(<Probe />);
+    await waitFor(() => expect(current(latest).config?.configured).toBe(true));
+    act(() => current(latest).generation.request());
+    act(() => void current(latest).generation.confirm());
+    await waitFor(() => expect(current(latest).generation.status).toBe("generating"));
+
+    act(() => current(latest).generation.cancel());
+    expect(current(latest).generation.status).toBe("idle");
+    expect(mocks.cancelGeneration).toHaveBeenCalledWith(expect.stringMatching(/^generation:/));
+
+    await act(async () => {
+      deferred.resolve(generationResult());
+      await deferred.promise;
+    });
+    expect(onGenerated).not.toHaveBeenCalled();
   });
 });
 

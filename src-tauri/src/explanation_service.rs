@@ -5,7 +5,13 @@ use reqwest::Url;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 #[cfg(not(test))]
+use std::collections::HashMap;
+#[cfg(not(test))]
+use std::sync::{Mutex, OnceLock};
+#[cfg(not(test))]
 use tauri::AppHandle;
+#[cfg(not(test))]
+use tokio::task::AbortHandle;
 
 use crate::app_error::AppError;
 #[cfg(not(test))]
@@ -13,6 +19,8 @@ use crate::context_builder::ContextNodeInput;
 use crate::context_builder::{
     build_context_bundle, BuildContextRequest, ContextFileInput, ContextTargetInput,
 };
+#[cfg(not(test))]
+use crate::file_authority;
 use crate::llm_provider::{
     CompletionRequest, LlmProvider, OpenAiCompatibleProvider, ProviderMessage,
 };
@@ -58,6 +66,7 @@ pub struct GenerateExplanationRequest {
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct GenerationFileInput {
+    grant_id: Option<String>,
     id: String,
     path: String,
     project_id: Option<String>,
@@ -171,31 +180,62 @@ pub fn save_model_config(
         .unwrap_or(DEFAULT_TIMEOUT_SECONDS)
         .clamp(10, 300);
 
+    let mut credential_rollback = None;
     if let Some(api_key) = request.api_key.as_deref() {
         let api_key = api_key.trim();
         if !api_key.is_empty() {
+            let previous = read_api_key()?;
             SystemCredentialStore
                 .set_password(api_key)
                 .map_err(keyring_error)?;
+            credential_rollback = Some(previous);
         }
     }
 
     let database_path = persistence_service::database_path(&app).map_err(AppError::database)?;
-    let stored =
-        persistence_service::save_model_config(&database_path, &endpoint, model, timeout_seconds)
-            .map_err(AppError::database)?;
+    let stored = match persistence_service::save_model_config(
+        &database_path,
+        &endpoint,
+        model,
+        timeout_seconds,
+    ) {
+        Ok(stored) => stored,
+        Err(error) => {
+            if let Some(previous) = credential_rollback {
+                restore_credential(&SystemCredentialStore, previous)?;
+            }
+            return Err(AppError::database(error));
+        }
+    };
     model_config_payload(Some(stored))
+}
+
+fn restore_credential(
+    store: &impl CredentialStore,
+    previous: Option<String>,
+) -> Result<(), AppError> {
+    match previous {
+        Some(value) => store.set_password(&value).map_err(keyring_error),
+        None => match store.delete_credential() {
+            Ok(()) | Err(KeyringError::NoEntry) => Ok(()),
+            Err(error) => Err(keyring_error(error)),
+        },
+    }
 }
 
 #[cfg(not(test))]
 #[tauri::command]
 pub fn reset_model_config(app: AppHandle) -> Result<ModelConfigPayload, AppError> {
+    let previous_credential = read_api_key()?;
     match SystemCredentialStore.delete_credential() {
         Ok(()) | Err(KeyringError::NoEntry) => {}
         Err(error) => return Err(keyring_error(error)),
     }
     let database_path = persistence_service::database_path(&app).map_err(AppError::database)?;
-    persistence_service::delete_model_config(&database_path).map_err(AppError::database)?;
+    if let Err(error) = persistence_service::delete_model_config(&database_path) {
+        restore_credential(&SystemCredentialStore, previous_credential)?;
+        return Err(AppError::database(error));
+    }
     model_config_payload(None)
 }
 
@@ -305,13 +345,129 @@ pub struct ModelConnectionResult {
 #[tauri::command]
 pub async fn generate_explanation(
     app: AppHandle,
+    operation_id: String,
     request: GenerateExplanationRequest,
+) -> Result<GenerateExplanationPayload, AppError> {
+    if !valid_operation_id(&operation_id) {
+        return Err(AppError::configuration(
+            "The generation operation id is invalid.",
+        ));
+    }
+    let task = tauri::async_runtime::spawn(generate_explanation_inner(app, request));
+    let abort_handle = task.inner().abort_handle();
+    {
+        let mut registry = generation_operations().lock().map_err(|_| {
+            AppError::new(
+                "llm.operation_registry_unavailable",
+                "The generation task registry is unavailable.",
+            )
+        })?;
+        if let Some(previous) = registry.insert(operation_id.clone(), abort_handle) {
+            previous.abort();
+        }
+    }
+    let outcome = task.await;
+    let still_registered = generation_operations()
+        .lock()
+        .map(|mut registry| registry.remove(&operation_id).is_some())
+        .unwrap_or(false);
+    match outcome {
+        Ok(result) => result,
+        Err(_) if !still_registered => Err(AppError::new(
+            "llm.cancelled",
+            "The explanation generation was cancelled.",
+        )),
+        Err(_) => Err(AppError::new(
+            "llm.task_failed",
+            "The explanation generation task stopped unexpectedly.",
+        )),
+    }
+}
+
+#[cfg(not(test))]
+#[tauri::command]
+pub fn cancel_generation(operation_id: String) -> Result<bool, AppError> {
+    if !valid_operation_id(&operation_id) {
+        return Err(AppError::configuration(
+            "The generation operation id is invalid.",
+        ));
+    }
+    let handle = generation_operations()
+        .lock()
+        .map_err(|_| {
+            AppError::new(
+                "llm.operation_registry_unavailable",
+                "The generation task registry is unavailable.",
+            )
+        })?
+        .remove(&operation_id);
+    if let Some(handle) = handle {
+        handle.abort();
+        Ok(true)
+    } else {
+        Ok(false)
+    }
+}
+
+#[cfg(not(test))]
+static GENERATION_OPERATIONS: OnceLock<Mutex<HashMap<String, AbortHandle>>> = OnceLock::new();
+
+#[cfg(not(test))]
+fn generation_operations() -> &'static Mutex<HashMap<String, AbortHandle>> {
+    GENERATION_OPERATIONS.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn valid_operation_id(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= 200
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b':' | b'.'))
+}
+
+#[cfg(not(test))]
+async fn generate_explanation_inner(
+    app: AppHandle,
+    mut request: GenerateExplanationRequest,
 ) -> Result<GenerateExplanationPayload, AppError> {
     if !request.code_transmission_approved {
         return Err(AppError::configuration(
             "发送已取消：必须由用户明确确认后才能把上下文片段发送给模型。",
         ));
     }
+
+    let grant_id = request.file.grant_id.as_deref().ok_or_else(|| {
+        AppError::new(
+            "fs.authorization_invalid",
+            "Reopen the file before generating an explanation.",
+        )
+    })?;
+    let snapshot_id = request.file.snapshot_id.as_deref().ok_or_else(|| {
+        AppError::new(
+            "fs.authorization_invalid",
+            "The authorized file snapshot is unavailable.",
+        )
+    })?;
+    let snapshot = file_authority::resolve_snapshot(grant_id, &request.file.id, snapshot_id)?;
+    request.file.path = snapshot.path;
+    request.file.project_root = snapshot.project_root;
+    request.file.language = snapshot.language;
+    request.file.code = snapshot.code;
+    request.file.file_hash = Some(sha256_hex(&request.file.code));
+    request.file.code_nodes = snapshot
+        .nodes
+        .into_iter()
+        .map(|node| GenerationCodeNodeInput {
+            id: node.id,
+            node_type: node.node_type,
+            name: node.name,
+            start_line: node.start_line,
+            end_line: node.end_line,
+            symbol_id: node.symbol_id,
+            code_hash: node.code_hash,
+            anchor_text: node.anchor_text,
+        })
+        .collect();
 
     let database_path = persistence_service::database_path(&app).map_err(AppError::database)?;
     let stored = persistence_service::load_model_config(&database_path)
@@ -876,6 +1032,17 @@ fn non_empty(value: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn generation_operation_ids_are_bounded_and_transport_safe() {
+        assert!(valid_operation_id("generation:1:42"));
+        assert!(valid_operation_id(
+            "generation:550e8400-e29b-41d4-a716-446655440000"
+        ));
+        assert!(!valid_operation_id(""));
+        assert!(!valid_operation_id("generation/id"));
+        assert!(!valid_operation_id(&"x".repeat(201)));
+    }
     use crate::context_builder::ContextBudgetInput;
     use std::io::{Read, Write};
     use std::net::TcpListener;

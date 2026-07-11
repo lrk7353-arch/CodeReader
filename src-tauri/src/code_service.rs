@@ -1,12 +1,16 @@
 #![cfg_attr(test, allow(dead_code))]
 
+use base64::Engine;
 use serde::Serialize;
 use std::io::Read;
 use std::path::{Path, PathBuf};
+#[cfg(not(test))]
+use tauri_plugin_dialog::DialogExt;
 use tree_sitter::{Language, Node, Parser};
 use walkdir::{DirEntry, WalkDir};
 
 use crate::app_error::AppError;
+use crate::file_authority;
 use crate::utils::sha256_hex;
 
 mod language;
@@ -106,6 +110,7 @@ const TEXT_FILE_NAMES: &[&str] = &[
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CodeFilePayload {
+    grant_id: Option<String>,
     id: String,
     name: String,
     path: String,
@@ -114,6 +119,7 @@ pub struct CodeFilePayload {
     relative_path: Option<String>,
     language: String,
     code: String,
+    image_data_url: Option<String>,
     file_hash: String,
     snapshot_id: String,
     code_nodes: Vec<CodeNodePayload>,
@@ -139,6 +145,8 @@ pub struct CodeNodePayload {
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ProjectScanPayload {
+    grant_id: Option<String>,
+    project_id: String,
     root_path: String,
     files: Vec<ProjectFilePayload>,
     nodes: Vec<ProjectTreeNodePayload>,
@@ -166,10 +174,127 @@ pub struct ProjectTreeNodePayload {
     path: String,
     relative_path: String,
     kind: String,
+    lazy: bool,
+    truncated: bool,
     capability: Option<FileCapabilityPayload>,
 }
 
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FileGrantPayload {
+    grant_id: String,
+    file_id: String,
+}
+
+#[cfg(not(test))]
+#[tauri::command]
+pub async fn register_file_grant(
+    app: tauri::AppHandle,
+) -> Result<Option<FileGrantPayload>, AppError> {
+    let selected = app.dialog().file().blocking_pick_file();
+    let Some(selected) = selected else {
+        return Ok(None);
+    };
+    let selected = selected
+        .into_path()
+        .map_err(|_| AppError::fs_path_resolve_failed("The selected file path is invalid."))?;
+    let path = canonicalize_input_path(&selected.to_string_lossy(), "file path")
+        .map_err(AppError::fs_path_resolve_failed)?;
+    if !path.is_file() {
+        return Err(AppError::fs_not_a_file(
+            "The selected path is not a readable file.",
+        ));
+    }
+    let id = file_id(&path);
+    let grant_id = file_authority::register_file(path, id.clone())?;
+    Ok(Some(FileGrantPayload {
+        grant_id,
+        file_id: id,
+    }))
+}
+
+#[cfg(not(test))]
+#[tauri::command]
+pub async fn register_directory_grant(
+    app: tauri::AppHandle,
+) -> Result<Option<ProjectScanPayload>, AppError> {
+    let selected = app.dialog().file().blocking_pick_folder();
+    let Some(selected) = selected else {
+        return Ok(None);
+    };
+    let selected = selected
+        .into_path()
+        .map_err(|_| AppError::fs_path_resolve_failed("The selected folder path is invalid."))?;
+    let root = canonicalize_input_path(&selected.to_string_lossy(), "project path")
+        .map_err(AppError::fs_path_resolve_failed)?;
+    if !root.is_dir() {
+        return Err(AppError::fs_not_a_dir(
+            "The selected path is not a project folder.",
+        ));
+    }
+    let grant_id = file_authority::register_directory(root.clone())?;
+    scan_project_root(root, Some(grant_id)).map(Some)
+}
+
 #[cfg_attr(not(test), tauri::command)]
+pub fn load_granted_file(grant_id: String, file_id: String) -> Result<CodeFilePayload, AppError> {
+    let (path, root) = file_authority::resolve_file(&grant_id, &file_id)?;
+    let mut payload = load_file_payload(path, root.as_deref()).map_err(fs_error_for_load)?;
+    payload.grant_id = Some(grant_id);
+    file_authority::register_snapshot(
+        payload.snapshot_id.clone(),
+        file_authority::FileSnapshot {
+            grant_id: payload.grant_id.clone().unwrap_or_default(),
+            file_id: payload.id.clone(),
+            path: payload.path.clone(),
+            project_root: Some(payload.project_root.clone()),
+            language: payload.language.clone(),
+            code: payload.code.clone(),
+            nodes: payload
+                .code_nodes
+                .iter()
+                .map(|node| file_authority::SnapshotNode {
+                    id: node.id.clone(),
+                    node_type: node.node_type.clone(),
+                    name: node.name.clone(),
+                    start_line: node.start_line,
+                    end_line: node.end_line,
+                    symbol_id: node.symbol_id.clone(),
+                    anchor_text: node.anchor_text.clone(),
+                    code_hash: node.code_hash.clone(),
+                })
+                .collect(),
+        },
+    )?;
+    Ok(payload)
+}
+
+#[cfg_attr(not(test), tauri::command)]
+pub fn load_granted_project_file(
+    grant_id: String,
+    file_id: String,
+) -> Result<CodeFilePayload, AppError> {
+    load_granted_file(grant_id, file_id)
+}
+
+#[cfg_attr(not(test), tauri::command)]
+pub fn rescan_granted_project(grant_id: String) -> Result<ProjectScanPayload, AppError> {
+    let root = file_authority::resolve_directory(&grant_id, None, directory_id)?;
+    scan_project_root(root, Some(grant_id))
+}
+
+#[cfg_attr(not(test), tauri::command)]
+pub fn expand_granted_directory(
+    grant_id: String,
+    directory_id_value: String,
+) -> Result<ProjectScanPayload, AppError> {
+    let directory =
+        file_authority::resolve_directory(&grant_id, Some(&directory_id_value), directory_id)?;
+    // Explicit expansion is still bounded; callers merge the returned nodes.
+    scan_project_root_with_budget(directory, Some(grant_id), 4, 2_000, false)
+}
+
+#[cfg(test)]
 pub fn load_code_file(path: String) -> Result<CodeFilePayload, AppError> {
     let path =
         canonicalize_input_path(&path, "file path").map_err(AppError::fs_path_resolve_failed)?;
@@ -181,7 +306,7 @@ pub fn load_code_file(path: String) -> Result<CodeFilePayload, AppError> {
     load_file_payload(path, None).map_err(fs_error_for_load)
 }
 
-#[cfg_attr(not(test), tauri::command)]
+#[cfg(test)]
 pub fn load_project_code_file(
     path: String,
     project_root: String,
@@ -228,7 +353,7 @@ fn fs_error_for_load(message: String) -> AppError {
     }
 }
 
-#[cfg_attr(not(test), tauri::command)]
+#[cfg(test)]
 pub fn scan_project(path: String) -> Result<ProjectScanPayload, AppError> {
     let root =
         canonicalize_input_path(&path, "project path").map_err(AppError::fs_path_resolve_failed)?;
@@ -238,16 +363,38 @@ pub fn scan_project(path: String) -> Result<ProjectScanPayload, AppError> {
         ));
     }
 
+    scan_project_root(root, None)
+}
+
+fn scan_project_root(
+    root: PathBuf,
+    grant_id: Option<String>,
+) -> Result<ProjectScanPayload, AppError> {
+    scan_project_root_with_budget(
+        root,
+        grant_id,
+        PROJECT_SCAN_MAX_DEPTH,
+        PROJECT_SCAN_MAX_ENTRIES,
+        true,
+    )
+}
+
+fn scan_project_root_with_budget(
+    root: PathBuf,
+    grant_id: Option<String>,
+    max_depth: usize,
+    max_entries: usize,
+    collapse_heavy_dirs: bool,
+) -> Result<ProjectScanPayload, AppError> {
     let mut files = Vec::new();
     let mut nodes = Vec::new();
     let mut truncated = false;
     let mut skipped_entries = 0;
-    for entry in WalkDir::new(&root)
-        .max_depth(PROJECT_SCAN_MAX_DEPTH)
+    let mut walker = WalkDir::new(&root)
+        .max_depth(max_depth)
         .follow_links(false)
-        .into_iter()
-        .filter_entry(|entry| !is_ignored_entry(entry))
-    {
+        .into_iter();
+    while let Some(entry) = walker.next() {
         let entry = match entry {
             Ok(entry) => entry,
             Err(_) => {
@@ -258,7 +405,7 @@ pub fn scan_project(path: String) -> Result<ProjectScanPayload, AppError> {
         if entry.depth() == 0 {
             continue;
         }
-        if nodes.len() >= PROJECT_SCAN_MAX_ENTRIES {
+        if nodes.len() >= max_entries {
             truncated = true;
             break;
         }
@@ -266,7 +413,11 @@ pub fn scan_project(path: String) -> Result<ProjectScanPayload, AppError> {
         let path = entry.path();
         let relative_path = relative_path(path, &root);
         if entry.file_type().is_dir() {
-            if entry.depth() == PROJECT_SCAN_MAX_DEPTH
+            let lazy = collapse_heavy_dirs && is_ignored_entry(&entry);
+            if lazy {
+                walker.skip_current_dir();
+            }
+            if entry.depth() == max_depth
                 && std::fs::read_dir(path)
                     .ok()
                     .and_then(|mut entries| entries.next())
@@ -281,6 +432,8 @@ pub fn scan_project(path: String) -> Result<ProjectScanPayload, AppError> {
                 path: display_path(path),
                 relative_path,
                 kind: "directory".to_string(),
+                lazy,
+                truncated: lazy,
                 capability: None,
             });
             continue;
@@ -296,6 +449,9 @@ pub fn scan_project(path: String) -> Result<ProjectScanPayload, AppError> {
             language: capability.language.clone(),
             capability: capability.clone(),
         };
+        if let Some(grant_id) = grant_id.as_deref() {
+            file_authority::register_project_file(grant_id, file.id.clone(), path.to_path_buf())?;
+        }
         nodes.push(ProjectTreeNodePayload {
             id: file.id.clone(),
             parent_id: parent_node_id(path, &root),
@@ -303,6 +459,8 @@ pub fn scan_project(path: String) -> Result<ProjectScanPayload, AppError> {
             path: file.path.clone(),
             relative_path,
             kind: "file".to_string(),
+            lazy: false,
+            truncated: false,
             capability: Some(capability),
         });
         files.push(file);
@@ -316,6 +474,8 @@ pub fn scan_project(path: String) -> Result<ProjectScanPayload, AppError> {
     });
 
     Ok(ProjectScanPayload {
+        grant_id,
+        project_id: project_id(&root),
         root_path: display_path(&root),
         files,
         nodes,
@@ -336,6 +496,29 @@ fn load_file_payload(
             .reason
             .clone()
             .unwrap_or_else(|| "This file cannot be previewed.".to_string()));
+    }
+    if capability.preview_kind == "image" {
+        let bytes =
+            std::fs::read(&path).map_err(|error| format!("Failed to read file: {error}"))?;
+        let mime = match path
+            .extension()
+            .and_then(|value| value.to_str())
+            .unwrap_or_default()
+            .to_ascii_lowercase()
+            .as_str()
+        {
+            "gif" => "image/gif",
+            "jpg" | "jpeg" => "image/jpeg",
+            "webp" => "image/webp",
+            "bmp" => "image/bmp",
+            _ => "image/png",
+        };
+        let mut payload = file_payload(path, project_root, None, capability, String::new());
+        payload.image_data_url = Some(format!(
+            "data:{mime};base64,{}",
+            base64::engine::general_purpose::STANDARD.encode(bytes)
+        ));
+        return Ok(payload);
     }
     let code = read_utf8_preview(&path)?;
 
@@ -395,6 +578,7 @@ fn file_payload(
     let project_root_display = display_path(&project_root_path);
 
     CodeFilePayload {
+        grant_id: None,
         id: file_id(&path),
         name: file_name(&path),
         path: display_path(&path),
@@ -403,6 +587,7 @@ fn file_payload(
         relative_path: project_root.map(|root| relative_path(&path, root)),
         language: capability.language.clone(),
         code,
+        image_data_url: None,
         snapshot_id: format!("snapshot:{}", &file_hash[..16]),
         file_hash,
         code_nodes: parse_result.nodes,
@@ -1184,8 +1369,9 @@ WHERE created_at < CURRENT_DATE;
         assert_eq!(readme.capability.preview_kind, "text");
         assert!(readme.capability.can_preview);
         assert!(!readme.capability.can_explain);
-        assert_eq!(binary.capability.preview_kind, "unavailable");
-        assert!(!binary.capability.can_preview);
+        assert_eq!(binary.capability.preview_kind, "image");
+        assert!(binary.capability.can_preview);
+        assert!(!binary.capability.can_explain);
 
         let _ = std::fs::remove_dir_all(&root);
     }
@@ -1211,13 +1397,14 @@ WHERE created_at < CURRENT_DATE;
     }
 
     #[test]
-    fn rejects_binary_large_and_symlink_preview_capabilities() {
-        let binary = classify_file(Path::new("image.png"), 512, false);
+    fn classifies_image_large_and_symlink_preview_capabilities() {
+        let image = classify_file(Path::new("image.png"), 512, false);
         let large = classify_file(Path::new("README.md"), MAX_PREVIEW_BYTES + 1, false);
         let symlink = classify_file(Path::new("linked.ts"), 32, true);
 
-        assert_eq!(binary.preview_kind, "unavailable");
-        assert!(!binary.can_preview);
+        assert_eq!(image.preview_kind, "image");
+        assert!(image.can_preview);
+        assert!(!image.can_explain);
         assert!(!large.can_preview);
         assert!(large
             .reason
