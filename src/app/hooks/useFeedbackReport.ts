@@ -1,6 +1,6 @@
 import { useCallback, useState } from "react";
 import packageJson from "../../../package.json";
-import { errorAction, parseAppError, sanitizeErrorText, type ErrorAction } from "../appError";
+import { errorAction, parseAppError, type ErrorAction } from "../appError";
 import { isDesktopRuntime } from "../../services/desktopWorkspace";
 
 export interface FeedbackReport {
@@ -47,10 +47,13 @@ function redactEndpoint(endpoint: string | null): string | null {
   if (!endpoint) {
     return null;
   }
-  // Keep scheme + host, drop path/query that might carry sensitive routing.
   try {
     const url = new URL(endpoint);
-    return `${url.protocol}//${url.host}`;
+    const loopbackHosts = new Set(["127.0.0.1", "localhost", "[::1]"]);
+    if (loopbackHosts.has(url.hostname)) {
+      return "local-loopback";
+    }
+    return url.protocol === "https:" ? "remote-https" : "remote-other";
   } catch {
     return "<unparseable>";
   }
@@ -79,7 +82,7 @@ export function buildFeedbackReport(options: UseFeedbackReportOptions): Feedback
     desktopRuntime: isDesktopRuntime(),
     providerType: sanitizeIdentifier(options.providerType),
     providerEndpoint: redactEndpoint(options.providerEndpoint),
-    providerModel: options.providerModel ? sanitizeErrorText(options.providerModel) : null,
+    providerModel: options.providerModel ? sanitizeIdentifier(options.providerModel) : null,
     providerConfigured: options.providerConfigured,
     lastWorkspaceError: workspaceError,
     lastGenerationError: generationError,
@@ -87,7 +90,7 @@ export function buildFeedbackReport(options: UseFeedbackReportOptions): Feedback
     // It is deliberately excluded until statuses are stable codes end-to-end.
     recentWorkspaceStatus: [],
     notes:
-      "This report is redacted: no API key, no source code, no full prompt, no full model response. Only stable error codes and redacted endpoint host are included."
+      "This report is redacted: no API key, no source code, no full prompt, no full model response. Only stable error codes and a coarse provider destination class are included."
   };
 }
 

@@ -50,12 +50,15 @@
     "copyright": "Copyright 2026 CodeReader contributors",
     "shortDescription": "Local-first AI-assisted code and Markdown reader.",
     "longDescription": "CodeReader helps people inspect local source trees, read code and Markdown, generate bounded reviewable explanations, retain reading progress, and detect stale explanations after files change.",
-    "icon": [
-      "icons/32x32.png",
-      "icons/128x128.png",
-      "icons/128x128@2x.png",
-      "icons/icon.ico"
-    ],
+    "icon": ["icons/32x32.png", "icons/128x128.png", "icons/128x128@2x.png", "icons/icon.ico"],
+    "linux": {
+      "deb": {
+        "depends": ["libwebkit2gtk-4.1-0", "libgtk-3-0"]
+      },
+      "rpm": {
+        "depends": ["webkit2gtk4.1", "gtk3"]
+      }
+    },
     "windows": {
       "allowDowngrades": false,
       "webviewInstallMode": {
@@ -64,10 +67,7 @@
       },
       "nsis": {
         "installMode": "currentUser",
-        "languages": [
-          "SimpChinese",
-          "English"
-        ],
+        "languages": ["SimpChinese", "English"],
         "displayLanguageSelector": false,
         "compression": "lzma",
         "startMenuFolder": "CodeReader",

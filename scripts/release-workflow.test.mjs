@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 const quality = readFileSync(".github/workflows/quality.yml", "utf8");
 const release = readFileSync(".github/workflows/release.yml", "utf8");
 const security = readFileSync(".github/workflows/security.yml", "utf8");
+const tauri = readFileSync("src-tauri/tauri.conf.json", "utf8");
 
 describe("production workflows", () => {
   it("compiles the supported native platform matrix", () => {
@@ -25,22 +26,58 @@ describe("production workflows", () => {
     expect(release).toContain("bundles: appimage,deb,rpm");
     expect(release).toContain("environment: production-release");
     expect(release).toContain("draft: true");
-    expect(release).toContain("actions/attest@v4");
+    expect(release).toContain("actions/attest@a1948c3f048ba23858d222213b7c278aabede763");
     expect(release).toContain("sbom-path: release-assets/CodeReader.spdx.json");
+    expect(release).toContain("release-evidence.mjs verify-sbom");
+  });
+
+  it("requires target-bound package smoke evidence before release approval", () => {
+    expect(release).toContain("windows-package-smoke.ps1");
+    expect(release).toContain("linux-package-smoke.mjs");
+    expect(release).toContain("verify-native-smoke:");
+    expect(release).toContain("release-evidence.mjs verify");
+    expect(release).toContain("subject-path: release-assets/native-smoke-*.json");
+    expect(release.indexOf("verify-native-smoke:")).toBeLessThan(
+      release.indexOf("environment: production-release")
+    );
+    expect(release).toContain("needs: verify-native-smoke");
+    expect(tauri).toContain('"libwebkit2gtk-4.1-0"');
+    expect(tauri).toContain('"webkit2gtk4.1"');
+  });
+
+  it("uses immutable tag checkouts, locked dependencies, and least privilege", () => {
+    expect(release).toContain("ref: refs/tags/${{ env.RELEASE_TAG }}");
+    expect(release).toContain("cargo metadata --locked");
+    expect(release).toContain("-- --locked");
+    expect(release).toContain("permissions:\n  contents: read");
+    expect(release).toContain("assemble:\n    needs: verify-native-smoke");
+    expect(release).toContain("contents: write");
+    expect(release).toContain("id-token: write");
+    expect(release).toContain("attestations: write");
   });
 
   it("runs code, dependency, and secret security checks", () => {
-    expect(security).toContain("github/codeql-action/init@v4");
+    expect(security).toContain(
+      "github/codeql-action/init@99df26d4f13ea111d4ec1a7dddef6063f76b97e9"
+    );
     expect(security).toContain("npm audit --omit=dev");
-    expect(security).toContain("rustsec/audit-check@v2.0.0");
-    expect(security).toContain("gitleaks/gitleaks-action@v2");
-    expect(security).toContain("actions/dependency-review-action@v4");
+    expect(security).toContain("rustsec/audit-check@69366f33c96575abad1ee0dba8212993eecbe998");
+    expect(security).toContain("gitleaks/gitleaks-action@ff98106e4c7b2bc287b24eaf42907196329070c7");
+    expect(security).toContain(
+      "actions/dependency-review-action@2031cfc080254a8a887f58cffee85186f0e49e48"
+    );
   });
 
-  it("uses current Node 24-based core action majors", () => {
-    expect(`${quality}\n${release}\n${security}`).not.toContain("actions/checkout@v4");
-    expect(`${quality}\n${release}\n${security}`).not.toContain("actions/setup-node@v4");
-    expect(`${quality}\n${release}\n${security}`).toContain("actions/checkout@v5");
-    expect(`${quality}\n${release}\n${security}`).toContain("actions/setup-node@v5");
+  it("pins every action to an immutable full commit SHA", () => {
+    const workflows = `${quality}\n${release}\n${security}`;
+    const actionRefs = [...workflows.matchAll(/^\s*-?\s*uses:\s+[^@\s]+@([^\s#]+)/gm)].map(
+      (match) => match[1]
+    );
+    expect(actionRefs.length).toBeGreaterThan(0);
+    for (const ref of actionRefs) {
+      expect(ref).toMatch(/^[0-9a-f]{40}$/);
+    }
+    expect(workflows).toContain("# v5");
+    expect(workflows).toContain("# stable");
   });
 });

@@ -16,4 +16,13 @@ describe("createOperationGate", () => {
     gate.invalidate("snapshot-1");
     expect(gate.isCurrent(operation)).toBe(false);
   });
+
+  it("rejects a lazy-directory result after another workspace opens", () => {
+    const gate = createOperationGate();
+    const expandProjectA = gate.begin("expand:grant-a:node_modules");
+    const openProjectB = gate.begin("open-project", true);
+
+    expect(gate.isCurrent(expandProjectA)).toBe(false);
+    expect(gate.isCurrent(openProjectB)).toBe(true);
+  });
 });

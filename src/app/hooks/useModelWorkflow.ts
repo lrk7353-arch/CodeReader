@@ -306,13 +306,9 @@ function formatGenerationErrorSummary(entry: {
   timestamp: string;
 }): string {
   return [
-    "CodeReader 解释生成错误摘要",
-    `时间: ${entry.timestamp}`,
-    `目标: ${entry.explanationId}`,
-    `状态: ${entry.status}`,
-    `错误: ${entry.error}`,
-    "",
-    "错误详情:",
+    "CodeReader generation diagnostic",
+    `timestamp: ${entry.timestamp}`,
+    `status: ${entry.status}`,
     entry.errorDetail
   ].join("\n");
 }

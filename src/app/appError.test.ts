@@ -31,7 +31,7 @@ describe("parseAppError", () => {
       code: "fs.read_failed",
       message: "failed /home/alice/private/main.ts token=sk-super-secret"
     });
-    expect(parsed.message).toContain("<path:main.ts>");
+    expect(parsed.message).toContain("<path:redacted>");
     expect(parsed.message).toContain("<secret>");
     expect(parsed.message).not.toContain("alice");
     expect(parsed.message).not.toContain("sk-super-secret");
@@ -43,10 +43,30 @@ describe("parseAppError", () => {
       message: "request failed",
       body: { response: "MODEL_RESPONSE_CANARY", apiKey: "sk-secret-value" }
     });
-    expect(detail).toBe("code: llm.http; message: 模型服务返回错误");
+    expect(detail).toBe("code: llm.http");
     expect(detail).not.toContain("MODEL_RESPONSE_CANARY");
     expect(detail).not.toContain("sk-secret-value");
   });
+  it("redacts arbitrary POSIX, Windows, UNC and home-relative paths", () => {
+    for (const path of [
+      "/workspace/alice/private.ts",
+      "/private/var/alice/model.md",
+      "D:\\profiles\\alice\\secret.sql",
+      "\\\\server\\alice\\private.py",
+      "~/alice/private.txt"
+    ]) {
+      const parsed = parseAppError(`failed at ${path}`);
+      expect(parsed.message).toContain("<path:redacted>");
+      expect(parsed.message).not.toContain("alice");
+    }
+  });
+
+  it("does not mistake a remote URL path for a local absolute path", () => {
+    expect(parseAppError("request to https://api.example.com/v1 failed").message).toContain(
+      "https://api.example.com/v1"
+    );
+  });
+
   it("reads a native Error message", () => {
     expect(parseAppError(new Error("native failure"))).toEqual({ message: "native failure" });
   });

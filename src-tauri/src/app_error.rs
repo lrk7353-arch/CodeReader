@@ -3,6 +3,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::llm_provider::ProviderError;
 
+pub(crate) const STALE_GENERATION_PERSISTENCE_ERROR: &str = "stale generation result";
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct AppError {
@@ -44,7 +46,10 @@ impl AppError {
         &self.message
     }
 
-    pub(crate) fn database(_internal_message: impl Into<String>) -> Self {
+    pub(crate) fn database(internal_message: impl Into<String>) -> Self {
+        if internal_message.into() == STALE_GENERATION_PERSISTENCE_ERROR {
+            return Self::stale_generation();
+        }
         Self::new("db.error", "无法访问本地数据。")
             .retryable(true)
             .with_action("retry_or_open_recovery")
@@ -66,6 +71,14 @@ impl AppError {
 
     pub(crate) fn llm_invalid_response(message: impl Into<String>) -> Self {
         Self::new("llm.invalid_response", message)
+    }
+
+    pub(crate) fn stale_generation() -> Self {
+        Self::new(
+            "llm.stale_result",
+            "The file changed while the explanation was being generated. The stale result was discarded.",
+        )
+        .with_action("regenerate_current_target")
     }
 
     pub(crate) fn fs_not_a_file(message: impl Into<String>) -> Self {
@@ -170,6 +183,11 @@ mod tests {
         assert_eq!(
             AppError::llm_invalid_response("failed").code,
             "llm.invalid_response"
+        );
+        assert_eq!(AppError::stale_generation().code, "llm.stale_result");
+        assert_eq!(
+            AppError::database(STALE_GENERATION_PERSISTENCE_ERROR).code,
+            "llm.stale_result"
         );
     }
 

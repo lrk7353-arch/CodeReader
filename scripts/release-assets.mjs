@@ -142,7 +142,7 @@ function releaseNotes(version, assets) {
     candidate
       ? "This is a release candidate for production validation."
       : "This is the first production-grade CodeReader release."
-  }\n\n## Supported systems\n\n- Windows 10 22H2 and Windows 11, x64 or ARM64; Microsoft Edge WebView2 Evergreen Runtime is required.\n- Linux with glibc 2.35 or newer and WebKitGTK 4.1; Ubuntu 22.04+, Debian 12+, and Fedora 39+ are the official baseline.\n- macOS is planned for the next version and is not included in this release.\n\n## Choose an installer\n\n- Windows: use the NSIS \`.exe\` for the simplest per-user install or the \`.msi\` for managed installation.\n- Linux: choose AppImage, \`.deb\`, or \`.rpm\` for your distribution and architecture. Package managers resolve runtime dependencies; AppImage users provide WebKitGTK 4.1 on the host.\n\n## Windows signing notice\n\nThe Windows packages in this release are not Authenticode-signed unless the release explicitly states otherwise. Windows may show SmartScreen or unknown-publisher warnings. Verify \`SHA256SUMS\` and the GitHub artifact attestation before installing.\n\n## Verification\n\n\`\`\`bash\nsha256sum -c SHA256SUMS\ngh attestation verify CodeReader_${version}_<platform>_<arch>.<format> -R lrk7353-arch/CodeReader\n\`\`\`\n\nAssets included: ${assets.length}.\n`;
+  }\n\n## Supported systems\n\n- Windows 10 22H2 and Windows 11, x64 or ARM64; Microsoft Edge WebView2 Evergreen Runtime is required.\n- Linux with glibc 2.35 or newer and WebKitGTK 4.1; Ubuntu 22.04+, Debian 12+, and Fedora 39+ are the official baseline.\n- macOS is planned for the next version and is not included in this release.\n\n## Choose an installer\n\n- Windows: use the NSIS \`.exe\` for the simplest per-user install or the \`.msi\` for managed installation.\n- Linux: choose AppImage, \`.deb\`, or \`.rpm\` for your distribution and architecture. Package managers resolve runtime dependencies; AppImage users provide WebKitGTK 4.1 on the host.\n\n## Automated package smoke scope\n\nThe four \`native-smoke-*.json\` records are bound to this tag, commit, architecture, and package hashes. They cover package metadata plus automated install, window launch, and uninstall checks on native GitHub-hosted runners. They do not replace the maintainer's native-hardware checks for picker interaction, database migration, explanation flow, restart persistence, or uninstall data policy.\n\n## Windows signing notice\n\nThe Windows packages in this release are not Authenticode-signed unless the release explicitly states otherwise. Windows may show SmartScreen or unknown-publisher warnings. Verify \`SHA256SUMS\` and the GitHub artifact attestation before installing.\n\n## Verification\n\n\`\`\`bash\nsha256sum -c SHA256SUMS\ngh attestation verify CodeReader_${version}_<platform>_<arch>.<format> -R lrk7353-arch/CodeReader\n\`\`\`\n\nInstaller/package assets included: ${assets.length}.\n`;
 }
 
 export function assembleReleaseAssets({ input, output, version }) {
@@ -229,16 +229,32 @@ export function verifyVersionCoherence({ root, tag }) {
   const lockVersion = normalizeVersion(
     JSON.parse(readFileSync(join(projectRoot, "package-lock.json"), "utf8")).version
   );
-  const tauriVersion = normalizeVersion(
-    JSON.parse(readFileSync(join(projectRoot, "src-tauri/tauri.conf.json"), "utf8")).version
+  const tauriConfig = JSON.parse(
+    readFileSync(join(projectRoot, "src-tauri/tauri.conf.json"), "utf8")
   );
+  const tauriVersion = normalizeVersion(tauriConfig.version);
   const cargoText = readFileSync(join(projectRoot, "src-tauri/Cargo.toml"), "utf8");
   const cargoVersion = normalizeVersion(cargoText.match(/^version\s*=\s*"([^"]+)"/m)?.[1]);
-  const versions = new Set([packageVersion, lockVersion, tauriVersion, cargoVersion]);
+  const cargoLockText = readFileSync(join(projectRoot, "src-tauri/Cargo.lock"), "utf8");
+  const cargoLockVersion = normalizeVersion(
+    cargoLockText.match(/\[\[package\]\]\s+name\s*=\s*"codereader"\s+version\s*=\s*"([^"]+)"/m)?.[1]
+  );
+  const versions = new Set([
+    packageVersion,
+    lockVersion,
+    tauriVersion,
+    cargoVersion,
+    cargoLockVersion
+  ]);
   if (versions.size !== 1) {
     fail(
-      `Version mismatch: package=${packageVersion}, lock=${lockVersion}, tauri=${tauriVersion}, cargo=${cargoVersion}`
+      `Version mismatch: package=${packageVersion}, lock=${lockVersion}, tauri=${tauriVersion}, cargo=${cargoVersion}, cargoLock=${cargoLockVersion}`
     );
+  }
+  const msiVersion = String(tauriConfig.bundle?.windows?.wix?.version ?? "");
+  const expectedMsiVersion = packageVersion.replace(/-rc\.\d+$/, "");
+  if (msiVersion !== expectedMsiVersion) {
+    fail(`MSI version ${msiVersion} does not match release version ${expectedMsiVersion}.`);
   }
   if (tag && normalizeVersion(tag) !== packageVersion) {
     fail(`Release tag ${tag} does not match project version ${packageVersion}.`);

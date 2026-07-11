@@ -108,19 +108,14 @@ function readOptionalString(record: Record<string, unknown>, key: string): strin
  * absolute paths and provider payloads, and cap its size.
  */
 export function sanitizeErrorText(value: string): string {
-  const sanitized = value
-    .replace(/\b(?:sk|rk|pk)-[A-Za-z0-9_-]{8,}\b/gi, "<secret>")
-    .replace(
-      /\b(?:api[_-]?key|authorization|bearer|token|secret|password)\b\s*[:=]\s*[^\s,;]+/gi,
-      (match) => `${match.split(/[:=]/, 1)[0]}: <secret>`
-    )
-    .replace(
-      /(?:[A-Za-z]:[\\/]|[\\/]{2}|~\/|\/(?:home|Users|tmp|var|opt|etc|root|mnt|srv|data)\/)[^\s"'<>]*/g,
-      (match) => {
-        const segments = match.split(/[\\/]/).filter(Boolean);
-        return `<path:${segments.at(-1) ?? "redacted"}>`;
-      }
-    )
+  const sanitized = redactAbsolutePaths(
+    value
+      .replace(/\b(?:sk|rk|pk)-[A-Za-z0-9_-]{8,}\b/gi, "<secret>")
+      .replace(
+        /\b(?:api[_-]?key|authorization|bearer|token|secret|password)\b\s*[:=]\s*[^\s,;]+/gi,
+        (match) => `${match.split(/[:=]/, 1)[0]}: <secret>`
+      )
+  )
     .replace(/\s+/g, " ")
     .trim();
   if (!sanitized) {
@@ -133,9 +128,38 @@ export function sanitizeErrorText(value: string): string {
 
 export function safeErrorDetail(error: unknown): string {
   const parsed = parseAppError(error);
-  return parsed.code
-    ? `code: ${parsed.code}; message: ${parsed.message}`
-    : `message: ${parsed.message}`;
+  return parsed.code && /^[A-Za-z0-9._:-]{1,120}$/.test(parsed.code)
+    ? `code: ${parsed.code}`
+    : "code: unknown";
+}
+
+/**
+ * Remove absolute paths without relying on a list of common home-directory
+ * prefixes. Diagnostics may originate from arbitrary user-selected folders,
+ * so `/workspace/alice`, Windows drive paths, UNC paths and device paths all
+ * cross the same privacy boundary. URL paths are left for the endpoint
+ * classifier and are not mistaken for local POSIX paths.
+ */
+function redactAbsolutePaths(value: string): string {
+  const windowsRedacted = value
+    .replace(/(?<![A-Za-z0-9])(?:[A-Za-z]:[\\/]|\\\\(?:\?\\|\.\\)?)[^\s"'<>]*/g, "<path:redacted>")
+    .replace(/~\/[^\s"'<>]*/g, "<path:redacted>");
+
+  return windowsRedacted.replace(
+    /\/[^\s"'<>/]+(?:\/[^\s"'<>/]*)*/g,
+    (match: string, offset: number, input: string): string => {
+      const tokenStart = Math.max(
+        input.lastIndexOf(" ", offset - 1),
+        input.lastIndexOf("\n", offset - 1),
+        input.lastIndexOf("\t", offset - 1)
+      );
+      const tokenPrefix = input.slice(tokenStart + 1, offset);
+      if (tokenPrefix.includes("://") || input[offset - 1] === "/") {
+        return match;
+      }
+      return "<path:redacted>";
+    }
+  );
 }
 
 function publicMessageForCode(code?: string): string | undefined {

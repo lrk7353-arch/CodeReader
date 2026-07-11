@@ -5,7 +5,8 @@ import { describe, expect, it } from "vitest";
 import {
   assembleReleaseAssets,
   collectReleaseAssets,
-  expectedReleaseAssetNames
+  expectedReleaseAssetNames,
+  verifyVersionCoherence
 } from "./release-assets.mjs";
 
 function tempRoot(name) {
@@ -78,6 +79,9 @@ describe("release assembly", () => {
       assets: expect.any(Array)
     });
     expect(readFileSync(join(output, "RELEASE-NOTES.md"), "utf8")).toContain("Windows 10 22H2");
+    expect(readFileSync(join(output, "RELEASE-NOTES.md"), "utf8")).toContain(
+      "do not replace the maintainer's native-hardware checks"
+    );
   });
 
   it("rejects incomplete release input", () => {
@@ -87,5 +91,12 @@ describe("release assembly", () => {
     expect(() =>
       assembleReleaseAssets({ input: root, output: join(root, "out"), version: "1.0.0-rc.1" })
     ).toThrow(/asset set mismatch/);
+  });
+});
+
+describe("release version coherence", () => {
+  it("checks package, lockfiles, Tauri, Cargo and MSI versions together", () => {
+    const version = JSON.parse(readFileSync("package.json", "utf8")).version;
+    expect(verifyVersionCoherence({ root: process.cwd(), tag: `v${version}` })).toBe(version);
   });
 });

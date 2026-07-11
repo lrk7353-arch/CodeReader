@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 #[cfg(not(test))]
 use std::collections::HashMap;
+use std::future::Future;
 #[cfg(not(test))]
 use std::sync::{Mutex, OnceLock};
 #[cfg(not(test))]
@@ -19,7 +20,6 @@ use crate::context_builder::ContextNodeInput;
 use crate::context_builder::{
     build_context_bundle, BuildContextRequest, ContextFileInput, ContextTargetInput,
 };
-#[cfg(not(test))]
 use crate::file_authority;
 use crate::llm_provider::{
     CompletionRequest, LlmProvider, OpenAiCompatibleProvider, ProviderMessage,
@@ -104,6 +104,13 @@ struct GenerationTargetInput {
     code_hash: Option<String>,
     anchor_text: Option<String>,
     status: String,
+}
+
+struct GenerationCommitGuard {
+    grant_id: String,
+    file_id: String,
+    snapshot_id: String,
+    expected_file_hash: String,
 }
 
 #[derive(Serialize)]
@@ -449,11 +456,18 @@ async fn generate_explanation_inner(
         )
     })?;
     let snapshot = file_authority::resolve_snapshot(grant_id, &request.file.id, snapshot_id)?;
+    let expected_file_hash = sha256_hex(&snapshot.code);
+    let commit_guard = GenerationCommitGuard {
+        grant_id: grant_id.to_string(),
+        file_id: request.file.id.clone(),
+        snapshot_id: snapshot_id.to_string(),
+        expected_file_hash: expected_file_hash.clone(),
+    };
     request.file.path = snapshot.path;
     request.file.project_root = snapshot.project_root;
     request.file.language = snapshot.language;
     request.file.code = snapshot.code;
-    request.file.file_hash = Some(sha256_hex(&request.file.code));
+    request.file.file_hash = Some(expected_file_hash);
     request.file.code_nodes = snapshot
         .nodes
         .into_iter()
@@ -535,15 +549,18 @@ async fn generate_explanation_inner(
         });
     let prompt = build_user_prompt(&context, &display_mode, &prompt_version, &templates.user)
         .map_err(AppError::configuration)?;
-    let (structured, attempts) = request_structured_explanation(
-        &stored,
-        api_key.as_deref(),
-        prompt,
-        context.target.start_line,
-        context.target.end_line,
-        request.file.code.lines().count().max(1),
-        &display_mode,
-        &templates.system,
+    let (structured, attempts) = await_provider_result_if_current(
+        request_structured_explanation(
+            &stored,
+            api_key.as_deref(),
+            prompt,
+            context.target.start_line,
+            context.target.end_line,
+            request.file.code.lines().count().max(1),
+            &display_mode,
+            &templates.system,
+        ),
+        &commit_guard,
     )
     .await?;
 
@@ -662,6 +679,36 @@ async fn generate_explanation_inner(
         model: stored.model,
         attempts,
     })
+}
+
+fn verify_generation_commit_guard(guard: &GenerationCommitGuard) -> Result<(), AppError> {
+    let snapshot =
+        file_authority::resolve_snapshot(&guard.grant_id, &guard.file_id, &guard.snapshot_id)?;
+    if sha256_hex(&snapshot.code) != guard.expected_file_hash {
+        return Err(AppError::stale_generation());
+    }
+    let (current_path, _) = file_authority::resolve_file(&guard.grant_id, &guard.file_id)?;
+    let current_code =
+        std::fs::read_to_string(current_path).map_err(|_| AppError::stale_generation())?;
+    if sha256_hex(&current_code) != guard.expected_file_hash {
+        return Err(AppError::stale_generation());
+    }
+    Ok(())
+}
+
+async fn await_provider_result_if_current<T, F>(
+    provider_result: F,
+    guard: &GenerationCommitGuard,
+) -> Result<T, AppError>
+where
+    F: Future<Output = Result<T, AppError>>,
+{
+    let result = provider_result.await?;
+    // The provider call can take long enough for the authorized file to be
+    // replaced, edited, or switched. Discard its response unless the grant,
+    // immutable snapshot, and current on-disk content still match the input.
+    verify_generation_commit_guard(guard)?;
+    Ok(result)
 }
 
 fn model_config_payload(stored: Option<StoredModelConfig>) -> Result<ModelConfigPayload, AppError> {

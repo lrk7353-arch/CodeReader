@@ -377,8 +377,10 @@ export function useWorkspaceFiles() {
         setWorkspaceStatus("Folder authorization expired. Reopen the folder.");
         return;
       }
+      const operation = operationGateRef.current.begin(`expand:${grantId}:${directoryId}`);
       try {
         const expanded = await expandGrantedDirectory(grantId, directoryId);
+        if (!operationGateRef.current.isCurrent(operation)) return;
         const directoryPrefix = projectNodes.find((node) => node.id === directoryId)?.relativePath;
         const qualify = (relativePath: string) =>
           directoryPrefix ? `${directoryPrefix}/${relativePath}` : relativePath;
@@ -415,7 +417,9 @@ export function useWorkspaceFiles() {
           return [...byId.values()];
         });
       } catch (error) {
-        reportWorkspaceError(error);
+        if (operationGateRef.current.isCurrent(operation)) {
+          reportWorkspaceError(error);
+        }
       }
     },
     [files, projectNodes, reportWorkspaceError, setWorkspaceStatus]

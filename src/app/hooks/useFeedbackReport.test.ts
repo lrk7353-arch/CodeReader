@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 import { buildFeedbackReport, redactErrorForReport, useFeedbackReport } from "./useFeedbackReport";
 
 describe("buildFeedbackReport", () => {
-  it("redacts the provider endpoint to scheme + host", () => {
+  it("reduces the provider endpoint to a coarse destination class", () => {
     const report = buildFeedbackReport({
       providerType: "openai-compatible",
       providerEndpoint: "https://api.example.com/v1/chat/completions?foo=bar",
@@ -15,7 +15,7 @@ describe("buildFeedbackReport", () => {
       recentWorkspaceStatus: ["ready"]
     });
 
-    expect(report.providerEndpoint).toBe("https://api.example.com");
+    expect(report.providerEndpoint).toBe("remote-https");
     expect(report.providerModel).toBe("gpt-4o-mini");
     expect(report.providerConfigured).toBe(true);
   });
@@ -42,6 +42,17 @@ describe("buildFeedbackReport", () => {
       recentWorkspaceStatus: []
     });
     expect(badReport.providerEndpoint).toBe("<unparseable>");
+
+    const localReport = buildFeedbackReport({
+      providerType: "openai-compatible",
+      providerEndpoint: "http://127.0.0.1:11434/v1",
+      providerModel: null,
+      providerConfigured: true,
+      lastWorkspaceError: null,
+      lastGenerationError: null,
+      recentWorkspaceStatus: []
+    });
+    expect(localReport.providerEndpoint).toBe("local-loopback");
   });
 
   it("excludes free-form workspace status text", () => {
@@ -97,7 +108,7 @@ describe("buildFeedbackReport", () => {
     const report = buildFeedbackReport({
       providerType: "openai-compatible",
       providerEndpoint: "https://api.example.com/v1?token=sk-endpoint-secret",
-      providerModel: "model-safe",
+      providerModel: "/workspace/alice/private-model sk-model-field-secret",
       providerConfigured: true,
       lastWorkspaceError: {
         message: "C:\\Users\\alice\\private\\main.ts sk-workspace-secret",
@@ -123,6 +134,7 @@ describe("buildFeedbackReport", () => {
       "MODEL_RESPONSE_CANARY",
       "sk-workspace-secret",
       "sk-model-secret",
+      "sk-model-field-secret",
       "proprietary"
     ]) {
       expect(json).not.toContain(canary);

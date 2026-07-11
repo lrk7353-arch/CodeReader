@@ -4,7 +4,15 @@ use super::database_error;
 
 pub(super) const LATEST_DATABASE_VERSION: i64 = 4;
 
-pub(super) fn migrate(conn: &Connection) -> Result<(), String> {
+#[cfg(test)]
+pub(super) fn migrate(conn: &mut Connection) -> Result<(), String> {
+    migrate_with_verification(conn, |_| Ok(()))
+}
+
+pub(super) fn migrate_with_verification(
+    conn: &mut Connection,
+    verify: impl FnOnce(&Connection) -> Result<(), String>,
+) -> Result<(), String> {
     conn.execute_batch("PRAGMA foreign_keys = ON;")
         .map_err(database_error)?;
 
@@ -15,10 +23,16 @@ pub(super) fn migrate(conn: &Connection) -> Result<(), String> {
         ));
     }
 
+    let transaction = conn.transaction().map_err(database_error)?;
     for version in (current_version + 1)..=LATEST_DATABASE_VERSION {
-        run_migration(conn, version)?;
+        apply_migration(&transaction, version)?;
+        transaction
+            .pragma_update(None, "user_version", version)
+            .map_err(database_error)?;
     }
-    Ok(())
+    verify_required_schema(&transaction)?;
+    verify(&transaction)?;
+    transaction.commit().map_err(database_error)
 }
 
 pub(super) fn database_version(conn: &Connection) -> Result<i64, String> {
@@ -26,20 +40,12 @@ pub(super) fn database_version(conn: &Connection) -> Result<i64, String> {
         .map_err(database_error)
 }
 
-fn run_migration(conn: &Connection, version: i64) -> Result<(), String> {
+#[cfg(test)]
+pub(super) fn run_migration(conn: &Connection, version: i64) -> Result<(), String> {
     conn.execute_batch("BEGIN IMMEDIATE;")
         .map_err(database_error)?;
 
-    let result = match version {
-        1 => migrate_to_v1(conn),
-        2 => migrate_to_v2(conn),
-        3 => migrate_to_v3(conn),
-        4 => migrate_to_v4(conn),
-        _ => Err(format!(
-            "No SQLite migration is registered for version {version}."
-        )),
-    }
-    .and_then(|_| {
+    let result = apply_migration(conn, version).and_then(|_| {
         conn.pragma_update(None, "user_version", version)
             .map_err(database_error)
     });
@@ -51,6 +57,133 @@ fn run_migration(conn: &Connection, version: i64) -> Result<(), String> {
             Err(error)
         }
     }
+}
+
+fn apply_migration(conn: &Connection, version: i64) -> Result<(), String> {
+    match version {
+        1 => migrate_to_v1(conn),
+        2 => migrate_to_v2(conn),
+        3 => migrate_to_v3(conn),
+        4 => migrate_to_v4(conn),
+        _ => Err(format!(
+            "No SQLite migration is registered for version {version}."
+        )),
+    }
+}
+
+fn verify_required_schema(conn: &Connection) -> Result<(), String> {
+    if database_version(conn)? != LATEST_DATABASE_VERSION {
+        return Err("SQLite schema version verification failed".to_string());
+    }
+
+    const REQUIRED_COLUMNS: &[(&str, &[&str])] = &[
+        ("projects", &["id", "root_path", "created_at", "updated_at"]),
+        (
+            "files",
+            &[
+                "id",
+                "project_id",
+                "path",
+                "content_hash",
+                "last_analyzed_hash",
+                "status",
+            ],
+        ),
+        (
+            "explanation_nodes",
+            &[
+                "id",
+                "project_id",
+                "file_id",
+                "snapshot_id",
+                "code_level_meaning",
+                "status",
+                "prompt_version",
+                "context_id",
+            ],
+        ),
+        (
+            "explanation_targets",
+            &[
+                "id",
+                "project_id",
+                "explanation_id",
+                "file_id",
+                "snapshot_id",
+                "status",
+            ],
+        ),
+        (
+            "explanation_feedback",
+            &["id", "project_id", "explanation_id", "feedback_type"],
+        ),
+        (
+            "user_reading_states",
+            &["id", "project_id", "explanation_id", "state", "updated_at"],
+        ),
+        (
+            "project_guides",
+            &[
+                "project_id",
+                "root_path",
+                "source_fingerprint",
+                "updated_at",
+            ],
+        ),
+        (
+            "prompt_versions",
+            &[
+                "version",
+                "status",
+                "rollout_percent",
+                "system_prompt_template",
+                "user_prompt_template",
+            ],
+        ),
+        (
+            "model_provider_settings",
+            &["id", "endpoint", "model", "timeout_seconds", "updated_at"],
+        ),
+    ];
+
+    for (table, required) in REQUIRED_COLUMNS {
+        let columns = column_names(conn, table)?;
+        if columns.is_empty() {
+            return Err(format!("SQLite required table is missing: {table}"));
+        }
+        for column in *required {
+            if !columns.iter().any(|existing| existing == column) {
+                return Err(format!(
+                    "SQLite required column is missing: {table}.{column}"
+                ));
+            }
+        }
+    }
+
+    let active_prompts: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM prompt_versions WHERE status = 'active'",
+            [],
+            |row| row.get(0),
+        )
+        .map_err(database_error)?;
+    if active_prompts > 1 {
+        return Err("SQLite prompt registry has multiple active versions".to_string());
+    }
+    Ok(())
+}
+
+fn column_names(conn: &Connection, table: &str) -> Result<Vec<String>, String> {
+    let escaped = table.replace('"', "\"\"");
+    let mut statement = conn
+        .prepare(&format!("PRAGMA table_info(\"{escaped}\")"))
+        .map_err(database_error)?;
+    let columns = statement
+        .query_map([], |row| row.get(1))
+        .map_err(database_error)?
+        .collect::<Result<Vec<String>, _>>()
+        .map_err(database_error)?;
+    Ok(columns)
 }
 
 fn migrate_to_v4(conn: &Connection) -> Result<(), String> {
@@ -374,9 +507,9 @@ mod tests {
 
     #[test]
     fn fresh_database_migrates_to_latest_version() {
-        let conn = Connection::open_in_memory().expect("database opens");
+        let mut conn = Connection::open_in_memory().expect("database opens");
 
-        migrate(&conn).expect("migration succeeds");
+        migrate(&mut conn).expect("migration succeeds");
 
         assert_eq!(
             database_version(&conn).expect("version reads"),
@@ -402,8 +535,8 @@ mod tests {
 
     #[test]
     fn unversioned_mvp_database_receives_missing_columns() {
-        let conn = Connection::open_in_memory().expect("database opens");
-        migrate(&conn).expect("initial migration succeeds");
+        let mut conn = Connection::open_in_memory().expect("database opens");
+        migrate(&mut conn).expect("initial migration succeeds");
         conn.pragma_update(None, "user_version", 0)
             .expect("version resets");
         conn.execute_batch(
@@ -423,7 +556,7 @@ mod tests {
         )
         .expect("legacy table is created");
 
-        migrate(&conn).expect("legacy database upgrades");
+        migrate(&mut conn).expect("legacy database upgrades");
 
         let columns = column_names(&conn, "explanation_nodes");
         assert!(columns.contains(&"depends_on_lines".to_string()));
@@ -438,11 +571,11 @@ mod tests {
 
     #[test]
     fn newer_database_is_rejected() {
-        let conn = Connection::open_in_memory().expect("database opens");
+        let mut conn = Connection::open_in_memory().expect("database opens");
         conn.pragma_update(None, "user_version", LATEST_DATABASE_VERSION + 1)
             .expect("version writes");
 
-        let error = migrate(&conn).expect_err("future schema should be rejected");
+        let error = migrate(&mut conn).expect_err("future schema should be rejected");
 
         assert!(error.contains("newer than this CodeReader build supports"));
     }
@@ -463,12 +596,33 @@ mod tests {
     }
 
     #[test]
+    fn verification_failure_rolls_back_the_entire_migration_sequence() {
+        let mut conn = Connection::open_in_memory().expect("database opens");
+
+        let error = migrate_with_verification(&mut conn, |_| {
+            Err("simulated post-migration verification failure".to_string())
+        })
+        .expect_err("verification failure should roll back every migration");
+
+        assert!(error.contains("simulated post-migration"));
+        assert_eq!(database_version(&conn).expect("version reads"), 0);
+        let projects_table: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'projects'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("schema query succeeds");
+        assert_eq!(projects_table, 0);
+    }
+
+    #[test]
     fn version_one_database_receives_prompt_registry() {
-        let conn = Connection::open_in_memory().expect("database opens");
+        let mut conn = Connection::open_in_memory().expect("database opens");
         run_migration(&conn, 1).expect("v1 migration succeeds");
         assert_eq!(database_version(&conn).expect("version reads"), 1);
 
-        migrate(&conn).expect("v1 database upgrades");
+        migrate(&mut conn).expect("v1 database upgrades");
 
         assert_eq!(
             database_version(&conn).expect("version reads"),
@@ -486,12 +640,12 @@ mod tests {
 
     #[test]
     fn v2_database_receives_prompt_template_columns() {
-        let conn = Connection::open_in_memory().expect("database opens");
+        let mut conn = Connection::open_in_memory().expect("database opens");
         run_migration(&conn, 1).expect("v1 migration succeeds");
         run_migration(&conn, 2).expect("v2 migration succeeds");
         assert_eq!(database_version(&conn).expect("version reads"), 2);
 
-        migrate(&conn).expect("v2 database upgrades to v3");
+        migrate(&mut conn).expect("v2 database upgrades to v3");
         assert_eq!(
             database_version(&conn).expect("version reads"),
             LATEST_DATABASE_VERSION

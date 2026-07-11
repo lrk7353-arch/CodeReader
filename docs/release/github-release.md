@@ -4,18 +4,18 @@ This runbook is the release authority for CodeReader `1.x`. A release is not rea
 
 ## Supported production matrix
 
-| Operating system | Architecture | Required packages |
-| --- | --- | --- |
-| Windows 10 22H2 / Windows 11 | x64 | NSIS `.exe`, MSI |
-| Windows 10 22H2 / Windows 11 | ARM64 | NSIS `.exe`, MSI |
-| Linux, glibc 2.35+ | x64 | AppImage, `.deb`, `.rpm` |
-| Linux, glibc 2.35+ | ARM64 | AppImage, `.deb`, `.rpm` |
+| Operating system             | Architecture | Required packages        |
+| ---------------------------- | ------------ | ------------------------ |
+| Windows 10 22H2 / Windows 11 | x64          | NSIS `.exe`, MSI         |
+| Windows 10 22H2 / Windows 11 | ARM64        | NSIS `.exe`, MSI         |
+| Linux, glibc 2.35+           | x64          | AppImage, `.deb`, `.rpm` |
+| Linux, glibc 2.35+           | ARM64        | AppImage, `.deb`, `.rpm` |
 
 Ubuntu 22.04+, Debian 12+, and Fedora 39+ are the officially documented Linux families. Other modern glibc-based distributions are community-compatible until verified. macOS is planned for the next version and has no `1.0.0` assets.
 
 Document Microsoft Edge WebView2 Evergreen Runtime as required on Windows and WebKitGTK 4.1 as required on Linux. The `.deb` and `.rpm` metadata must declare the Linux runtime dependency; AppImage release notes must state that the host provides it.
 
-Exactly ten installer/package assets are required.
+Exactly ten installer/package assets are required. The draft also carries four release metadata files and four target-bound native package-smoke JSON records.
 
 ## One-time GitHub repository setup
 
@@ -28,6 +28,8 @@ Exactly ten installer/package assets are required.
 2. Create a `production-release` environment.
 3. Add the maintainer as a required reviewer for that environment. The release assembly job must pause for this approval.
 4. Keep Actions permissions restricted to the workflow declarations. Do not grant repository-wide write permissions by default.
+
+For the current solo-maintainer repository, `main` requires a pull request and every quality/security gate but has no independent approving-review count. The `production-release` environment remains a separate, explicit approval gate. Any administrator bypass is an incident-recovery action and must be recorded in the release notes or incident log; it must not be described as independent review.
 
 ## Candidate preparation
 
@@ -69,16 +71,24 @@ The workflow must:
 3. Build on native Windows/Linux x64/ARM64 runners.
 4. Normalize package names to include version, OS, architecture, and format.
 5. Reject fewer or more than ten package assets.
-6. Generate:
+6. On every native build runner, validate package architecture/runtime metadata and run automated package install, visible-window launch, and uninstall smoke checks. AppImage must also launch. Bind the resulting JSON to the tag, checkout commit, OS/architecture, and exact package SHA-256 values; do not record absolute paths or user data.
+7. Verify all four smoke records and their package hashes in an unprotected job before requesting approval for the `production-release` environment.
+8. Generate:
    - `SHA256SUMS`;
    - `CodeReader.spdx.json` (SPDX 2.3 SBOM);
    - `release-metadata.json`;
    - `RELEASE-NOTES.md`.
-7. Generate GitHub artifact attestations with Actions OIDC.
-8. Pause at the protected `production-release` environment.
-9. Create a draft GitHub Release. Automation must not publish it directly.
+9. Generate GitHub artifact attestations with Actions OIDC.
+10. Pause at the protected `production-release` environment.
+11. Create a draft GitHub Release. Automation must not publish it directly.
 
-## Native smoke evidence
+## Automated native package smoke
+
+The release workflow runs on native Windows/Linux x64/ARM64 GitHub-hosted runners. It checks Debian/RPM architecture and WebKitGTK dependency metadata, installs and removes the native package-manager format, starts a visible application window under the runner desktop/Xvfb, and launches AppImage. The four `native-smoke-<platform>-<arch>.json` files are attested release assets and contain only portable check names, status, release identity, and package hashes.
+
+This automation is deliberately narrower than full product acceptance. An RPM container on the native Linux host validates RPM installation and runtime compatibility but is not evidence of a complete Fedora desktop user journey.
+
+## Maintainer native-hardware acceptance
 
 Before publishing, verify each of the four platform/architecture combinations on native hardware or its GitHub-hosted native runner:
 
@@ -92,7 +102,7 @@ Before publishing, verify each of the four platform/architecture combinations on
 - close cleanly;
 - verify uninstall/package removal behavior.
 
-Do not substitute cross-compilation for native smoke evidence.
+Do not substitute cross-compilation, the automated package smoke, or an RPM container for the following native-hardware functional evidence.
 
 ## Windows signature policy
 
@@ -120,15 +130,16 @@ When Azure Trusted Signing, SignPath, or a conventional certificate is configure
    gh attestation verify <asset> -R lrk7353-arch/CodeReader
    ```
 
-4. Confirm there are exactly ten platform packages plus the four release metadata files.
-5. Confirm Release notes contain:
+4. Confirm there are exactly ten platform packages, four release metadata files, and four native package-smoke records.
+5. Confirm each smoke record says `status: pass`, names the correct tag/commit/architecture, contains no absolute path, and hashes exactly the packages in the draft.
+6. Confirm Release notes contain:
    - supported OS and architecture matrix;
    - package-selection instructions;
    - database backup/migration statement;
    - unsigned Windows warning when applicable;
    - macOS-next-version statement;
    - known limitations.
-6. Confirm there are no open P0/P1 release issues.
+7. Confirm there are no open P0/P1 release issues.
 
 ## Publish and post-release checks
 
