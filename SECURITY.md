@@ -4,6 +4,15 @@
 
 Security fixes target the latest `1.0.x` stable release and the active `1.0.0-rc.N` candidate while production validation is in progress. Historical beta and MVP tags are unsupported except as documented database-migration inputs.
 
+## Tracked Upstream Security Exceptions
+
+- `RUSTSEC-2024-0429` / `GHSA-wrw7-89jp-8q8g`: Tauri 2.11.2 currently brings
+  `glib 0.18.5` through its Linux GTK3 runtime. The affected
+  `VariantStrIter` API is not called by CodeReader or by the inspected
+  dependency source graph. RustSec CI names this advisory explicitly as a
+  temporary exception; the GitHub Dependabot alert remains open. Remove the
+  exception as soon as Tauri's Linux stack supports `glib >= 0.20.0`.
+
 ## Reporting A Vulnerability
 
 Please use GitHub's private vulnerability reporting/security-advisory flow for `lrk7353-arch/CodeReader`. If that flow is unavailable, contact the maintainer through the repository owner profile without posting exploit details in a public issue.
