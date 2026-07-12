@@ -9,7 +9,7 @@ describe("app copy layer", () => {
 
     const copy = getAppCopy();
     expect(copy.brand.title).toBe("CodeReader");
-    expect(copy.brand.stageBadge).toBe("发布候选 · 1.0.0-rc.1");
+    expect(copy.brand.stageBadge).toBe("发布候选 · 1.0.0-rc.2");
     expect(copy.actions.sample).toBe("\u4f53\u9a8c\u793a\u4f8b");
   });
 
@@ -18,7 +18,7 @@ describe("app copy layer", () => {
 
     expect(copy.brand.title).toBe("CodeReader");
     expect(copy.brand.tagline).toBe("Standalone desktop code-reading IDE");
-    expect(copy.brand.stageBadge).toBe("Release candidate · 1.0.0-rc.1");
+    expect(copy.brand.stageBadge).toBe("Release candidate · 1.0.0-rc.2");
     expect(copy.actions.openProject).toBe("Open project");
     expect(copy.model.unconfigured).toBe("Model not configured");
   });

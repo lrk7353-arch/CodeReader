@@ -78,8 +78,12 @@ describe("public documentation", () => {
   it("keeps a readable, non-corrupted public history across supported versions", () => {
     const changelog = read("CHANGELOG.md");
     const history = read("docs/history/version-history.zh-CN.md");
+    const readme = read("README.md");
+    const chineseReadme = read("README.zh-CN.md");
 
     expect(changelog).toContain("1.0.0-rc.2");
+    expect(readme).toContain("Current channel: `1.0.0-rc.2`");
+    expect(chineseReadme).toContain("1.0.0-rc.2 候选版");
     expect(changelog).toContain("0.11.0-beta.4");
     expect(changelog).toContain("0.10.0");
     expect(changelog).toContain("0.1.0");
