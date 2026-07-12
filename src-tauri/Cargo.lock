@@ -1191,9 +1191,8 @@ dependencies = [
 
 [[package]]
 name = "gio-sys"
-version = "0.18.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "37566df850baf5e4cb0dfb78af2e4b9898d817ed9263d1090a2df958c64737d2"
+version = "0.18.5"
+source = "git+https://github.com/lrk7353-arch/gtk-rs-core-security?rev=a10fcaacb24c29b7199f97bdfbe682b8f101bb86#a10fcaacb24c29b7199f97bdfbe682b8f101bb86"
 dependencies = [
  "glib-sys",
  "gobject-sys",
@@ -1205,8 +1204,7 @@ dependencies = [
 [[package]]
 name = "glib"
 version = "0.18.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "233daaf6e83ae6a12a52055f568f9d7cf4671dabb78ff9560ab6da230ce00ee5"
+source = "git+https://github.com/lrk7353-arch/gtk-rs-core-security?rev=a10fcaacb24c29b7199f97bdfbe682b8f101bb86#a10fcaacb24c29b7199f97bdfbe682b8f101bb86"
 dependencies = [
  "bitflags 2.13.0",
  "futures-channel",
@@ -1228,8 +1226,7 @@ dependencies = [
 [[package]]
 name = "glib-macros"
 version = "0.18.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0bb0228f477c0900c880fd78c8759b95c7636dbd7842707f49e132378aa2acdc"
+source = "git+https://github.com/lrk7353-arch/gtk-rs-core-security?rev=a10fcaacb24c29b7199f97bdfbe682b8f101bb86#a10fcaacb24c29b7199f97bdfbe682b8f101bb86"
 dependencies = [
  "heck 0.4.1",
  "proc-macro-crate 2.0.2",
@@ -1241,9 +1238,8 @@ dependencies = [
 
 [[package]]
 name = "glib-sys"
-version = "0.18.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "063ce2eb6a8d0ea93d2bf8ba1957e78dbab6be1c2220dd3daca57d5a9d869898"
+version = "0.18.5"
+source = "git+https://github.com/lrk7353-arch/gtk-rs-core-security?rev=a10fcaacb24c29b7199f97bdfbe682b8f101bb86#a10fcaacb24c29b7199f97bdfbe682b8f101bb86"
 dependencies = [
  "libc",
  "system-deps",
@@ -1257,9 +1253,8 @@ checksum = "0cc23270f6e1808e30a928bdc84dea0b9b4136a8bc82338574f23baf47bbd280"
 
 [[package]]
 name = "gobject-sys"
-version = "0.18.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0850127b514d1c4a4654ead6dedadb18198999985908e6ffe4436f53c785ce44"
+version = "0.18.5"
+source = "git+https://github.com/lrk7353-arch/gtk-rs-core-security?rev=a10fcaacb24c29b7199f97bdfbe682b8f101bb86#a10fcaacb24c29b7199f97bdfbe682b8f101bb86"
 dependencies = [
  "glib-sys",
  "libc",
@@ -5439,4 +5434,4 @@ dependencies = [
 name = "zmij"
 version = "1.0.21"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b8848ee67ecc8aedbaf3e4122217aff892639231befc6a1b58d29fff4c2cabaa"
+checksum = "b8848ee67ec
