@@ -2,6 +2,17 @@
 
 This runbook is the release authority for CodeReader `1.x`. A release is not ready merely because the application builds locally.
 
+The public-facing Release page is governed by [the Chinese public Release-page
+specification](public-release-notes.zh-CN.md). The generated `RELEASE-NOTES.md`
+must be bilingual and must point users to `README.zh-CN.md` for installation,
+uninstall, verification, recovery, and troubleshooting details. This runbook
+remains the maintainer execution procedure; it is not a substitute for the
+public Release page.
+
+Use [the RC monitoring and rollback procedure](post-release-monitoring.md) to
+open a release-tracking issue, triage feedback without collecting sensitive
+content, and preserve a non-destructive rollback path after publication.
+
 ## Supported production matrix
 
 | Operating system             | Architecture | Required packages        |

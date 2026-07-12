@@ -1,0 +1,101 @@
+name: Release feedback
+description: Report an installation, upgrade, startup, or release-asset problem
+title: "[Release]: "
+labels: ["release-feedback"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for testing CodeReader. Do not include source code, prompts,
+        model responses, API keys, credentials, database files, or personal
+        absolute paths. Use CodeReader's redacted feedback preview when it is
+        available.
+  - type: input
+    id: version
+    attributes:
+      label: CodeReader version and Release URL
+      placeholder: "1.0.0-rc.1 — https://github.com/lrk7353-arch/CodeReader/releases/tag/v1.0.0-rc.1"
+    validations:
+      required: true
+  - type: dropdown
+    id: operating_system
+    attributes:
+      label: Operating system
+      options:
+        - Windows 10 22H2
+        - Windows 11
+        - Ubuntu 22.04 or newer
+        - Debian 12 or newer
+        - Fedora 39 or newer
+        - Other supported Linux distribution
+    validations:
+      required: true
+  - type: dropdown
+    id: architecture
+    attributes:
+      label: Architecture
+      options:
+        - x64
+        - ARM64
+    validations:
+      required: true
+  - type: dropdown
+    id: package_format
+    attributes:
+      label: Downloaded package
+      options:
+        - Windows NSIS setup.exe
+        - Windows MSI
+        - Linux deb
+        - Linux rpm
+        - Linux AppImage
+    validations:
+      required: true
+  - type: checkboxes
+    id: verification
+    attributes:
+      label: Verification completed
+      options:
+        - label: I matched the downloaded file to SHA256SUMS.
+          required: true
+        - label: I confirmed the package architecture matches this device.
+          required: true
+        - label: I have removed sensitive data from this report.
+          required: true
+  - type: dropdown
+    id: stage
+    attributes:
+      label: First failing stage
+      options:
+        - Download or verification
+        - Installer start
+        - Installation
+        - Application start
+        - Open file or folder
+        - Markdown or code reading
+        - Database upgrade or recovery
+        - Model connection or explanation
+        - Restart persistence
+        - Uninstall
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior and stable error code
+      description: Include only redacted information. Do not paste source, prompts, model output, keys, or local paths.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Minimal reproduction steps
+      placeholder: "1. ...\n2. ...\n3. ..."
+    validations:
+      required: true

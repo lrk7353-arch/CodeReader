@@ -3,6 +3,15 @@
 This directory contains the current project-owned engineering documentation.
 External tools and agent skills do not define its layout.
 
+Public entry points:
+
+- `../README.md`: English product and installation information.
+- `../README.zh-CN.md`: complete Simplified Chinese installation, verification,
+  upgrade, uninstall, and troubleshooting guide.
+- `history/version-history.zh-CN.md`: public Chinese version history and
+  compatibility overview.
+- `release/public-release-notes.zh-CN.md`: public GitHub Release-page contract.
+
 ## Directory map
 
 - `architecture/`: approved product, architecture, and production-readiness
