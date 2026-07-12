@@ -31,3 +31,13 @@ tree-sitter-python = "0.25.0"
 tree-sitter-sequel = "0.3.11"
 tree-sitter-typescript = "0.23.2"
 walkdir = "2.5.0"
+
+[patch.crates-io]
+# Tauri 2.11's GTK3 stack is constrained to glib 0.18. This immutable,
+# upstream-derived source patch fixes VariantStrIter soundness until Tauri
+# migrates the Linux GTK dependency chain to glib >= 0.20.
+glib = { git = "https://github.com/lrk7353-arch/gtk-rs-core-security", rev = "a10fcaacb24c29b7199f97bdfbe682b8f101bb86" }
+glib-sys = { git = "https://github.com/lrk7353-arch/gtk-rs-core-security", rev = "a10fcaacb24c29b7199f97bdfbe682b8f101bb86" }
+gobject-sys = { git = "https://github.com/lrk7353-arch/gtk-rs-core-security", rev = "a10fcaacb24c29b7199f97bdfbe682b8f101bb86" }
+gio-sys = { git = "https://github.com/lrk7353-arch/gtk-rs-core-security", rev = "a10fcaacb24c29b7199f97bdfbe682b8f101bb86" }
+glib-macros = { git = "https://github.com/lrk7353-arch/gtk-rs-core-security", rev = "a10fcaacb24c29b7199f97bdfbe682b8f101bb86" }

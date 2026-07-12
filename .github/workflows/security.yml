@@ -66,10 +66,6 @@ jobs:
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           working-directory: src-tauri
-          # Tauri 2.11's GTK3 stack pins glib 0.18.5. The vulnerable
-          # VariantStrIter API is not called by CodeReader or its dependency
-          # sources; keep the Dependabot alert open until Tauri upgrades GTK.
-          ignore: RUSTSEC-2024-0429
 
   dependency-review:
     if: github.event_name == 'pull_request'
