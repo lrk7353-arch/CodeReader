@@ -1,5 +1,7 @@
 # CodeReader
 
+[English](README.md) | [简体中文](README.zh-CN.md) | [Version history / 版本沿革](docs/history/version-history.zh-CN.md) | [Release guide / 发布说明](docs/release/public-release-notes.zh-CN.md)
+
 CodeReader is a local-first desktop application for reading source code and Markdown with persistent, reviewable AI explanations. It opens user-selected files and directories, preserves reading progress, and detects when explanations become stale after files change.
 
 > Current channel: `1.0.0-rc.1` release candidate. Release candidates are intended for full production validation before the stable `1.0.0` publication.
@@ -30,7 +32,7 @@ Production downloads are published on [GitHub Releases](https://github.com/lrk73
 
 Official Linux baselines are Ubuntu 22.04+, Debian 12+, and Fedora 39+. Other modern glibc-based distributions may work but are community-compatible until verified.
 
-Windows requires the Microsoft Edge WebView2 Evergreen Runtime. It is normally present on supported Windows installations; if CodeReader opens to a blank window, install or repair WebView2 from Microsoft and restart CodeReader. Linux packages require the distribution's WebKitGTK 4.1 runtime; `.deb` and `.rpm` package managers resolve it as a dependency, while AppImage users must provide it on the host.
+Windows requires the [Microsoft Edge WebView2 Evergreen Runtime](https://developer.microsoft.com/microsoft-edge/webview2/). It is normally present on supported Windows installations; if CodeReader opens to a blank window, install or repair WebView2 from Microsoft and restart CodeReader. Linux packages require the distribution's WebKitGTK 4.1 runtime; `.deb` and `.rpm` package managers resolve it as a dependency, while AppImage users must provide it on the host.
 
 Use the NSIS executable for a straightforward current-user Windows installation. MSI is intended for managed installation. On Linux, use `.deb` for Debian/Ubuntu, `.rpm` for Fedora/RPM-based systems, or AppImage for a portable installation.
 
@@ -70,6 +72,37 @@ Background work is target-bound. Completing an old scan, refresh, or explanation
 ## Update policy
 
 The application may check the official GitHub repository for a newer release and open its Release page. CodeReader `1.0` does not silently download or install updates.
+
+## Install, remove, and troubleshoot
+
+### Install
+
+- Windows: download the matching `_setup.exe` for an ordinary per-user installation. Use the matching `.msi` only for managed deployment or a software-distribution tool. Verify the checksum and artifact attestation before starting either installer.
+- Debian / Ubuntu: install the matching `.deb` with `sudo apt install ./<asset>.deb`.
+- Fedora / RPM distributions: install the matching `.rpm` with `sudo dnf install ./<asset>.rpm`.
+- AppImage: run `chmod +x <asset>.AppImage`, then start the file. The host must still provide WebKitGTK 4.1.
+
+### Remove
+
+- Windows: uninstall CodeReader from **Settings → Apps → Installed apps**, the NSIS uninstaller, or your managed-software tool.
+- Debian / Ubuntu: run `sudo apt remove codereader`.
+- Fedora / RPM distributions: run `sudo dnf remove codereader`.
+- AppImage: close CodeReader and delete the AppImage plus any desktop launcher you created.
+
+Uninstall is not a data-erasure tool. Preserve local reading data and verified migration backups before manually removing application data.
+
+### Troubleshoot
+
+| Symptom | What to do |
+| --- | --- |
+| Blank window on Windows | Install or repair the [Microsoft Edge WebView2 Evergreen Runtime](https://developer.microsoft.com/microsoft-edge/webview2/), then restart CodeReader. |
+| SmartScreen or unknown-publisher notice | Current Windows packages are unsigned unless a specific Release states verified Authenticode signing. Verify SHA-256 and the GitHub artifact attestation before deciding whether to continue. |
+| `.deb` or `.rpm` cannot install | Confirm the downloaded architecture and install the local package through the distribution package manager so it can resolve WebKitGTK and GTK dependencies. |
+| AppImage does not start | Check its executable permission and the host WebKitGTK 4.1 runtime; try the matching `.deb` or `.rpm` when available. |
+| A file is visible but not shown in the reader | It may be binary, oversized, special, or use an unsafe encoding. CodeReader keeps it in the tree and retains the currently readable document. |
+| Model request fails | Check the model endpoint, model name, network or local service. Do not put API keys, source code, prompts, or model output into a feedback report. |
+
+The [Chinese guide](README.zh-CN.md) provides the same workflow in Simplified Chinese, including recovery guidance for supported 0.10.x and 0.11.x upgrades.
 
 ## Development from source
 
@@ -149,7 +182,7 @@ CodeReader uses a lightweight trunk-based workflow:
 - Required quality and security checks must pass before merge.
 - Source branches are deleted after merge; force-pushing `main` is prohibited.
 
-See [CONTRIBUTING.md](CONTRIBUTING.md), [SECURITY.md](SECURITY.md), and the [production release runbook](docs/release/github-release.md).
+See [CONTRIBUTING.md](CONTRIBUTING.md), [SECURITY.md](SECURITY.md), the [Chinese user guide](README.zh-CN.md), and the [production release runbook](docs/release/github-release.md).
 
 ## License
 

@@ -79,6 +79,17 @@ describe("release assembly", () => {
       assets: expect.any(Array)
     });
     expect(readFileSync(join(output, "RELEASE-NOTES.md"), "utf8")).toContain("Windows 10 22H2");
+    expect(readFileSync(join(output, "RELEASE-NOTES.md"), "utf8")).toContain("简体中文");
+    expect(readFileSync(join(output, "RELEASE-NOTES.md"), "utf8")).toContain(
+      "CodeReader_1.0.0-rc.1_windows_x64_setup.exe"
+    );
+    expect(readFileSync(join(output, "RELEASE-NOTES.md"), "utf8")).toContain(
+      "https://github.com/lrk7353-arch/CodeReader/blob/v1.0.0-rc.1/README.zh-CN.md"
+    );
+    expect(readFileSync(join(output, "RELEASE-NOTES.md"), "utf8")).not.toMatch(
+      /(?:\/home\/|[A-Z]:[\\/]|\\\\Users\\\\)/
+    );
+    expect(readFileSync(join(output, "RELEASE-NOTES.md"), "utf8")).toContain("Windows 未签名提示");
     expect(readFileSync(join(output, "RELEASE-NOTES.md"), "utf8")).toContain(
       "do not replace the maintainer's native-hardware checks"
     );

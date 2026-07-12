@@ -1,108 +1,88 @@
-# Changelog
+# CodeReader 变更日志 / Changelog
 
-## 1.0.0-rc.1 - 2026-07-11
+本日志记录面向用户和维护者的重要版本变化。更完整的兼容性说明见 [版本沿革](docs/history/version-history.zh-CN.md)；历史验收、内测和规划原件保留在 docs/history 中供追溯。
 
-### Production safety and data durability
+## [Unreleased]
 
-- Replace renderer-authoritative file paths with native registered grants and opaque project/file identifiers; revalidate canonical containment, symlinks, and snapshots before access.
-- Bind file loading, refresh, and explanation generation to operation/target identities so stale background results cannot replace the active document or state.
-- Apply strict feedback and error redaction, privacy canary tests, and an explicit preview/approval step before copying diagnostics.
-- Expand the public `AppError` contract and remove raw string errors from Tauri command boundaries.
-- Add backup-first SQLite migration, integrity/foreign-key/count verification, WAL and busy timeout configuration, destructive-failure recovery, and read-only recovery metadata.
-- Add keyring/database compensation and a database-enforced single-active-prompt invariant.
-- Harden update discovery with semantic-version parsing, bounded responses, timeouts, release channels, redirect policy, and official GitHub origin validation.
+### 公开发行内容
 
-### Complete reading workspace
+- 增加中英双语入口、完整中文用户安装/升级/卸载/排障说明和公开 Release 页面规范。
+- 将 Release 正文改为自动生成的中英双语内容，并列出实际安装包、验证方式、签名状态与原生 smoke 边界。
+- 重整历史版本叙事，移除损坏编码的旧条目，保留可追溯的 beta 与 MVP 档案。
 
-- Keep ordinary unsupported files visible with metadata instead of replacing the current readable document.
-- Add lazy, bounded expansion for heavy dependency/generated directories.
-- Add safe Markdown preview/source navigation and bounded local image preview.
-- Add responsive production workspace states, background-task visibility, and accessibility-focused interaction updates.
+## [1.0.0-rc.1] - 2026-07-11
 
-### Production distribution
+### 生产安全与数据可靠性
 
-- Add native Windows/Linux x64/ARM64 quality and release matrices.
-- Require two Windows formats and three Linux formats per architecture, for exactly ten platform packages.
-- Add release-set verification, normalized filenames, SHA-256 checksums, SPDX SBOM generation, GitHub artifact attestations, and a manually approved draft Release.
-- Add native Linux and Windows ARM64 release entry points while retaining the verified Windows x64 path.
-- Document Windows 10 22H2/Windows 11 and glibc 2.35+ requirements, unsigned Windows behavior, package selection, migration recovery, and macOS deferral.
+- 将文件系统访问从界面层传入路径改为原生选择器授予的受限对象；访问前重新校验规范路径、符号链接与快照边界。
+- 将加载、刷新和解释生成绑定到操作与目标身份，防止旧后台任务覆盖当前文档或阅读状态。
+- 为反馈与错误信息提供稳定错误码、严格脱敏和隐私 canary 测试，避免源码、提示词、模型回答、密钥和个人绝对路径泄漏。
+- 增加旧应用数据发现、迁移前验证备份、单事务 schema 迁移、完整性验证和非破坏性只读恢复。
+- 防止模型调用完成后把过时解释写入已变化文件的快照。
 
-## Unreleased
+### 阅读体验
 
-### Public repository preparation
+- 普通文件始终保留在文件树中；不支持、二进制、过大或不安全编码文件显示元数据而不会清空当前可读文件。
+- 增加重目录的按需、受限展开；支持安全 Markdown 预览/源码/标题导航与受限本地图片预览。
+- 增加任务可见性、取消/重试、响应式布局、键盘焦点恢复和减少动态效果支持。
 
-- Prepare public README, contribution, security, issue, and PR guidance.
-- Document the GitHub Release checklist for Windows artifacts, Linux evidence, checksums, and signing status.
-- Add low-risk update discovery planning for GitHub Releases without automatic installation.
+### Windows/Linux 首发发布链
 
-### Beta 4 hardening (post-beta.4)
+- 支持 Windows 与 Linux 的 x64、ARM64 原生构建验证。
+- 每个发布集合要求两个 Windows 包和每架构三个 Linux 包，共十个安装包。
+- 生成 SHA-256、SPDX 2.3 SBOM、release metadata、GitHub artifact attestations 和四份原生 package-smoke 记录。
+- 在原生运行器执行包元数据、安装、可见窗口启动和卸载的自动化 smoke；完整用户验收仍是发布前必需步骤。
+- 明确 Windows 包在未完成 Authenticode 验证前属于未签名状态；macOS 延后到下一版本。
 
-- Make workspace error actions executable: retry/checkNetwork now render a 重试 button, checkEncoding renders 重新选择文件, and fs.* path errors render 重新选择项目/重新选择文件 plus a 复制错误详情 button that copies the redacted error detail to the clipboard.
-- Retain generation error summary: useModelWorkflow tracks lastGeneration (explanationId, status, error, errorDetail, timestamp); ExplanationPanel renders a 复制错误摘要 button for feedback.
-- Add redacted feedback report export: useFeedbackReport builds a JSON report (app version, platform, provider endpoint host only, last workspace/generation error, recent workspace status history) with no API key/source/prompt; a 反馈包 toolbar button copies it to the clipboard.
-- Add project-level reading progress: useProjectProgress computes totalFiles/explainedFiles/totalExplanations/readExplanations/understoodExplanations/completionPercent and the most recently updated explanation as a continue-reading target; the topbar shows 进度 N% plus a 继续阅读 button.
-- Add model connection test: test_model_connection Tauri command sends a minimal ping and returns {ok, model, endpoint, echo}; ModelSettingsDialog has a 测试连接 button. Ollama works via http://localhost:11434/v1/chat/completions with no extra code.
-- Add medium and stress synthetic project fixtures for real-project validation boundaries (120-file multilang; 3000-line file, 200+ node file, binary, non-UTF-8, deep dirs).
+## [0.11.0-beta.4]
 
-### 0.11.0-beta.4
+### 内测反馈与真实项目验证
 
-- Promote the internal beta phase to `0.11.0-beta.4` with RC-prep validation and release-chain hardening.
-- Add Windows release-chain smoke script (`scripts/windows-release-smoke.mjs`) that auto-verifies manifest/SHA-256/signing-status consistency and writes a manual install evidence template; document the chain in `Windows-release-chain-smoke.md`.
-- Add the Beta4 acceptance document, real-project validation template, and Linux desktop smoke `nonBlockingGenerationProgressVisible` checklist item.
-- Classify workspace failures with stable `fs.*` error codes: `load_code_file` and `scan_project` now return `AppError` so the frontend can branch on the code; add `errorAction()` mapping codes to actionable suggestions (retry, openModelSettings, checkEncoding).
-- Cap long structure lists: compact target lists now scroll inside a `max-height: min(220px, 30vh)` box so a file with many structure entries no longer pushes the project tree out of view; add a 60-item interaction test.
-- Split `context_builder/budget.rs` (context_builder 1735 → 1669 lines) and `code_service/language.rs` (code_service 1383 → 1274 lines), behavior unchanged, all tests pass.
-- Move model-settings, generation, and prompt-registry copy into the resource layer (`copy.ts`) with zh-CN and en entries; `ModelSettingsDialog` now consumes the copy layer instead of inline strings.
+- 增加脱敏反馈包预览、项目级阅读进度、解释错误摘要和模型连接测试。
+- 增加中型与压力项目夹具，覆盖多语言、大文件、二进制、非 UTF-8 和深层目录场景。
+- 为错误操作提供稳定错误码和明确的重新选择、重试、网络检查等恢复路径。
+- 为长结构列表和窄窗口改进可用性，并继续拆分大型模块以保持可维护性。
 
-### 0.11.0-beta.3
+## [0.11.0-beta.3]
 
-- Promote the internal beta phase to `0.11.0-beta.3` with execution-level prompt gray rollout and Linux development validation.
-- Add prompt version registry persistence (schema v3) with `system_prompt_template` and `user_prompt_template` columns; the explanation service loads the selected version's templates and sends them as the system/user messages to the provider, so a canary version truly changes the prompt content.
-- Implement stable canary rollout via `sha256(project_id:file_path:target_id)` sampling so the same target resolves to the same version across regenerations.
-- Add atomic `rollback_prompt_version` and `list_prompt_versions` Tauri commands, plus a Prompt Registry management dialog that lists, registers, edits, and rolls back versions.
-- Harden prompt template handling: custom user templates must include the `{payload}` placeholder; partial upserts preserve existing templates via COALESCE; `load_prompt_templates` propagates database errors instead of swallowing them.
-- Validate Linux/Debian development: `npm run doctor:linux` and `npm run verify:linux` pass on WSL Ubuntu 24.04 with Rust 1.96.1; `npm run tauri dev` launches the desktop app via WSLg.
-- Fix Linux reproducibility: remove the `powershell.exe` script-shell override, prepend `~/.cargo/bin` to PATH in cargo/doctor scripts, and add a header fallback for `libxdo-dev` which ships no pkg-config file.
-- Extract `persistence/explanation_hydration.rs` from `persistence_service.rs` (1996 → ~1300 lines) continuing the workspace-state splitting by responsibility.
+### 提示词与 Linux 验证
 
-### 0.11.0-beta.2
+- 增加持久化提示词版本库、稳定 canary 抽样、版本回滚和 Prompt Registry 管理。
+- 要求自定义用户提示词保留上下文占位，并使部分更新保留已有模板。
+- 在 Linux/Debian 路径验证开发、测试与桌面启动，并改善原生依赖检测。
 
-- Promote the internal beta phase to `0.11.0-beta.2` with formalised diagnosability and regression coverage.
-- Land a backend `AppError` taxonomy that propagates stable codes to the frontend parser.
-- Add React Testing Library interaction coverage for the workspace controllers (open file, open project, refresh, feedback).
-- Cover migration rollback, corrupted database, and credential-store failure paths in unit tests.
-- Define an internal beta feedback template, crash/log redaction rules, and a regression checklist.
-- Add a cross-module Authenticode signing and verification framework that records unsigned-internal-beta builds without requiring a real certificate, and ships a unit-testable Node policy module.
-- Extract a user-facing copy resource layer that reserves an English UI entry alongside the shipped Chinese strings.
-- Update the topbar stage badge, version metadata, and beta acceptance docs to reflect the Beta 2 milestone.
+## [0.11.0-beta.2]
 
-### 0.11.0-beta.1
+### 可诊断性与回归基础
 
-- Start the `0.11.0-beta.1` internal beta phase with explicit quality, architecture, and iteration standards.
-- Add transactional SQLite migrations driven by `PRAGMA user_version`, including legacy and future-schema tests.
-- Add an `LlmProvider` boundary with stable provider error categories.
-- Extract explanation-context and model-generation lifecycles from the main React container.
-- Add cross-platform Cargo script entry points and a GitHub Actions quality workflow.
-- Add application smoke and serialized-error tests.
-- Compact long file-structure lists around the active editor line, with collapse and show-all controls.
-- Keep expanded file structures inside a bounded scroll area so long files do not hide the project tree.
-- Include test files in first-mile reading paths when they are meaningful project entry points.
-- Clarify the sample login flow across entry, business, and data files.
-- Prevent project navigation labels from overflowing narrow sidebars.
+- 建立后端 AppError 分类并将稳定错误码传递给前端。
+- 增加工作区交互、迁移回滚、损坏数据库和凭据存储失败的回归覆盖。
+- 建立内测反馈模板、日志脱敏规则和回归检查表。
+- 增加未签名内测包的签名策略框架与用户文案资源层。
 
-## v0.10.0 - 2026-06-11
+## [0.11.0-beta.1]
 
-- Added deterministic project file classification and recommended reading paths.
-- Added SQLite persistence for project guides and file-level reading progress.
-- Added Files / Reading Path navigation in the project sidebar.
-- Expanded the no-API-key sample into a three-file entry, business, and data flow.
-- Added structured Python and SQL explanation support.
-- Added real project hierarchy, safe text previews, and code change detection.
-- Added reproducible Windows x64 NSIS and MSI release packaging.
-- Embedded the WebView2 bootstrapper and GNU WebView2 runtime loader for standalone startup.
-- Added branded Windows application icons, release manifests, and SHA-256 checksums.
-- Verified install, independent launch, restart recovery, uninstall data retention, and reinstall recovery.
+### 可维护的内测基线
 
-## v0.1.0
+- 引入以 SQLite user_version 驱动的事务迁移以及旧/未来 schema 测试。
+- 建立 LLM 提供方边界，拆分解释上下文与模型生成生命周期。
+- 增加跨平台 Cargo 命令、GitHub Actions 质量门禁和应用 smoke。
+- 改进文件结构列表的折叠、滚动与窄侧栏显示。
 
-- Initialized the CodeReader app shell for Sprint 0.
+## [0.10.0] - 2026-06-11
+
+### 连续阅读能力
+
+- 增加确定性的项目文件分类、推荐阅读路径、项目指引和文件级阅读进度。
+- 增加 Python 与 SQL 的结构化解释、真实项目层级、安全文本预览和代码变更检测。
+- 提供早期 Windows x64 NSIS/MSI 发布包装、校验和及安装/重启/卸载恢复验证。
+
+## [0.1.0]
+
+### 起点
+
+- 初始化 CodeReader 桌面阅读器外壳。
+
+## 历史档案说明
+
+0.11 内测的细粒度任务、验收报告、签名方案和真实项目记录没有被删除，而是保存在 docs/history/beta。更早的 MVP 和 VS Code 扩展方向同样保存在 docs/history 对应目录。它们用于理解项目决策，不应覆盖当前 1.0 生产约束或公开文档。

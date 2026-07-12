@@ -16,6 +16,29 @@ CodeReader is a maintained local-first production desktop reader, not an MVP exp
 
 Before claiming completion, run the relevant frontend, Rust, migration, privacy, race, packaging, and documentation gates from a clean checkout.
 
+## Whole-Product Review and Remediation Standard
+
+When reviewing, diagnosing, or repairing CodeReader, work from the whole
+product and release lifecycle rather than the narrowest reported symptom.
+
+- Inspect and report relevant product behavior, compatibility, privacy,
+  accessibility, documentation, historical-version obligations, packaging,
+  release evidence, operations, and maintainability implications.
+- State what was verified, what was not verified, and every material remaining
+  gap. A green local test or CI job is evidence for its own gate only; it is
+  never sufficient evidence that the product or public release is complete.
+- Prefer the most complete safe remediation that satisfies the production
+  contract, including user-facing documentation and regression coverage, over
+  the quickest patch or a minimal symptom suppression.
+- Do not silently narrow the requested scope to save time, tokens, or tooling
+  effort. If a complete solution needs additional authority, native hardware,
+  external credentials, or maintainer action, complete every safe prerequisite
+  first and explicitly hand off the exact outstanding action.
+- Treat public communication as a release gate: README content, installation,
+  uninstall, verification, troubleshooting, release notes, known limitations,
+  and version history must be accurate, understandable, and maintained along
+  with the code they describe.
+
 ## Project-Owned Directory Policy
 
 CodeReader's repository conventions override defaults suggested by external
