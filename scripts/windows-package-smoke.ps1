@@ -1,9 +1,10 @@
 param(
-    [Parameter(Mandatory)][ValidateSet("x64", "arm64")][string]$Architecture,
-    [Parameter(Mandatory)][string]$ReleaseTag,
-    [Parameter(Mandatory)][string]$CommitSha,
-    [Parameter(Mandatory)][string]$ArtifactDirectory,
-    [Parameter(Mandatory)][string]$Output
+    [ValidateSet("x64", "arm64")][string]$Architecture,
+    [string]$ReleaseTag,
+    [string]$CommitSha,
+    [string]$ArtifactDirectory,
+    [string]$Output,
+    [switch]$SelfTest
 )
 
 $ErrorActionPreference = "Stop"
@@ -28,12 +29,25 @@ function Get-CodeReaderUninstallEntry {
         Select-Object -First 1
 }
 
+function Normalize-CodeReaderInstallLocation {
+    param([AllowNull()][string]$InstallLocation)
+    if ([string]::IsNullOrWhiteSpace($InstallLocation)) { return $null }
+
+    $normalized = $InstallLocation.Trim()
+    if ($normalized.Length -ge 2 -and $normalized.StartsWith('"') -and $normalized.EndsWith('"')) {
+        $normalized = $normalized.Substring(1, $normalized.Length - 2).Trim()
+    }
+    if ([string]::IsNullOrWhiteSpace($normalized)) { return $null }
+    return $normalized
+}
+
 function Resolve-CodeReaderExecutable {
     param($Entry)
     $candidates = @()
-    if ($Entry.InstallLocation) {
-        $candidates += Join-Path $Entry.InstallLocation "CodeReader.exe"
-        $candidates += Join-Path $Entry.InstallLocation "codereader.exe"
+    $installLocation = Normalize-CodeReaderInstallLocation ([string]$Entry.InstallLocation)
+    if ($installLocation) {
+        $candidates += Join-Path -Path $installLocation -ChildPath "CodeReader.exe"
+        $candidates += Join-Path -Path $installLocation -ChildPath "codereader.exe"
     }
     if ($Entry.DisplayIcon) {
         $candidates += ($Entry.DisplayIcon -replace ',\d+$', '').Trim('"')
@@ -74,6 +88,28 @@ function Invoke-NsisUninstall {
     elseif ($command -match '^(.+?\.exe)(?:\s|$)') { $uninstaller = $Matches[1] }
     else { throw "Cannot parse the NSIS uninstall command." }
     Invoke-ExpectedExit "Uninstall NSIS package" $uninstaller @("/S")
+}
+
+if ($SelfTest) {
+    $quoted = Normalize-CodeReaderInstallLocation '"C:\Program Files\CodeReader"'
+    if ($quoted -ne "C:\Program Files\CodeReader") { throw "Quoted InstallLocation normalization failed." }
+    $plain = Normalize-CodeReaderInstallLocation "C:\Program Files\CodeReader"
+    if ($plain -ne "C:\Program Files\CodeReader") { throw "Plain InstallLocation normalization failed." }
+    if (Normalize-CodeReaderInstallLocation '""') { throw "Empty InstallLocation must normalize to null." }
+    Write-Host "Windows package smoke helper self-test passed."
+    exit 0
+}
+
+foreach ($required in @{
+        Architecture = $Architecture
+        ReleaseTag = $ReleaseTag
+        CommitSha = $CommitSha
+        ArtifactDirectory = $ArtifactDirectory
+        Output = $Output
+    }.GetEnumerator()) {
+    if ([string]::IsNullOrWhiteSpace([string]$required.Value)) {
+        throw "Missing required parameter: $($required.Key)."
+    }
 }
 
 $expectedRunnerArch = if ($Architecture -eq "arm64") { "ARM64" } else { "AMD64" }

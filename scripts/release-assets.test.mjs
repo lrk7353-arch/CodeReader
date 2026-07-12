@@ -28,12 +28,12 @@ describe("release asset collection", () => {
       output,
       platform: "windows",
       arch: "arm64",
-      version: "1.0.0-rc.1"
+      version: "1.0.0-rc.2"
     });
 
     expect(copied.map((path) => path.split(/[\\/]/).at(-1)).sort()).toEqual([
-      "CodeReader_1.0.0-rc.1_windows_arm64.msi",
-      "CodeReader_1.0.0-rc.1_windows_arm64_setup.exe"
+      "CodeReader_1.0.0-rc.2_windows_arm64.msi",
+      "CodeReader_1.0.0-rc.2_windows_arm64_setup.exe"
     ]);
   });
 
@@ -49,7 +49,7 @@ describe("release asset collection", () => {
         output: join(root, "out"),
         platform: "linux",
         arch: "x64",
-        version: "1.0.0-rc.1"
+        version: "1.0.0-rc.2"
       })
     ).toThrow(/exactly one.*rpm/);
   });
@@ -61,11 +61,11 @@ describe("release assembly", () => {
     const input = join(root, "input");
     const output = join(root, "output");
     mkdirSync(input, { recursive: true });
-    for (const name of expectedReleaseAssetNames("1.0.0-rc.1")) {
+    for (const name of expectedReleaseAssetNames("1.0.0-rc.2")) {
       writeFileSync(join(input, name), `payload:${name}`);
     }
 
-    const assets = assembleReleaseAssets({ input, output, version: "1.0.0-rc.1" });
+    const assets = assembleReleaseAssets({ input, output, version: "1.0.0-rc.2" });
 
     expect(assets).toHaveLength(10);
     expect(readFileSync(join(output, "SHA256SUMS"), "utf8").trim().split("\n")).toHaveLength(10);
@@ -74,17 +74,17 @@ describe("release assembly", () => {
       files: expect.arrayContaining([expect.objectContaining({ fileName: assets[0].name })])
     });
     expect(JSON.parse(readFileSync(join(output, "release-metadata.json"), "utf8"))).toMatchObject({
-      version: "1.0.0-rc.1",
+      version: "1.0.0-rc.2",
       windowsAuthenticodeSigned: false,
       assets: expect.any(Array)
     });
     expect(readFileSync(join(output, "RELEASE-NOTES.md"), "utf8")).toContain("Windows 10 22H2");
     expect(readFileSync(join(output, "RELEASE-NOTES.md"), "utf8")).toContain("简体中文");
     expect(readFileSync(join(output, "RELEASE-NOTES.md"), "utf8")).toContain(
-      "CodeReader_1.0.0-rc.1_windows_x64_setup.exe"
+      "CodeReader_1.0.0-rc.2_windows_x64_setup.exe"
     );
     expect(readFileSync(join(output, "RELEASE-NOTES.md"), "utf8")).toContain(
-      "https://github.com/lrk7353-arch/CodeReader/blob/v1.0.0-rc.1/README.zh-CN.md"
+      "https://github.com/lrk7353-arch/CodeReader/blob/v1.0.0-rc.2/README.zh-CN.md"
     );
     expect(readFileSync(join(output, "RELEASE-NOTES.md"), "utf8")).not.toMatch(
       /(?:\/home\/|[A-Z]:[\\/]|\\\\Users\\\\)/
@@ -98,9 +98,9 @@ describe("release assembly", () => {
   it("rejects incomplete release input", () => {
     const root = tempRoot("assemble-incomplete");
     mkdirSync(root, { recursive: true });
-    writeFileSync(join(root, "CodeReader_1.0.0-rc.1_windows_x64_setup.exe"), "exe");
+    writeFileSync(join(root, "CodeReader_1.0.0-rc.2_windows_x64_setup.exe"), "exe");
     expect(() =>
-      assembleReleaseAssets({ input: root, output: join(root, "out"), version: "1.0.0-rc.1" })
+      assembleReleaseAssets({ input: root, output: join(root, "out"), version: "1.0.0-rc.2" })
     ).toThrow(/asset set mismatch/);
   });
 });

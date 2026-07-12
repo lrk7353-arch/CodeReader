@@ -4,7 +4,7 @@
 
 CodeReader is a local-first desktop application for reading source code and Markdown with persistent, reviewable AI explanations. It opens user-selected files and directories, preserves reading progress, and detects when explanations become stale after files change.
 
-> Current channel: `1.0.0-rc.1` release candidate. Release candidates are intended for full production validation before the stable `1.0.0` publication.
+> Current channel: `1.0.0-rc.2` release candidate. Release candidates are intended for full production validation before the stable `1.0.0` publication.
 
 ## Product scope
 

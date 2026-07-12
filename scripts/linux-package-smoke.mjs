@@ -42,6 +42,10 @@ function parseArgs(argv) {
 }
 
 export function validateLinuxPackageMetadata({ deb, rpm, arch, captureOutput = capture }) {
+  const debName = captureOutput("dpkg-deb", ["-f", deb, "Package"]);
+  if (!/^[a-z0-9][a-z0-9+.-]*$/.test(debName)) {
+    fail(`Unsafe Debian package name: ${debName}.`);
+  }
   const debArch = captureOutput("dpkg-deb", ["-f", deb, "Architecture"]);
   const expectedDebArch = arch === "arm64" ? "arm64" : "amd64";
   if (debArch !== expectedDebArch)
@@ -50,6 +54,10 @@ export function validateLinuxPackageMetadata({ deb, rpm, arch, captureOutput = c
   if (!/libwebkit2gtk-4\.1-0/i.test(debDepends))
     fail("Deb package does not declare WebKitGTK 4.1.");
 
+  const rpmName = captureOutput("rpm", ["-qp", "--qf", "%{NAME}", rpm]);
+  if (!/^[A-Za-z0-9][A-Za-z0-9+._-]*$/.test(rpmName)) {
+    fail(`Unsafe RPM package name: ${rpmName}.`);
+  }
   const rpmArch = captureOutput("rpm", ["-qp", "--qf", "%{ARCH}", rpm]);
   const expectedRpmArch = arch === "arm64" ? "aarch64" : "x86_64";
   if (rpmArch !== expectedRpmArch)
@@ -58,6 +66,7 @@ export function validateLinuxPackageMetadata({ deb, rpm, arch, captureOutput = c
   if (!/libwebkit2gtk-4\.1\.so\.0|webkit2gtk/i.test(rpmRequires)) {
     fail("RPM package does not declare a WebKitGTK 4.1 runtime requirement.");
   }
+  return { debName, rpmName };
 }
 
 export function runLinuxPackageSmoke(argv = process.argv.slice(2)) {
@@ -82,7 +91,7 @@ export function runLinuxPackageSmoke(argv = process.argv.slice(2)) {
   const deb = paths.get(names.find((name) => name.endsWith(".deb")));
   const rpm = paths.get(names.find((name) => name.endsWith(".rpm")));
   const appImage = paths.get(names.find((name) => name.endsWith(".AppImage")));
-  validateLinuxPackageMetadata({ deb, rpm, arch });
+  const { debName, rpmName: installedRpmName } = validateLinuxPackageMetadata({ deb, rpm, arch });
 
   const launchScript = resolve(root, "scripts/linux-window-smoke.sh");
   run("Install Debian package", "sudo", ["apt-get", "install", "-y", deb]);
@@ -94,7 +103,7 @@ export function runLinuxPackageSmoke(argv = process.argv.slice(2)) {
     launchScript,
     "/usr/bin/codereader"
   ]);
-  run("Uninstall Debian package", "sudo", ["apt-get", "purge", "-y", "codereader"]);
+  run("Uninstall Debian package", "sudo", ["apt-get", "purge", "-y", debName]);
 
   chmodSync(appImage, 0o755);
   run(
@@ -110,8 +119,8 @@ export function runLinuxPackageSmoke(argv = process.argv.slice(2)) {
     "set -euo pipefail",
     "dnf install -y xorg-x11-server-Xvfb xdotool dbus-daemon /assets/" + rpmName,
     "dbus-run-session -- xvfb-run -a bash /repo/scripts/linux-window-smoke.sh /usr/bin/codereader",
-    "dnf remove -y codereader",
-    "! rpm -q codereader"
+    "dnf remove -y " + installedRpmName,
+    "! rpm -q " + installedRpmName
   ].join("; ");
   run("Install, launch, and uninstall RPM", "docker", [
     "run",

@@ -67,8 +67,8 @@ For the current solo-maintainer repository, `main` requires a pull request and e
 Create an annotated, signed tag when a signing identity is available:
 
 ```bash
-git tag -a v1.0.0-rc.1 -m "CodeReader 1.0.0-rc.1"
-git push origin v1.0.0-rc.1
+git tag -a v1.0.0-rc.2 -m "CodeReader 1.0.0-rc.2"
+git push origin v1.0.0-rc.2
 ```
 
 Pushing a `v1.*` tag starts `.github/workflows/release.yml`. A manual run may be used only with an existing tag.
