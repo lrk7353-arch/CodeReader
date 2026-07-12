@@ -8,6 +8,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 #[cfg(not(test))]
 use tauri::AppHandle;
 
+#[cfg(not(test))]
+use crate::app_error::AppError;
 use crate::persistence_service;
 use crate::utils::sha256_hex;
 
@@ -86,9 +88,9 @@ pub struct ProjectGuidePayload {
 pub fn generate_project_guide(
     app: AppHandle,
     request: GenerateProjectGuideRequest,
-) -> Result<ProjectGuidePayload, String> {
-    let database_path = persistence_service::database_path(&app)?;
-    generate_project_guide_at_path(&database_path, request)
+) -> Result<ProjectGuidePayload, AppError> {
+    let database_path = persistence_service::database_path(&app).map_err(AppError::database)?;
+    generate_project_guide_at_path(&database_path, request).map_err(AppError::database)
 }
 
 #[cfg_attr(not(test), tauri::command)]
@@ -96,10 +98,10 @@ pub fn generate_project_guide(
 pub fn load_project_guide(
     app: AppHandle,
     request: LoadProjectGuideRequest,
-) -> Result<Option<ProjectGuidePayload>, String> {
-    let database_path = persistence_service::database_path(&app)?;
-    let conn = persistence_service::open_database(&database_path)?;
-    load_project_guide_from_connection(&conn, &request.project_id)
+) -> Result<Option<ProjectGuidePayload>, AppError> {
+    let database_path = persistence_service::database_path(&app).map_err(AppError::database)?;
+    let conn = persistence_service::open_database(&database_path).map_err(AppError::database)?;
+    load_project_guide_from_connection(&conn, &request.project_id).map_err(AppError::database)
 }
 
 fn generate_project_guide_at_path(

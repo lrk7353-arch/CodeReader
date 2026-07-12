@@ -1,4 +1,6 @@
-use rusqlite::{params, Connection};
+#[cfg(not(test))]
+use crate::app_error::AppError;
+use rusqlite::{params, Connection, TransactionBehavior};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 #[cfg(not(test))]
@@ -101,8 +103,8 @@ pub struct PromptVersionPayload {
 pub fn upsert_prompt_version(
     app: AppHandle,
     request: UpsertPromptVersionRequest,
-) -> Result<PromptVersionPayload, String> {
-    let database_path = super::database_path(&app)?;
+) -> Result<PromptVersionPayload, AppError> {
+    let database_path = super::database_path(&app).map_err(AppError::database)?;
     let record = upsert_prompt_version_at_path(
         &database_path,
         PromptVersionRegistration {
@@ -114,15 +116,16 @@ pub fn upsert_prompt_version(
             system_prompt_template: request.system_prompt_template,
             user_prompt_template: request.user_prompt_template,
         },
-    )?;
+    )
+    .map_err(AppError::database)?;
     Ok(record_to_payload(record))
 }
 
 #[cfg(not(test))]
 #[tauri::command]
-pub fn list_prompt_versions(app: AppHandle) -> Result<Vec<PromptVersionPayload>, String> {
-    let database_path = super::database_path(&app)?;
-    let records = list_prompt_versions_at_path(&database_path)?;
+pub fn list_prompt_versions(app: AppHandle) -> Result<Vec<PromptVersionPayload>, AppError> {
+    let database_path = super::database_path(&app).map_err(AppError::database)?;
+    let records = list_prompt_versions_at_path(&database_path).map_err(AppError::database)?;
     Ok(records.into_iter().map(record_to_payload).collect())
 }
 
@@ -146,14 +149,15 @@ pub struct RollbackPromptVersionPayload {
 pub fn rollback_prompt_version(
     app: AppHandle,
     request: RollbackPromptVersionRequest,
-) -> Result<RollbackPromptVersionPayload, String> {
-    let database_path = super::database_path(&app)?;
+) -> Result<RollbackPromptVersionPayload, AppError> {
+    let database_path = super::database_path(&app).map_err(AppError::database)?;
     let (target, failed) = rollback_prompt_version_at_path(
         &database_path,
         &request.target_version,
         &request.failed_version,
         request.notes.as_deref(),
-    )?;
+    )
+    .map_err(AppError::database)?;
     Ok(RollbackPromptVersionPayload {
         target: record_to_payload(target),
         failed: record_to_payload(failed),
@@ -196,16 +200,29 @@ pub(crate) fn upsert_prompt_version_at_path(
         input.user_prompt_template = None;
     }
     validate_prompt_version(&input)?;
-    let conn = super::open_database(database_path)?;
+    let mut conn = super::open_database(database_path)?;
+    let transaction = conn
+        .transaction_with_behavior(TransactionBehavior::Immediate)
+        .map_err(super::database_error)?;
     let now = super::now_timestamp();
-    let created_at = conn
+    let created_at = transaction
         .query_row(
             "SELECT created_at FROM prompt_versions WHERE version = ?1",
             params![input.version],
             |row| row.get::<_, String>(0),
         )
         .unwrap_or_else(|_| now.clone());
-    conn.execute(
+    if input.status == "active" {
+        transaction
+            .execute(
+                "UPDATE prompt_versions
+                 SET status = 'retired', rollout_percent = 0, updated_at = ?1
+                 WHERE status = 'active' AND version <> ?2",
+                params![now, input.version],
+            )
+            .map_err(super::database_error)?;
+    }
+    transaction.execute(
         "INSERT INTO prompt_versions
          (version, status, rollout_percent, rollback_from, notes,
           system_prompt_template, user_prompt_template, created_at, updated_at)
@@ -231,6 +248,7 @@ pub(crate) fn upsert_prompt_version_at_path(
         ],
     )
     .map_err(super::database_error)?;
+    transaction.commit().map_err(super::database_error)?;
 
     load_prompt_version(&conn, &input.version)
 }
@@ -442,7 +460,9 @@ pub(crate) fn rollback_prompt_version_at_path(
     }
 
     let mut conn = super::open_database(database_path)?;
-    let tx = conn.transaction().map_err(super::database_error)?;
+    let tx = conn
+        .transaction_with_behavior(TransactionBehavior::Immediate)
+        .map_err(super::database_error)?;
     let now = super::now_timestamp();
 
     let target_exists: i64 = tx
@@ -472,19 +492,27 @@ pub(crate) fn rollback_prompt_version_at_path(
 
     tx.execute(
         "UPDATE prompt_versions
-         SET status = 'active', rollout_percent = 100, rollback_from = NULL, notes = NULL,
-             updated_at = ?2
+         SET status = 'rolled_back', rollout_percent = 0, rollback_from = ?2, notes = ?3,
+             updated_at = ?4
          WHERE version = ?1",
-        params![target_version, now],
+        params![failed_version, target_version, notes, now],
     )
     .map_err(super::database_error)?;
 
     tx.execute(
         "UPDATE prompt_versions
-         SET status = 'rolled_back', rollout_percent = 0, rollback_from = ?2, notes = ?3,
-             updated_at = ?4
+         SET status = 'retired', rollout_percent = 0, updated_at = ?1
+         WHERE status = 'active' AND version <> ?2",
+        params![now, target_version],
+    )
+    .map_err(super::database_error)?;
+
+    tx.execute(
+        "UPDATE prompt_versions
+         SET status = 'active', rollout_percent = 100, rollback_from = NULL, notes = NULL,
+             updated_at = ?2
          WHERE version = ?1",
-        params![failed_version, target_version, notes, now],
+        params![target_version, now],
     )
     .map_err(super::database_error)?;
 
@@ -1172,6 +1200,38 @@ mod tests {
             .expect("query should not error");
         assert!(templates.is_none(), "unknown version should return None");
 
+        let _ = std::fs::remove_file(database_path);
+    }
+
+    #[test]
+    fn concurrent_active_prompt_updates_leave_exactly_one_active() {
+        let database_path = temp_database_path("prompt-concurrent-active");
+        super::super::open_database(&database_path).expect("database initializes");
+        let handles = ["active-a", "active-b"].map(|version| {
+            let path = database_path.clone();
+            std::thread::spawn(move || {
+                upsert_prompt_version_at_path(
+                    &path,
+                    prompt_registration(version, "active", 100, None, None),
+                )
+            })
+        });
+        for handle in handles {
+            handle
+                .join()
+                .expect("worker joins")
+                .expect("active upsert succeeds");
+        }
+        let conn = super::super::open_database(&database_path).expect("database reopens");
+        let active_count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM prompt_versions WHERE status = 'active'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("active count queries");
+        assert_eq!(active_count, 1);
+        drop(conn);
         let _ = std::fs::remove_file(database_path);
     }
 

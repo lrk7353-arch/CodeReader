@@ -1,5 +1,6 @@
 import { useCallback, useState } from "react";
-import { errorAction, errorMessage, type ErrorAction } from "../appError";
+import packageJson from "../../../package.json";
+import { errorAction, parseAppError, type ErrorAction } from "../appError";
 import { isDesktopRuntime } from "../../services/desktopWorkspace";
 
 export interface FeedbackReport {
@@ -46,37 +47,57 @@ function redactEndpoint(endpoint: string | null): string | null {
   if (!endpoint) {
     return null;
   }
-  // Keep scheme + host, drop path/query that might carry sensitive routing.
   try {
     const url = new URL(endpoint);
-    return `${url.protocol}//${url.host}`;
+    const loopbackHosts = new Set(["127.0.0.1", "localhost", "[::1]"]);
+    if (loopbackHosts.has(url.hostname)) {
+      return "local-loopback";
+    }
+    return url.protocol === "https:" ? "remote-https" : "remote-other";
   } catch {
     return "<unparseable>";
   }
 }
 
 export function buildFeedbackReport(options: UseFeedbackReportOptions): FeedbackReport {
+  const workspaceError = options.lastWorkspaceError
+    ? redactErrorForReport(options.lastWorkspaceError)
+    : null;
+  const generationError = options.lastGenerationError
+    ? {
+        explanationId: sanitizeIdentifier(options.lastGenerationError.explanationId),
+        status: sanitizeIdentifier(options.lastGenerationError.status),
+        error:
+          options.lastGenerationError.status === "error"
+            ? "generation failed (details redacted)"
+            : "",
+        timestamp: sanitizeTimestamp(options.lastGenerationError.timestamp)
+      }
+    : null;
   return {
     generatedAt: new Date().toISOString(),
-    appVersion: "0.11.0-beta.4",
+    appVersion: packageJson.version,
     platform: typeof navigator !== "undefined" ? navigator.platform : "unknown",
     userAgent: typeof navigator !== "undefined" ? navigator.userAgent : "unknown",
     desktopRuntime: isDesktopRuntime(),
-    providerType: options.providerType,
+    providerType: sanitizeIdentifier(options.providerType),
     providerEndpoint: redactEndpoint(options.providerEndpoint),
-    providerModel: options.providerModel,
+    providerModel: options.providerModel ? sanitizeIdentifier(options.providerModel) : null,
     providerConfigured: options.providerConfigured,
-    lastWorkspaceError: options.lastWorkspaceError,
-    lastGenerationError: options.lastGenerationError,
-    recentWorkspaceStatus: options.recentWorkspaceStatus.slice(-10),
+    lastWorkspaceError: workspaceError,
+    lastGenerationError: generationError,
+    // Status text may contain a user path, source excerpt or provider response.
+    // It is deliberately excluded until statuses are stable codes end-to-end.
+    recentWorkspaceStatus: [],
     notes:
-      "This report is redacted: no API key, no source code, no full prompt, no full model response. Only stable error codes and redacted endpoint host are included."
+      "This report is redacted: no API key, no source code, no full prompt, no full model response. Only stable error codes and a coarse provider destination class are included."
   };
 }
 
 export function useFeedbackReport(options: UseFeedbackReportOptions) {
   const [lastReport, setLastReport] = useState<FeedbackReport | null>(null);
   const [busy, setBusy] = useState(false);
+  const [previewOpen, setPreviewOpen] = useState(false);
 
   const generate = useCallback(() => {
     setBusy(true);
@@ -89,22 +110,35 @@ export function useFeedbackReport(options: UseFeedbackReportOptions) {
     }
   }, [options]);
 
-  const copyReport = useCallback(async () => {
+  const preparePreview = useCallback(() => {
     const report = generate();
-    const text = JSON.stringify(report, null, 2);
+    setPreviewOpen(true);
+    return report;
+  }, [generate]);
+
+  const closePreview = useCallback(() => setPreviewOpen(false), []);
+
+  const copyPreparedReport = useCallback(async () => {
+    if (!lastReport || !previewOpen) {
+      return false;
+    }
     try {
-      await navigator.clipboard.writeText(text);
+      await navigator.clipboard.writeText(JSON.stringify(lastReport, null, 2));
+      setPreviewOpen(false);
       return true;
     } catch {
       return false;
     }
-  }, [generate]);
+  }, [lastReport, previewOpen]);
 
   return {
     busy,
     lastReport,
-    copyReport,
-    generate
+    previewOpen,
+    closePreview,
+    copyPreparedReport,
+    generate,
+    preparePreview
   };
 }
 
@@ -121,33 +155,33 @@ export function redactErrorForReport(
   if (!error) {
     return null;
   }
-  const message = redactPaths(errorMessage(error));
-  const action = errorAction(error);
-  // Extract a stable code if present, but never serialize the full object.
-  let code = "";
-  if (error && typeof error === "object" && "code" in error) {
-    const raw = (error as { code?: unknown }).code;
-    if (typeof raw === "string") {
-      code = raw;
+  const parsed = parseAppError(error);
+  const message = "Error details redacted";
+  let action = errorAction(error);
+  if (error && typeof error === "object" && "action" in error) {
+    const suppliedAction = (error as { action?: unknown }).action;
+    if (
+      suppliedAction === "retry" ||
+      suppliedAction === "openModelSettings" ||
+      suppliedAction === "checkNetwork" ||
+      suppliedAction === "checkEncoding" ||
+      suppliedAction === "none"
+    ) {
+      action = suppliedAction;
     }
   }
+  // Extract a stable code if present, but never serialize the full object.
+  const code = parsed.code ?? "";
   const detail = code ? `code: ${code}` : "<no stable code>";
   return { message, action, detail };
 }
 
-/**
- * Redact absolute paths in a string to basename only. Matches common path
- * patterns: Unix (/home/..., /Users/..., /tmp/..., /var/..., /opt/...),
- * Windows (C:\...), and UNC (\\...\...). This prevents feedback reports from
- * leaking full filesystem paths.
- */
-function redactPaths(text: string): string {
-  return text.replace(
-    /(?:[A-Za-z]:[\\/]|[\\/]{2}|~\/|\/(?:home|Users|tmp|var|opt|etc|root|mnt|srv|data)\/)[^\s"'<>]*/g,
-    (match) => {
-      const segments = match.split(/[\\/]/).filter(Boolean);
-      const basename = segments[segments.length - 1] ?? match;
-      return `<path:${basename}>`;
-    }
-  );
+/** Only allow protocol identifiers, stable IDs and model labels. */
+function sanitizeIdentifier(value: string): string {
+  return /^[A-Za-z0-9._:-]{1,120}$/.test(value) ? value : "<redacted>";
+}
+
+function sanitizeTimestamp(value: string): string {
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? "<invalid>" : parsed.toISOString();
 }

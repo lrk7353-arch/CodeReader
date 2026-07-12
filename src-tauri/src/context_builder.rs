@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::{BTreeSet, HashSet};
 
 use crate::utils::sha256_hex;
+use crate::{app_error::AppError, file_authority};
 
 mod budget;
 mod static_analysis;
@@ -20,6 +21,50 @@ pub struct BuildContextRequest {
     pub(crate) file: ContextFileInput,
     pub(crate) target: ContextTargetInput,
     pub(crate) budget: Option<ContextBudgetInput>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BuildGrantedContextRequest {
+    grant_id: String,
+    file_id: String,
+    snapshot_id: String,
+    target: ContextTargetInput,
+    budget: Option<ContextBudgetInput>,
+}
+
+#[cfg_attr(not(test), tauri::command)]
+pub fn build_granted_explanation_context(
+    request: BuildGrantedContextRequest,
+) -> Result<ContextBundle, AppError> {
+    let snapshot = file_authority::resolve_snapshot(
+        &request.grant_id,
+        &request.file_id,
+        &request.snapshot_id,
+    )?;
+    build_context_bundle(BuildContextRequest {
+        file: ContextFileInput {
+            path: snapshot.path,
+            language: snapshot.language,
+            code: snapshot.code,
+            code_nodes: snapshot
+                .nodes
+                .into_iter()
+                .map(|node| ContextNodeInput {
+                    id: node.id,
+                    node_type: node.node_type,
+                    name: node.name,
+                    start_line: node.start_line,
+                    end_line: node.end_line,
+                    symbol_id: node.symbol_id,
+                    anchor_text: node.anchor_text,
+                })
+                .collect(),
+        },
+        target: request.target,
+        budget: request.budget,
+    })
+    .map_err(|message| AppError::new("context.invalid", message))
 }
 
 #[derive(Deserialize)]
@@ -132,7 +177,7 @@ struct CandidateSnippet {
     priority: usize,
 }
 
-#[cfg_attr(not(test), tauri::command)]
+#[cfg(test)]
 pub fn build_explanation_context(request: BuildContextRequest) -> Result<ContextBundle, String> {
     build_context_bundle(request)
 }

@@ -2,13 +2,19 @@
 
 #[cfg(test)]
 use rusqlite::params;
-use rusqlite::Connection;
+use rusqlite::{Connection, OpenFlags, MAIN_DB};
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+use std::fs::OpenOptions;
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex, OnceLock};
+use std::time::Duration;
 use std::time::{SystemTime, UNIX_EPOCH};
 #[cfg(not(test))]
 use tauri::{AppHandle, Manager};
 
+#[cfg(not(test))]
+use crate::app_error::AppError;
 use crate::utils::sha256_hex;
 
 #[path = "persistence/schema.rs"]
@@ -102,6 +108,7 @@ pub use user_activity::{
 };
 
 const DATABASE_FILE_NAME: &str = "codereader.sqlite";
+const LEGACY_APP_IDENTIFIER: &str = "com.codereader.app";
 const EXPLANATION_SCHEMA_VERSION: &str = "mvp-0.1";
 const PROMPT_VERSION: &str = "mock-structure-target-v0.1";
 
@@ -193,6 +200,9 @@ pub struct ChangeSummaryPayload {
 pub struct PersistenceStatusPayload {
     database_path: String,
     initialized: bool,
+    read_only_recovery: bool,
+    backup_path: Option<String>,
+    recovery_message: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -225,6 +235,7 @@ pub struct ExplanationPayload {
     pub(crate) updated_at: String,
 }
 
+#[derive(Clone)]
 pub(crate) struct GeneratedExplanationInput {
     pub(crate) project_id: Option<String>,
     pub(crate) project_root: Option<String>,
@@ -266,39 +277,396 @@ pub(crate) struct GeneratedExplanationInput {
 pub fn hydrate_code_file_persistence(
     app: AppHandle,
     request: HydrateCodeFileRequest,
-) -> Result<HydratedCodeFilePayload, String> {
-    let database_path = database_path(&app)?;
-    hydrate_code_file_at_path(&database_path, request)
+) -> Result<HydratedCodeFilePayload, AppError> {
+    let database_path = database_path(&app).map_err(AppError::database)?;
+    hydrate_code_file_at_path(&database_path, request).map_err(AppError::database)
 }
 
 #[cfg(not(test))]
 #[tauri::command]
-pub fn initialize_persistence(app: AppHandle) -> Result<PersistenceStatusPayload, String> {
-    let database_path = database_path(&app)?;
-    open_database(&database_path)?;
-    Ok(PersistenceStatusPayload {
-        database_path: display_path(&database_path),
-        initialized: true,
-    })
+pub fn initialize_persistence(app: AppHandle) -> Result<PersistenceStatusPayload, AppError> {
+    let database_path = current_database_path(&app).map_err(AppError::database)?;
+    let preparation =
+        prepare_legacy_database(&database_path, &legacy_database_path(&database_path));
+    if preparation.is_err() {
+        let _ = set_database_state(&database_path, DatabaseState::ReadOnlyRecovery);
+    }
+    match preparation.and_then(|_| open_database(&database_path)) {
+        Ok(_) => Ok(PersistenceStatusPayload {
+            database_path: display_path(&database_path),
+            initialized: true,
+            read_only_recovery: false,
+            backup_path: latest_backup_path(&database_path).map(|path| display_path(&path)),
+            recovery_message: None,
+        }),
+        Err(_) => Ok(PersistenceStatusPayload {
+            database_path: display_path(&database_path),
+            initialized: false,
+            read_only_recovery: true,
+            backup_path: latest_backup_path(&database_path).map(|path| display_path(&path)),
+            recovery_message: Some(recovery_message(&database_path)),
+        }),
+    }
 }
 
 pub(crate) fn open_database(path: &Path) -> Result<Connection, String> {
+    let path = normalized_database_key(path);
+    let lock = database_lock(&path)?;
+    let _guard = lock
+        .lock()
+        .map_err(|_| "SQLite initialization lock is unavailable".to_string())?;
+    if database_state(&path)? == DatabaseState::ReadOnlyRecovery {
+        return Err(
+            "SQLite is in read-only recovery after an unsafe initialization failure".to_string(),
+        );
+    }
+
+    match open_database_inner(&path) {
+        Ok(conn) => {
+            set_database_state(&path, DatabaseState::Ready)?;
+            Ok(conn)
+        }
+        Err(error) => {
+            set_database_state(&path, DatabaseState::ReadOnlyRecovery)?;
+            Err(error)
+        }
+    }
+}
+
+fn open_database_inner(path: &Path) -> Result<Connection, String> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)
             .map_err(|error| format!("Failed to create database directory: {error}"))?;
     }
-    let conn = Connection::open(path).map_err(database_error)?;
-    schema::migrate(&conn)?;
+    let existed = path
+        .metadata()
+        .map(|metadata| metadata.len() > 0)
+        .unwrap_or(false);
+    let mut conn = match Connection::open(path) {
+        Ok(conn) => conn,
+        Err(error) => {
+            let error = database_error(error);
+            return Err(if existed {
+                preserve_unreadable_database(path, error)
+            } else {
+                error
+            });
+        }
+    };
+    if let Err(error) = configure_connection(&conn) {
+        drop(conn);
+        return Err(if existed {
+            preserve_unreadable_database(path, error)
+        } else {
+            error
+        });
+    }
+    if let Err(error) = verify_integrity(&conn) {
+        drop(conn);
+        return Err(if existed {
+            preserve_unreadable_database(path, error)
+        } else {
+            error
+        });
+    }
+
+    let version = schema::database_version(&conn)?;
+    let backup_path = if existed && version != schema::LATEST_DATABASE_VERSION {
+        Some(create_database_backup(&conn, path)?)
+    } else {
+        None
+    };
+    let counts_before = table_row_counts(&conn)?;
+    if let Err(error) = schema::migrate_with_verification(&mut conn, |transaction| {
+        verify_database(transaction, &counts_before)
+    }) {
+        drop(conn);
+        if let Some(backup_path) = backup_path.as_deref() {
+            restore_database_backup(backup_path, path)?;
+        }
+        return Err(error);
+    }
     Ok(conn)
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum DatabaseState {
+    Unknown,
+    Ready,
+    ReadOnlyRecovery,
+}
+
+#[derive(Default)]
+struct DatabaseRegistry {
+    locks: HashMap<PathBuf, Arc<Mutex<()>>>,
+    states: HashMap<PathBuf, DatabaseState>,
+}
+
+static DATABASE_REGISTRY: OnceLock<Mutex<DatabaseRegistry>> = OnceLock::new();
+static LEGACY_IMPORT_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+
+fn registry() -> &'static Mutex<DatabaseRegistry> {
+    DATABASE_REGISTRY.get_or_init(|| Mutex::new(DatabaseRegistry::default()))
+}
+
+fn normalized_database_key(path: &Path) -> PathBuf {
+    path.to_path_buf()
+}
+
+fn database_lock(path: &Path) -> Result<Arc<Mutex<()>>, String> {
+    let mut registry = registry()
+        .lock()
+        .map_err(|_| "SQLite state registry is unavailable".to_string())?;
+    Ok(registry
+        .locks
+        .entry(path.to_path_buf())
+        .or_insert_with(|| Arc::new(Mutex::new(())))
+        .clone())
+}
+
+fn database_state(path: &Path) -> Result<DatabaseState, String> {
+    let registry = registry()
+        .lock()
+        .map_err(|_| "SQLite state registry is unavailable".to_string())?;
+    Ok(registry
+        .states
+        .get(path)
+        .copied()
+        .unwrap_or(DatabaseState::Unknown))
+}
+
+fn set_database_state(path: &Path, state: DatabaseState) -> Result<(), String> {
+    registry()
+        .lock()
+        .map_err(|_| "SQLite state registry is unavailable".to_string())?
+        .states
+        .insert(path.to_path_buf(), state);
+    Ok(())
+}
+
+fn restore_database_backup(backup_path: &Path, database_path: &Path) -> Result<(), String> {
+    for suffix in ["-wal", "-shm"] {
+        let mut sidecar = database_path.as_os_str().to_os_string();
+        sidecar.push(suffix);
+        match std::fs::remove_file(PathBuf::from(sidecar)) {
+            Ok(()) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(format!("Failed to remove SQLite recovery sidecar: {error}")),
+        }
+    }
+    std::fs::copy(backup_path, database_path)
+        .map(|_| ())
+        .map_err(|error| format!("Database migration failed and backup restore failed: {error}"))
+}
+
+fn configure_connection(conn: &Connection) -> Result<(), String> {
+    conn.busy_timeout(Duration::from_secs(5))
+        .map_err(database_error)?;
+    let journal_mode: String = conn
+        .query_row("PRAGMA journal_mode", [], |row| row.get(0))
+        .map_err(database_error)?;
+    if !journal_mode.eq_ignore_ascii_case("wal") {
+        conn.pragma_update(None, "journal_mode", "WAL")
+            .map_err(database_error)?;
+    }
+    conn.execute_batch(
+        "PRAGMA foreign_keys = ON;
+         PRAGMA synchronous = NORMAL;",
+    )
+    .map_err(database_error)
+}
+
+fn verify_integrity(conn: &Connection) -> Result<(), String> {
+    let result: String = conn
+        .query_row("PRAGMA integrity_check", [], |row| row.get(0))
+        .map_err(database_error)?;
+    if result == "ok" {
+        Ok(())
+    } else {
+        Err("SQLite integrity verification failed".to_string())
+    }
+}
+
+fn verify_database(conn: &Connection, counts_before: &[(String, i64)]) -> Result<(), String> {
+    verify_integrity(conn)?;
+    let foreign_key_errors: i64 = conn
+        .query_row("SELECT COUNT(*) FROM pragma_foreign_key_check", [], |row| {
+            row.get(0)
+        })
+        .map_err(database_error)?;
+    if foreign_key_errors != 0 {
+        return Err("SQLite foreign-key verification failed".to_string());
+    }
+    let counts_after = table_row_counts(conn)?;
+    for (table, before) in counts_before {
+        if let Some((_, after)) = counts_after.iter().find(|(name, _)| name == table) {
+            if after < before {
+                return Err(format!("SQLite row-count verification failed for {table}"));
+            }
+        }
+    }
+    Ok(())
+}
+
+fn table_row_counts(conn: &Connection) -> Result<Vec<(String, i64)>, String> {
+    let mut statement = conn
+        .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'")
+        .map_err(database_error)?;
+    let names = statement
+        .query_map([], |row| row.get::<_, String>(0))
+        .map_err(database_error)?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(database_error)?;
+    names
+        .into_iter()
+        .map(|name| {
+            let escaped = name.replace('"', "\"\"");
+            let count = conn
+                .query_row(&format!("SELECT COUNT(*) FROM \"{escaped}\""), [], |row| {
+                    row.get(0)
+                })
+                .map_err(database_error)?;
+            Ok((name, count))
+        })
+        .collect()
+}
+
+fn create_database_backup(conn: &Connection, path: &Path) -> Result<PathBuf, String> {
+    let backup_path = backup_path(path);
+    conn.backup(MAIN_DB, &backup_path, None)
+        .map_err(database_error)?;
+    let backup = Connection::open(&backup_path).map_err(database_error)?;
+    verify_integrity(&backup)?;
+    Ok(backup_path)
+}
+
+fn create_raw_backup(path: &Path) -> Result<PathBuf, String> {
+    let backup_path = backup_path(path);
+    std::fs::copy(path, &backup_path)
+        .map_err(|error| format!("Failed to preserve unreadable database: {error}"))?;
+    Ok(backup_path)
+}
+
+fn preserve_unreadable_database(path: &Path, original_error: String) -> String {
+    match create_raw_backup(path) {
+        Ok(_) => original_error,
+        Err(backup_error) => format!(
+            "{original_error}; a verified recovery backup could not be created: {backup_error}"
+        ),
+    }
+}
+
+fn recovery_message(path: &Path) -> String {
+    if latest_backup_path(path).is_some() {
+        "The local database could not be upgraded safely. The original data and a verified backup were preserved for recovery.".to_string()
+    } else {
+        "The local database could not be upgraded safely. The original data was left untouched, but CodeReader could not verify a recovery backup. Free disk space or permissions and retry recovery before making changes.".to_string()
+    }
+}
+
+fn backup_path(path: &Path) -> PathBuf {
+    let millis = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_millis())
+        .unwrap_or_default();
+    path.with_extension(format!("sqlite.backup-{millis}"))
+}
+
+fn latest_backup_path(path: &Path) -> Option<PathBuf> {
+    let parent = path.parent()?;
+    let prefix = format!("{}.", path.file_name()?.to_string_lossy());
+    let mut backups = std::fs::read_dir(parent)
+        .ok()?
+        .filter_map(Result::ok)
+        .map(|entry| entry.path())
+        .filter(|candidate| {
+            candidate.file_name().is_some_and(|name| {
+                let name = name.to_string_lossy();
+                name.starts_with(&prefix) && name.contains("backup-")
+            })
+        })
+        .collect::<Vec<_>>();
+    backups.sort();
+    backups.pop()
 }
 
 #[cfg(not(test))]
 pub(crate) fn database_path(app: &AppHandle) -> Result<PathBuf, String> {
+    let current = current_database_path(app)?;
+    if let Err(error) = prepare_legacy_database(&current, &legacy_database_path(&current)) {
+        let _ = set_database_state(&current, DatabaseState::ReadOnlyRecovery);
+        return Err(error);
+    }
+    Ok(current)
+}
+
+#[cfg(not(test))]
+fn current_database_path(app: &AppHandle) -> Result<PathBuf, String> {
     let app_data_dir = app
         .path()
         .app_data_dir()
         .map_err(|error| format!("Failed to resolve CodeReader data directory: {error}"))?;
     Ok(app_data_dir.join(DATABASE_FILE_NAME))
+}
+
+fn legacy_database_path(current: &Path) -> PathBuf {
+    current
+        .parent()
+        .and_then(Path::parent)
+        .map(|app_data_root| {
+            app_data_root
+                .join(LEGACY_APP_IDENTIFIER)
+                .join(DATABASE_FILE_NAME)
+        })
+        .unwrap_or_else(|| PathBuf::from(LEGACY_APP_IDENTIFIER).join(DATABASE_FILE_NAME))
+}
+
+fn prepare_legacy_database(current: &Path, legacy: &Path) -> Result<bool, String> {
+    let import_lock = LEGACY_IMPORT_LOCK.get_or_init(|| Mutex::new(()));
+    let _guard = import_lock
+        .lock()
+        .map_err(|_| "Legacy database import lock is unavailable".to_string())?;
+
+    // Existing production data always wins. In particular, never merge or
+    // overwrite when both identifiers already have a database.
+    if current.exists() || !legacy.exists() {
+        return Ok(false);
+    }
+    if let Some(parent) = current.parent() {
+        std::fs::create_dir_all(parent)
+            .map_err(|error| format!("Failed to create current database directory: {error}"))?;
+    }
+
+    let legacy_connection = Connection::open_with_flags(legacy, OpenFlags::SQLITE_OPEN_READ_ONLY)
+        .map_err(database_error)?;
+    verify_integrity(&legacy_connection)?;
+    let backup_path = create_database_backup(&legacy_connection, legacy)?;
+
+    let import_result = copy_file_if_absent(&backup_path, current).and_then(|_| {
+        let imported = Connection::open_with_flags(current, OpenFlags::SQLITE_OPEN_READ_ONLY)
+            .map_err(database_error)?;
+        verify_integrity(&imported)
+    });
+    if let Err(error) = import_result {
+        let _ = std::fs::remove_file(current);
+        return Err(format!("Legacy database import failed safely: {error}"));
+    }
+    Ok(true)
+}
+
+fn copy_file_if_absent(source: &Path, destination: &Path) -> Result<(), String> {
+    let mut source_file = std::fs::File::open(source)
+        .map_err(|error| format!("Failed to open verified legacy backup: {error}"))?;
+    let mut destination_file = OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(destination)
+        .map_err(|error| format!("Refused to overwrite current database: {error}"))?;
+    std::io::copy(&mut source_file, &mut destination_file)
+        .map_err(|error| format!("Failed to import verified legacy backup: {error}"))?;
+    destination_file
+        .sync_all()
+        .map_err(|error| format!("Failed to flush imported legacy database: {error}"))
 }
 
 fn stable_project_id(file: &PersistenceCodeFile) -> String {
@@ -425,6 +793,197 @@ mod tests {
         assert!(error.contains("SQLite persistence error"));
         assert_eq!(contents, b"not a sqlite database");
 
+        let backup = latest_backup_path(&database_path).expect("corrupt database is preserved");
+        assert_eq!(std::fs::read(&backup).expect("backup reads"), contents);
+        let _ = std::fs::remove_file(backup);
+        let _ = std::fs::remove_file(database_path);
+    }
+
+    #[test]
+    fn legacy_database_is_backed_up_and_rows_survive_migration() {
+        let database_path = temp_database_path("legacy-backup");
+        let conn = open_database(&database_path).expect("current database opens");
+        conn.execute(
+            "INSERT INTO projects (id, root_path, created_at, updated_at)
+             VALUES ('project:fixture', '/fixture', 'before', 'before')",
+            [],
+        )
+        .expect("fixture row inserts");
+        conn.execute_batch(
+            "DROP INDEX uq_prompt_versions_single_active;
+             PRAGMA user_version = 3;",
+        )
+        .expect("database is converted to a v3 fixture");
+        drop(conn);
+
+        let migrated = open_database(&database_path).expect("legacy database migrates");
+        let count: i64 = migrated
+            .query_row(
+                "SELECT COUNT(*) FROM projects WHERE id = 'project:fixture'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("fixture row queries");
+        assert_eq!(count, 1);
+        assert_eq!(
+            schema::database_version(&migrated).expect("version reads"),
+            schema::LATEST_DATABASE_VERSION
+        );
+        drop(migrated);
+
+        let backup = latest_backup_path(&database_path).expect("migration backup exists");
+        let backup_conn = Connection::open(&backup).expect("backup opens");
+        assert_eq!(
+            schema::database_version(&backup_conn).expect("backup version reads"),
+            3
+        );
+        drop(backup_conn);
+        let _ = std::fs::remove_file(backup);
+        let _ = std::fs::remove_file(database_path);
+    }
+
+    #[test]
+    fn supported_historical_databases_import_migrate_and_reopen_without_loss() {
+        let fixtures = [
+            (
+                "v0_10",
+                1,
+                include_str!("../tests/fixtures/persistence/v0_10.sql"),
+            ),
+            (
+                "v0_11_early",
+                2,
+                include_str!("../tests/fixtures/persistence/v0_11_early.sql"),
+            ),
+            (
+                "v0_11_current",
+                3,
+                include_str!("../tests/fixtures/persistence/v0_11_current.sql"),
+            ),
+        ];
+
+        for (name, version, fixture) in fixtures {
+            let root = temp_app_data_root(name);
+            let current = root.join("com.codereader.desktop").join(DATABASE_FILE_NAME);
+            let legacy = root.join(LEGACY_APP_IDENTIFIER).join(DATABASE_FILE_NAME);
+            create_historical_fixture(&legacy, version, fixture);
+            let legacy_bytes = std::fs::read(&legacy).expect("legacy database reads");
+
+            assert!(prepare_legacy_database(&current, &legacy).expect("legacy import succeeds"));
+            let imported = open_database(&current).expect("imported database migrates");
+            assert_eq!(
+                schema::database_version(&imported).expect("version reads"),
+                schema::LATEST_DATABASE_VERSION
+            );
+            for table in [
+                "explanation_nodes",
+                "explanation_targets",
+                "user_reading_states",
+                "project_guides",
+                "model_provider_settings",
+            ] {
+                let count: i64 = imported
+                    .query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| {
+                        row.get(0)
+                    })
+                    .expect("historical row count reads");
+                assert!(count >= 1, "{name} preserves {table}");
+            }
+            drop(imported);
+
+            let reopened = open_database(&current).expect("migrated database reopens");
+            let explanation: String = reopened
+                .query_row(
+                    "SELECT code_level_meaning FROM explanation_nodes WHERE id = 'exp:fixture'",
+                    [],
+                    |row| row.get(0),
+                )
+                .expect("historical explanation remains readable");
+            assert!(explanation.starts_with("Anonymous"));
+            drop(reopened);
+
+            assert_eq!(
+                std::fs::read(&legacy).expect("legacy source remains readable"),
+                legacy_bytes,
+                "{name} never overwrites the source database"
+            );
+            assert!(
+                latest_backup_path(&legacy).is_some(),
+                "{name} has a verified backup"
+            );
+            let _ = std::fs::remove_dir_all(root);
+        }
+    }
+
+    #[test]
+    fn legacy_import_never_overwrites_an_existing_current_database() {
+        let root = temp_app_data_root("legacy-conflict");
+        let current = root.join("com.codereader.desktop").join(DATABASE_FILE_NAME);
+        let legacy = root.join(LEGACY_APP_IDENTIFIER).join(DATABASE_FILE_NAME);
+        std::fs::create_dir_all(current.parent().expect("current parent")).expect("current dir");
+        std::fs::create_dir_all(legacy.parent().expect("legacy parent")).expect("legacy dir");
+        std::fs::write(&current, b"current-owner-data").expect("current database fixture writes");
+        std::fs::write(&legacy, b"legacy-owner-data").expect("legacy database fixture writes");
+
+        assert!(!prepare_legacy_database(&current, &legacy).expect("conflict is not imported"));
+        assert_eq!(
+            std::fs::read(&current).expect("current reads"),
+            b"current-owner-data"
+        );
+        assert_eq!(
+            std::fs::read(&legacy).expect("legacy reads"),
+            b"legacy-owner-data"
+        );
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn unsafe_initialization_blocks_later_database_writes_for_the_same_path() {
+        let database_path = temp_database_path("read-only-recovery");
+        std::fs::write(&database_path, b"not a sqlite database").expect("corrupt fixture writes");
+
+        open_database(&database_path).expect_err("unsafe initialization fails");
+        let error = open_database(&database_path).expect_err("recovery state blocks retry writes");
+        assert!(error.contains("read-only recovery"));
+        assert_eq!(
+            std::fs::read(&database_path).expect("original database remains"),
+            b"not a sqlite database"
+        );
+        let _ = std::fs::remove_file(database_path);
+    }
+
+    #[test]
+    fn recovery_message_never_claims_a_backup_when_none_exists() {
+        let database_path = temp_database_path("recovery-message");
+        let message = recovery_message(&database_path);
+        assert!(message.contains("left untouched"));
+        assert!(!message.contains("a verified backup were preserved"));
+    }
+
+    #[test]
+    fn newer_database_is_preserved_with_a_recovery_backup() {
+        let database_path = temp_database_path("future-backup");
+        let conn = open_database(&database_path).expect("current database opens");
+        conn.pragma_update(None, "user_version", schema::LATEST_DATABASE_VERSION + 1)
+            .expect("future version writes");
+        drop(conn);
+
+        let error = open_database(&database_path).expect_err("future database is rejected");
+        assert!(error.contains("newer than this CodeReader build supports"));
+        let preserved = Connection::open(&database_path).expect("original remains readable");
+        assert_eq!(
+            schema::database_version(&preserved).expect("preserved version reads"),
+            schema::LATEST_DATABASE_VERSION + 1
+        );
+        drop(preserved);
+        let backup = latest_backup_path(&database_path).expect("recovery backup exists");
+        let backup_conn = Connection::open(&backup).expect("backup opens");
+        assert_eq!(
+            schema::database_version(&backup_conn).expect("backup version reads"),
+            schema::LATEST_DATABASE_VERSION + 1
+        );
+        drop(backup_conn);
+        let _ = std::fs::remove_file(backup);
         let _ = std::fs::remove_file(database_path);
     }
 
@@ -531,8 +1090,35 @@ mod tests {
             context_sources: "[]".to_string(),
         };
 
-        let saved =
-            save_generated_explanation(&database_path, input).expect("generated explanation saves");
+        hydrate_code_file_at_path(
+            &database_path,
+            HydrateCodeFileRequest {
+                file: PersistenceCodeFile {
+                    id: "file:test".to_string(),
+                    path: "C:/test-project/src/example.ts".to_string(),
+                    project_id: Some("project:test".to_string()),
+                    project_root: Some("C:/test-project".to_string()),
+                    relative_path: Some("src/example.ts".to_string()),
+                    language: "typescript".to_string(),
+                    code: [
+                        "const input = request.value;",
+                        "const value = input;",
+                        "use(value);",
+                        "audit(value);",
+                        "return value;",
+                    ]
+                    .join("\n"),
+                    file_hash: Some("file-hash".to_string()),
+                    snapshot_id: Some("snapshot:test".to_string()),
+                    code_nodes: Vec::new(),
+                },
+                seed_explanations: Vec::new(),
+            },
+        )
+        .expect("generation input is hydrated before persistence");
+
+        let saved = save_generated_explanation(&database_path, input.clone())
+            .expect("generated explanation saves");
         assert_eq!(saved.code_meaning, "读取输入。");
         assert_eq!(saved.trust_label.as_deref(), Some("context_needed"));
 
@@ -591,6 +1177,41 @@ mod tests {
             restored.review_suggestion.as_deref(),
             Some("检查后续分支。")
         );
+
+        hydrate_code_file_at_path(
+            &database_path,
+            HydrateCodeFileRequest {
+                file: PersistenceCodeFile {
+                    id: "file:test".to_string(),
+                    path: "C:/test-project/src/example.ts".to_string(),
+                    project_id: Some("project:test".to_string()),
+                    project_root: Some("C:/test-project".to_string()),
+                    relative_path: Some("src/example.ts".to_string()),
+                    language: "typescript".to_string(),
+                    code: "const changed = true;".to_string(),
+                    file_hash: Some("file-hash:changed".to_string()),
+                    snapshot_id: Some("snapshot:test:changed".to_string()),
+                    code_nodes: Vec::new(),
+                },
+                seed_explanations: Vec::new(),
+            },
+        )
+        .expect("newer file snapshot hydrates");
+        let stale = match save_generated_explanation(&database_path, input) {
+            Ok(_) => panic!("old generation must not overwrite the newer file state"),
+            Err(error) => error,
+        };
+        assert_eq!(stale, "stale generation result");
+        let connection = open_database(&database_path).expect("database reopens");
+        let hash: String = connection
+            .query_row(
+                "SELECT content_hash FROM files WHERE id = 'file:test'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("current file hash reads");
+        assert_eq!(hash, "file-hash:changed");
+        drop(connection);
 
         let _ = std::fs::remove_file(database_path);
     }
@@ -1321,5 +1942,27 @@ mod tests {
                 .expect("system time should be after epoch")
                 .as_nanos()
         ))
+    }
+
+    fn temp_app_data_root(name: &str) -> PathBuf {
+        std::env::temp_dir().join(format!(
+            "codereader-{name}-app-data-{}",
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .expect("system time should be after epoch")
+                .as_nanos()
+        ))
+    }
+
+    fn create_historical_fixture(path: &Path, version: i64, fixture: &str) {
+        std::fs::create_dir_all(path.parent().expect("fixture parent"))
+            .expect("fixture directory creates");
+        let connection = Connection::open(path).expect("fixture database opens");
+        for migration in 1..=version {
+            schema::run_migration(&connection, migration).expect("historical schema builds");
+        }
+        connection
+            .execute_batch(fixture)
+            .expect("anonymous historical fixture loads");
     }
 }

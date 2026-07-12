@@ -19,6 +19,8 @@ npm run release:windows
 
 when validating release-chain changes.
 
+Release and platform work must also exercise the relevant native architecture. Linux x64, Linux ARM64, Windows x64, and Windows ARM64 are official `1.0` targets.
+
 ## Branches
 
 CodeReader uses a lightweight trunk-based workflow:
@@ -37,10 +39,13 @@ CodeReader uses a lightweight trunk-based workflow:
 
 Before opening a PR:
 
-- Run the relevant tests.
+- Run `npm run verify:linux` from a clean checkout when the host supports it.
+- Run targeted Windows/Linux architecture checks for platform-specific changes.
 - Update docs when behavior changes.
 - Add or update tests for user-visible behavior.
+- Add deterministic regression tests for races, migration failures, privacy boundaries, and recovery behavior.
 - Keep generated artifacts out of commits unless the PR is specifically about release evidence.
+- Do not weaken filesystem grants, bounded AI context, diagnostic redaction, backup-first migration, or stale-operation rejection without an approved architecture change.
 
 ## Commit Style
 
@@ -49,3 +54,7 @@ Use short conventional prefixes such as `feat:`, `fix:`, `docs:`, `test:`, `refa
 ## Privacy And Security
 
 Do not commit API keys, local database files, private code samples, or user logs containing secrets.
+
+Public command errors must use the shared safe `AppError` contract. Renderer code must use opaque project/file/context identifiers after native selection rather than treating arbitrary paths or provider destinations as authority. Database schema changes require supported beta fixtures, backup/rollback evidence, and integrity checks.
+
+Release-chain changes must preserve the ten required Windows/Linux x64/ARM64 packages and the checksum, SPDX SBOM, attestation, unsigned-Windows disclosure, and manual-approval gates described in `docs/release/github-release.md`.

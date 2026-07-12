@@ -1,11 +1,14 @@
 param(
     [switch]$SkipChecks,
-    [switch]$NsisOnly
+    [switch]$NsisOnly,
+    [ValidateSet("x64", "arm64")]
+    [string]$Architecture = "x64"
 )
 
 $ErrorActionPreference = "Stop"
 
 $repoRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot ".."))
+$env:CODEREADER_WINDOWS_ARCH = $Architecture
 . (Join-Path $PSScriptRoot "configure-windows-rust.ps1")
 . (Join-Path $PSScriptRoot "sign-windows-artifacts.ps1")
 $cargoTarget = if ($env:CODEREADER_CARGO_TARGET_DIR) {
@@ -95,7 +98,7 @@ try {
     $releaseRoot = $targetReleaseRoot
     $bundleRoot = Join-Path $releaseRoot "bundle"
     $artifactDirectory = [System.IO.Path]::GetFullPath(
-        (Join-Path $repoRoot "artifacts\windows-x64")
+        (Join-Path $repoRoot "artifacts\windows-$Architecture")
     )
     $repoPrefix = $repoRoot.TrimEnd(
         [System.IO.Path]::DirectorySeparatorChar,
@@ -130,7 +133,7 @@ try {
         [pscustomobject]@{
             name = $copied.Name
             bundleType = $copied.Extension.TrimStart(".").ToLowerInvariant()
-            architecture = "x86_64"
+            architecture = if ($Architecture -eq "arm64") { "aarch64" } else { "x86_64" }
             sizeBytes = $copied.Length
             sha256 = $null
             sourcePath = $bundle.FullName
@@ -165,7 +168,7 @@ try {
         product = "CodeReader"
         version = $package.version
         platform = "windows"
-        architecture = "x86_64"
+        architecture = if ($Architecture -eq "arm64") { "aarch64" } else { "x86_64" }
         generatedAt = [DateTimeOffset]::Now.ToString("o")
         artifacts = @($manifestEntries)
         signingManifest = $signingManifestPath

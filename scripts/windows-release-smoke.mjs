@@ -9,6 +9,13 @@ export const DEFAULT_RELEASE_SMOKE_OUTPUT = "artifacts/windows-evidence/release-
 export const DEFAULT_RELEASE_SMOKE_STATUS = "manual_required";
 export const ARTIFACTS_DIR = "artifacts/windows-x64";
 
+function releaseArtifactsDirectory(architecture) {
+  if (architecture !== "x64" && architecture !== "arm64") {
+    throw new Error(`Unsupported Windows smoke architecture: ${architecture}`);
+  }
+  return `artifacts/windows-${architecture}`;
+}
+
 export function parseSmokeArgs(argv) {
   const result = { output: null, help: false };
   for (let i = 0; i < argv.length; i += 1) {
@@ -241,12 +248,14 @@ export function runWindowsReleaseSmoke({
   args = [],
   stdout = process.stdout,
   cwd = process.cwd(),
-  generatedAt
+  generatedAt,
+  architecture = process.env.CODEREADER_WINDOWS_ARCH ?? "x64"
 } = {}) {
   const { output } = parseSmokeArgs(args);
   const outputPath = output ?? DEFAULT_RELEASE_SMOKE_OUTPUT;
   const targetPath = resolve(cwd, outputPath);
-  const automated = runAutomatedReleaseChecks();
+  const artifactsDir = resolve(root, releaseArtifactsDirectory(architecture));
+  const automated = runAutomatedReleaseChecks({ artifactsDir });
   const template = buildReleaseSmokeTemplate({
     platform: process.platform,
     cwd,

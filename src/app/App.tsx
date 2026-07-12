@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useMemo, useRef, useState } from "react";
 import {
   BookOpen,
   FilePlus2,
@@ -6,14 +6,17 @@ import {
   RefreshCw,
   Settings2,
   Tags,
-  ClipboardList
+  ClipboardList,
+  ListTodo
 } from "lucide-react";
 import { FileExplorer } from "../features/file-explorer/FileExplorer";
-import { MonacoCodeViewer } from "../features/code-viewer/MonacoCodeViewer";
+import { ReadableFileViewer } from "../features/code-viewer/ReadableFileViewer";
 import { ExplanationPanel } from "../features/explanation-panel/ExplanationPanel";
 import { GenerationConfirmDialog } from "../features/explanation-generation/GenerationConfirmDialog";
 import { ModelSettingsDialog } from "../features/model-settings/ModelSettingsDialog";
 import { PromptRegistryDialog } from "../features/prompt-registry/PromptRegistryDialog";
+import { FeedbackReportDialog } from "../features/feedback-report/FeedbackReportDialog";
+import { TaskCenter } from "../features/task-center/TaskCenter";
 import { getAppCopy } from "./copy";
 import { useExplanationContext } from "./hooks/useExplanationContext";
 import { useExplanationFeedback } from "./hooks/useExplanationFeedback";
@@ -28,10 +31,13 @@ import type { ErrorAction } from "./appError";
 
 export function App() {
   const copy = getAppCopy();
+  const [taskCenterOpen, setTaskCenterOpen] = useState(false);
+  const taskCenterButtonRef = useRef<HTMLButtonElement>(null);
   const {
     copyErrorDetail,
     databasePath,
     displayedProjectGuide,
+    expandDirectory,
     filesForExplorer,
     guideFocusToken,
     hydratedExplanations,
@@ -130,6 +136,9 @@ export function App() {
   }, [copy, selectedExplanation, selectedFile.capability]);
   return (
     <main className="app-shell">
+      <a className="skip-link" href="#workspace-content">
+        跳到阅读区
+      </a>
       <header className="topbar">
         <div className="brand">
           <span className="brand-mark" aria-hidden="true">
@@ -182,15 +191,7 @@ export function App() {
           </button>
           <button
             type="button"
-            onClick={() => {
-              void feedbackReport.copyReport().then((ok) => {
-                setWorkspaceStatus(
-                  ok
-                    ? "反馈包已复制到剪贴板（脱敏，可粘贴到反馈）。"
-                    : "反馈包复制失败：剪贴板不可用，请重试。"
-                );
-              });
-            }}
+            onClick={feedbackReport.preparePreview}
             disabled={feedbackReport.busy}
             title="导出脱敏反馈包到剪贴板"
           >
@@ -213,6 +214,17 @@ export function App() {
                 ? copy.updates.checking
                 : copy.actions.update}
             </span>
+          </button>
+          <button
+            ref={taskCenterButtonRef}
+            type="button"
+            onClick={() => setTaskCenterOpen((current) => !current)}
+            aria-expanded={taskCenterOpen}
+            aria-controls="task-center"
+            title="查看后台任务"
+          >
+            <ListTodo size={16} aria-hidden="true" />
+            <span>任务</span>
           </button>
         </div>
         <div className="topbar-status">
@@ -248,7 +260,12 @@ export function App() {
         </div>
       </header>
 
-      <section className="workspace" aria-label="CodeReader workspace">
+      <section
+        id="workspace-content"
+        className="workspace"
+        aria-label="CodeReader workspace"
+        tabIndex={-1}
+      >
         <FileExplorer
           files={filesForExplorer}
           guideFocusToken={guideFocusToken}
@@ -261,8 +278,9 @@ export function App() {
           workspaceName={workspaceName}
           onSelectFile={selectFile}
           onSelectExplanation={selectExplanation}
+          onExpandDirectory={(directoryId) => void expandDirectory(directoryId)}
         />
-        <MonacoCodeViewer
+        <ReadableFileViewer
           file={selectedFileForViewer}
           selectedExplanation={selectedExplanation}
           onSelectExplanation={selectExplanation}
@@ -323,6 +341,20 @@ export function App() {
         <UpdateCheckStatus state={updateCheck.state} copy={copy.updates} />
       </footer>
 
+      <div id="task-center">
+        <TaskCenter
+          generationStatus={modelWorkflow.generation.status}
+          open={taskCenterOpen}
+          returnFocusRef={taskCenterButtonRef}
+          updateState={updateCheck.state}
+          workspaceBusy={isWorkspaceBusy}
+          onCancelGeneration={modelWorkflow.generation.cancel}
+          onClose={() => setTaskCenterOpen(false)}
+          onRetryGeneration={modelWorkflow.generation.request}
+          onRetryUpdate={() => void updateCheck.check()}
+        />
+      </div>
+
       <ModelSettingsDialog
         busy={modelWorkflow.settings.busy}
         config={modelWorkflow.config}
@@ -344,6 +376,20 @@ export function App() {
         onRefresh={promptRegistry.refresh}
         onRollback={promptRegistry.rollback}
         onUpsert={promptRegistry.upsert}
+      />
+      <FeedbackReportDialog
+        open={feedbackReport.previewOpen}
+        report={feedbackReport.lastReport}
+        onCancel={feedbackReport.closePreview}
+        onCopy={() => {
+          void feedbackReport.copyPreparedReport().then((ok) => {
+            setWorkspaceStatus(
+              ok
+                ? "反馈包已复制到剪贴板（已预览并脱敏）。"
+                : "反馈包复制失败：剪贴板不可用，请重试。"
+            );
+          });
+        }}
       />
       {modelWorkflow.config && explanationContext.bundle && selectedExplanation ? (
         <GenerationConfirmDialog

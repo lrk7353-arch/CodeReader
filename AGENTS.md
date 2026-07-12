@@ -1,5 +1,21 @@
 # AGENTS.md
 
+## Production Product Contract
+
+CodeReader is a maintained local-first production desktop reader, not an MVP experiment.
+
+- The supported `1.0` release targets Windows and Linux on x64 and ARM64. macOS is a next-version target.
+- Users may open any file or directory selected through the native picker. The renderer must not gain arbitrary filesystem or network authority.
+- Existing `0.10.x` and `0.11.x` explanations, progress, prompts, model configuration, and credential references are compatibility obligations.
+- Database migrations require a verified backup, transactional changes, integrity checks, and a non-destructive recovery path.
+- Source code, prompts, model responses, credentials, and personal absolute paths must not enter exported diagnostics.
+- Background operations must be target-bound; stale work must never replace the current document or state.
+- A public release requires the complete Windows/Linux x64/ARM64 package matrix, native smoke evidence, checksums, SPDX SBOM, and artifact attestations.
+- Never describe Windows packages as signed unless Authenticode verification actually passed.
+- Changes to these invariants require an architecture decision in `docs/architecture/` and maintainer approval.
+
+Before claiming completion, run the relevant frontend, Rust, migration, privacy, race, packaging, and documentation gates from a clean checkout.
+
 ## Project-Owned Directory Policy
 
 CodeReader's repository conventions override defaults suggested by external

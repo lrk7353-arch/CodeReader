@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { ContextPreviewStatus } from "../../features/context-preview/ContextPreview";
 import {
   generateExplanation,
+  cancelGeneration as cancelGenerationRequest,
   getModelConfig,
   isDesktopRuntime,
   resetModelConfig,
@@ -16,7 +17,8 @@ import type {
   ModelConfig,
   SaveModelConfigInput
 } from "../../types/explanation";
-import { errorMessage } from "../appError";
+import { errorMessage, safeErrorDetail } from "../appError";
+import { createOperationGate } from "./operationGate";
 
 export type GenerationStatus = "idle" | "generating" | "error";
 
@@ -53,6 +55,33 @@ export function useModelWorkflow({
     errorDetail: string;
     timestamp: string;
   } | null>(null);
+  const generationGateRef = useRef(createOperationGate());
+  const activeGenerationIdRef = useRef<string | null>(null);
+  const targetKey = `${file.id}:${file.fileHash ?? "no-hash"}:${explanation?.id ?? "none"}:${contextBundle?.contextId ?? "none"}`;
+  const renderedTargetRef = useRef(targetKey);
+  if (renderedTargetRef.current !== targetKey) {
+    renderedTargetRef.current = targetKey;
+    generationGateRef.current.invalidate(targetKey);
+  }
+
+  const abortNativeGeneration = useCallback(() => {
+    const operationId = activeGenerationIdRef.current;
+    activeGenerationIdRef.current = null;
+    if (operationId && isDesktopRuntime()) {
+      void cancelGenerationRequest(operationId).catch(() => {
+        // The identity gate remains the final UI-write safeguard if the
+        // request completed before native cancellation arrived.
+      });
+    }
+  }, []);
+
+  useEffect(
+    () => () => {
+      abortNativeGeneration();
+      generationGateRef.current.invalidate(null);
+    },
+    [abortNativeGeneration, targetKey]
+  );
 
   useEffect(() => {
     if (!isDesktopRuntime()) {
@@ -110,9 +139,13 @@ export function useModelWorkflow({
     setGenerationStatus("generating");
     setGenerationError("");
     const explanationId = explanation.id;
+    const operation = generationGateRef.current.begin(targetKey);
+    const operationId = `generation:${operation.epoch}:${operation.operationId}`;
+    activeGenerationIdRef.current = operationId;
     const timestamp = new Date().toISOString();
     try {
-      const result = await generateExplanation(file, explanation);
+      const result = await generateExplanation(file, explanation, operationId);
+      if (!generationGateRef.current.isCurrent(operation)) return;
       onGenerated(result);
       setGenerationStatus("idle");
       setLastGeneration({
@@ -126,6 +159,7 @@ export function useModelWorkflow({
         `解释已生成并保存：${result.model}${result.attempts > 1 ? "（结构修复后通过）" : ""}`
       );
     } catch (cause) {
+      if (!generationGateRef.current.isCurrent(operation)) return;
       const message = errorMessage(cause);
       const detail = extractGenerationErrorDetail(cause);
       setGenerationStatus("error");
@@ -138,8 +172,12 @@ export function useModelWorkflow({
         timestamp
       });
       onWorkspaceStatus(message);
+    } finally {
+      if (activeGenerationIdRef.current === operationId) {
+        activeGenerationIdRef.current = null;
+      }
     }
-  }, [config, contextBundle, explanation, file, onGenerated, onWorkspaceStatus]);
+  }, [config, contextBundle, explanation, file, onGenerated, onWorkspaceStatus, targetKey]);
 
   const persistConfig = useCallback(
     async (input: SaveModelConfigInput) => {
@@ -184,7 +222,7 @@ export function useModelWorkflow({
       setConnectionResult("");
       try {
         const result = await testModelConnection(input);
-        setConnectionResult(`连接成功：${result.model} 返回 "${result.echo.slice(0, 40)}"`);
+        setConnectionResult(`连接成功：${result.model}`);
         onWorkspaceStatus(`模型连接测试通过：${result.model}`);
       } catch (cause) {
         const message = errorMessage(cause);
@@ -207,10 +245,12 @@ export function useModelWorkflow({
   }, [onWorkspaceStatus]);
 
   const cancelGeneration = useCallback(() => {
+    abortNativeGeneration();
+    generationGateRef.current.invalidate(targetKey);
     setConfirmOpen(false);
     setGenerationStatus("idle");
     setGenerationError("");
-  }, []);
+  }, [abortNativeGeneration, targetKey]);
 
   const copyGenerationError = useCallback(async () => {
     if (!lastGeneration || !lastGeneration.errorDetail) {
@@ -255,20 +295,7 @@ export function useModelWorkflow({
 }
 
 function extractGenerationErrorDetail(error: unknown): string {
-  if (typeof error === "string") {
-    return error;
-  }
-  if (error instanceof Error) {
-    return `${error.name}: ${error.message}`;
-  }
-  if (error && typeof error === "object") {
-    try {
-      return JSON.stringify(error);
-    } catch {
-      return "<unserializable error>";
-    }
-  }
-  return "<unknown error>";
+  return safeErrorDetail(error);
 }
 
 function formatGenerationErrorSummary(entry: {
@@ -279,13 +306,9 @@ function formatGenerationErrorSummary(entry: {
   timestamp: string;
 }): string {
   return [
-    "CodeReader 解释生成错误摘要",
-    `时间: ${entry.timestamp}`,
-    `目标: ${entry.explanationId}`,
-    `状态: ${entry.status}`,
-    `错误: ${entry.error}`,
-    "",
-    "错误详情:",
+    "CodeReader generation diagnostic",
+    `timestamp: ${entry.timestamp}`,
+    `status: ${entry.status}`,
     entry.errorDetail
   ].join("\n");
 }

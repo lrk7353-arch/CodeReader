@@ -5,12 +5,15 @@ export interface AppErrorInfo {
 
 const FALLBACK_MESSAGE = "未知错误";
 const MAX_DEPTH = 3;
+const MAX_SAFE_MESSAGE_LENGTH = 320;
 
 export function parseAppError(error: unknown): AppErrorInfo {
   const extracted = extract(error, 0);
   return {
     code: extracted?.code,
-    message: extracted?.message || FALLBACK_MESSAGE
+    message:
+      publicMessageForCode(extracted?.code) ??
+      (extracted?.message ? sanitizeErrorText(extracted.message) : FALLBACK_MESSAGE)
   };
 }
 
@@ -97,4 +100,81 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 function readOptionalString(record: Record<string, unknown>, key: string): string | undefined {
   const raw = record[key];
   return typeof raw === "string" && raw.length > 0 ? raw : undefined;
+}
+
+/**
+ * Error messages cross a trust boundary before reaching the UI or clipboard.
+ * Keep the useful human-readable summary while removing common credentials,
+ * absolute paths and provider payloads, and cap its size.
+ */
+export function sanitizeErrorText(value: string): string {
+  const sanitized = redactAbsolutePaths(
+    value
+      .replace(/\b(?:sk|rk|pk)-[A-Za-z0-9_-]{8,}\b/gi, "<secret>")
+      .replace(
+        /\b(?:api[_-]?key|authorization|bearer|token|secret|password)\b\s*[:=]\s*[^\s,;]+/gi,
+        (match) => `${match.split(/[:=]/, 1)[0]}: <secret>`
+      )
+  )
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!sanitized) {
+    return FALLBACK_MESSAGE;
+  }
+  return sanitized.length > MAX_SAFE_MESSAGE_LENGTH
+    ? `${sanitized.slice(0, MAX_SAFE_MESSAGE_LENGTH)}…`
+    : sanitized;
+}
+
+export function safeErrorDetail(error: unknown): string {
+  const parsed = parseAppError(error);
+  return parsed.code && /^[A-Za-z0-9._:-]{1,120}$/.test(parsed.code)
+    ? `code: ${parsed.code}`
+    : "code: unknown";
+}
+
+/**
+ * Remove absolute paths without relying on a list of common home-directory
+ * prefixes. Diagnostics may originate from arbitrary user-selected folders,
+ * so `/workspace/alice`, Windows drive paths, UNC paths and device paths all
+ * cross the same privacy boundary. URL paths are left for the endpoint
+ * classifier and are not mistaken for local POSIX paths.
+ */
+function redactAbsolutePaths(value: string): string {
+  const windowsRedacted = value
+    .replace(/(?<![A-Za-z0-9])(?:[A-Za-z]:[\\/]|\\\\(?:\?\\|\.\\)?)[^\s"'<>]*/g, "<path:redacted>")
+    .replace(/~\/[^\s"'<>]*/g, "<path:redacted>");
+
+  return windowsRedacted.replace(
+    /\/[^\s"'<>/]+(?:\/[^\s"'<>/]*)*/g,
+    (match: string, offset: number, input: string): string => {
+      const tokenStart = Math.max(
+        input.lastIndexOf(" ", offset - 1),
+        input.lastIndexOf("\n", offset - 1),
+        input.lastIndexOf("\t", offset - 1)
+      );
+      const tokenPrefix = input.slice(tokenStart + 1, offset);
+      if (tokenPrefix.includes("://") || input[offset - 1] === "/") {
+        return match;
+      }
+      return "<path:redacted>";
+    }
+  );
+}
+
+function publicMessageForCode(code?: string): string | undefined {
+  switch (code) {
+    case "llm.timeout":
+      return "模型请求超时";
+    case "llm.connection":
+      return "无法连接模型服务";
+    case "llm.http":
+      return "模型服务返回错误";
+    case "llm.invalid_response":
+      return "模型响应格式无效";
+    case "llm.empty_response":
+      return "模型服务返回了空响应";
+    default:
+      return undefined;
+  }
 }

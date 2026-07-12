@@ -1,41 +1,95 @@
 # CodeReader
 
-CodeReader is an open source desktop IDE for reading code with persistent AI-assisted explanations. It helps you open a local project, inspect structure, generate reviewable explanations for selected code, track reading progress, and detect when explanations become stale after code changes.
+CodeReader is a local-first desktop application for reading source code and Markdown with persistent, reviewable AI explanations. It opens user-selected files and directories, preserves reading progress, and detects when explanations become stale after files change.
 
-> Current status: `0.11.0-beta.4`. CodeReader is usable for internal/beta workflows, but the public release channel is still being hardened.
+> Current channel: `1.0.0-rc.1` release candidate. Release candidates are intended for full production validation before the stable `1.0.0` publication.
 
-## What It Does
+## Product scope
 
-- Opens local files and projects in a desktop Tauri app.
-- Builds a guided reading path for small and medium codebases.
-- Generates structured explanations for JavaScript, TypeScript, Python, and SQL.
-- Stores explanations, reading state, prompt versions, and model settings locally.
-- Detects code changes and marks affected explanations as stale.
-- Runs without a hosted backend; model access is configured by the user.
+- Open any local file or directory selected through the native operating-system picker.
+- Browse ordinary files even when their format is not previewable.
+- Read JavaScript, TypeScript, Python, SQL, text, Markdown, and bounded image previews.
+- Generate structured explanations from bounded, previewable context.
+- Keep explanations, reading state, project guidance, prompt versions, and model settings locally.
+- Detect code changes and mark affected explanations stale.
+- Use OpenAI-compatible HTTPS providers or explicitly configured local loopback models.
+- Run without a CodeReader-hosted backend or mandatory telemetry.
 
-## Download
+CodeReader `1.0` is not a cloud collaboration service, autonomous code editor, or plugin marketplace. macOS packaging is planned for the next version.
 
-Public downloads are published on the GitHub Releases page:
+## Downloads and system requirements
 
-<https://github.com/lrk7353-arch/CodeReader/releases>
+Production downloads are published on [GitHub Releases](https://github.com/lrk7353-arch/CodeReader/releases).
 
-Windows beta builds are distributed as NSIS/MSI installers with SHA-256 checksum files. Unsigned beta builds may show Windows SmartScreen or publisher warnings.
+| System | Architecture | Choose one |
+| --- | --- | --- |
+| Windows 10 22H2 or Windows 11 | x64 | NSIS `setup.exe` or MSI |
+| Windows 10 22H2 or Windows 11 | ARM64 | NSIS `setup.exe` or MSI |
+| Linux, glibc 2.35+ | x64 | AppImage, `.deb`, or `.rpm` |
+| Linux, glibc 2.35+ | ARM64 | AppImage, `.deb`, or `.rpm` |
 
-Linux users can build from source while binary packaging is being stabilized.
+Official Linux baselines are Ubuntu 22.04+, Debian 12+, and Fedora 39+. Other modern glibc-based distributions may work but are community-compatible until verified.
 
-## Quick Start From Source
+Windows requires the Microsoft Edge WebView2 Evergreen Runtime. It is normally present on supported Windows installations; if CodeReader opens to a blank window, install or repair WebView2 from Microsoft and restart CodeReader. Linux packages require the distribution's WebKitGTK 4.1 runtime; `.deb` and `.rpm` package managers resolve it as a dependency, while AppImage users must provide it on the host.
+
+Use the NSIS executable for a straightforward current-user Windows installation. MSI is intended for managed installation. On Linux, use `.deb` for Debian/Ubuntu, `.rpm` for Fedora/RPM-based systems, or AppImage for a portable installation.
+
+### Windows unsigned-build notice
+
+CodeReader does not currently have an Authenticode certificate. Unless a specific Release explicitly says otherwise, Windows packages are unsigned and may trigger SmartScreen or an unknown-publisher prompt. GitHub artifact attestations, SHA-256 checksums, and the SPDX SBOM establish build provenance but do not replace Authenticode identity.
+
+Verify a downloaded package before installing:
+
+```bash
+sha256sum -c SHA256SUMS
+gh attestation verify <downloaded-package> -R lrk7353-arch/CodeReader
+```
+
+## First run and local data
+
+1. Start CodeReader.
+2. Choose **Open project** or **Open file** and select any target available to your operating-system account.
+3. Configure an OpenAI-compatible model or a local loopback model if AI explanations are needed.
+4. Review the exact bounded context and provider destination before approving external transmission.
+
+CodeReader stores its SQLite database in the platform application-data directory and stores API credentials in the operating-system credential store. Source code is not uploaded to a CodeReader service.
+
+When upgrading from supported `0.10.x` or `0.11.x` builds, CodeReader creates a database backup before migration, applies transactional migrations, and verifies the result. If migration cannot be completed safely, the application retains the original database and enters a non-destructive recovery state.
+
+## Reading behavior
+
+- Supported code files provide structure-aware navigation and AI explanation targets.
+- Markdown supports safe preview/source modes and heading navigation; raw HTML and dangerous URL schemes are not executed.
+- Plain text remains readable without structured explanation.
+- Images use bounded local preview data.
+- Unknown, binary, oversized, symlink, or special files stay visible with metadata and a reason when preview is unavailable.
+- Heavy dependency/generated directories are represented lazily and scanned only when requested.
+
+Background work is target-bound. Completing an old scan, refresh, or explanation must not replace the file currently being read.
+
+## Update policy
+
+The application may check the official GitHub repository for a newer release and open its Release page. CodeReader `1.0` does not silently download or install updates.
+
+## Development from source
 
 Requirements:
 
 - Node.js 22
 - npm
 - Rust stable
-- Tauri desktop dependencies for your OS
+- Tauri 2 desktop dependencies for the host operating system
 
 Install and verify:
 
 ```bash
 npm ci
+npm run verify:linux
+```
+
+Individual gates:
+
+```bash
 npm test
 npm run lint
 npm run format:check
@@ -51,74 +105,52 @@ Run the browser preview:
 npm run dev
 ```
 
-Run the full desktop app:
+Run the full desktop application:
 
 ```bash
 npm run tauri dev
 ```
 
-## Linux Development
+### Linux development
 
-On Debian/Ubuntu-based systems, install the Tauri system dependencies, then run:
+On Debian/Ubuntu, install the Tauri WebKitGTK dependencies, then run:
 
 ```bash
 npm run doctor:linux
 npm run verify:linux
 ```
 
-The GitHub Actions quality workflow uses the same Linux verification path.
+Build native Linux packages on the matching architecture:
 
-## Windows Release Builds
+```bash
+npm run release:linux -- --arch x64
+# On an ARM64 Linux host:
+npm run release:linux -- --arch arm64
+```
 
-On Windows PowerShell:
+### Windows package builds
+
+On native Windows PowerShell:
 
 ```powershell
 npm run release:windows
+npm run release:windows:arm64
 ```
 
-Artifacts are written to `artifacts/windows-x64/`:
+ARM64 packages require the native ARM64 MSVC Rust toolchain. The GitHub release workflow builds all four platform/architecture combinations on native GitHub-hosted runners.
 
-- `CodeReader_*_x64-setup.exe`
-- `CodeReader_*_x64_zh-CN.msi`
-- `release-manifest.json`
-- `signing-manifest.json`
-- `SHA256SUMS.txt`
+## Repository workflow
 
-## Contributing
+CodeReader uses a lightweight trunk-based workflow:
 
-Issues and pull requests are welcome. Please read `CONTRIBUTING.md` before opening a PR.
+- `main` is the only permanent branch and should remain releasable.
+- `feature/<topic>` and `fix/<topic>` are short-lived pull-request branches.
+- `release/<version>` is optional for release-candidate preparation.
+- Required quality and security checks must pass before merge.
+- Source branches are deleted after merge; force-pushing `main` is prohibited.
 
-Good first contributions include:
-
-- Reproducible bug reports with OS/app version details.
-- Documentation fixes.
-- Tests around file loading, persistence, prompt versions, and release checks.
-- Small UI improvements that preserve the current desktop workflow.
-
-## Release Policy
-
-- `main` tracks public stable release baselines.
-- `dev` is the integration branch for accepted work.
-- `codex/*`, `feature/*`, and `fix/*` are task branches.
-- GitHub Releases are the public distribution channel.
-- Automatic update installation is not enabled in the first public release; the app may only check for newer releases and point users to GitHub.
-
-## Roadmap
-
-Near-term:
-
-- Harden the public release chain.
-- Stabilize Linux packaging.
-- Add safer update discovery.
-- Improve English and Chinese copy coverage.
-
-Later:
-
-- Tauri automatic updater support.
-- Broader language support.
-- Larger-project reading workflows.
-- Team collaboration and cloud sync, only after the local-first workflow is stable.
+See [CONTRIBUTING.md](CONTRIBUTING.md), [SECURITY.md](SECURITY.md), and the [production release runbook](docs/release/github-release.md).
 
 ## License
 
-MIT. See `LICENSE`.
+MIT. See [LICENSE](LICENSE).

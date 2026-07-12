@@ -10,6 +10,7 @@ const BINARY_EXTENSIONS: &[&str] = &[
     "jpeg", "jpg", "lockb", "mov", "mp3", "mp4", "o", "obj", "otf", "pdf", "png", "so", "tar",
     "ttf", "wasm", "webm", "webp", "woff", "woff2", "zip",
 ];
+const IMAGE_EXTENSIONS: &[&str] = &["bmp", "gif", "jpeg", "jpg", "png", "webp"];
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(super) enum CodeLanguage {
@@ -105,6 +106,16 @@ pub(super) fn classify_file(
         .extension()
         .map(|value| value.to_string_lossy().to_ascii_lowercase())
         .unwrap_or_default();
+    if IMAGE_EXTENSIONS.contains(&extension.as_str()) {
+        return FileCapabilityPayload {
+            preview_kind: "image".to_string(),
+            can_preview: true,
+            can_explain: false,
+            language: "plaintext".to_string(),
+            reason: Some("Image preview is available with a strict local size limit.".to_string()),
+            size_bytes,
+        };
+    }
     if BINARY_EXTENSIONS.contains(&extension.as_str()) {
         return unavailable_capability(
             size_bytes,

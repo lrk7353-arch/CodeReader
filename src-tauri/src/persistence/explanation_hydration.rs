@@ -1,4 +1,4 @@
-use rusqlite::{params, Connection};
+use rusqlite::{params, Connection, Error as SqliteError, TransactionBehavior};
 use std::collections::HashSet;
 use std::path::Path;
 
@@ -14,6 +14,7 @@ use super::{
     CodeNodeInput, ExplanationInput, ExplanationPayload, GeneratedExplanationInput,
     HydrateCodeFileRequest, HydratedCodeFilePayload, EXPLANATION_SCHEMA_VERSION, PROMPT_VERSION,
 };
+use crate::app_error::STALE_GENERATION_PERSISTENCE_ERROR;
 use crate::change_detection::detect_changes;
 use crate::utils::sha256_hex;
 
@@ -359,7 +360,12 @@ pub(crate) fn save_generated_explanation(
     input: GeneratedExplanationInput,
 ) -> Result<ExplanationPayload, String> {
     let mut conn = open_database(database_path)?;
-    let tx = conn.transaction().map_err(database_error)?;
+    // Take the write reservation before comparing the expected file state. A
+    // concurrent hydrate cannot advance the file hash between this check and
+    // the explanation write.
+    let tx = conn
+        .transaction_with_behavior(TransactionBehavior::Immediate)
+        .map_err(database_error)?;
     let now = now_timestamp();
     let project_id = input.project_id.clone().unwrap_or_else(|| {
         let root = input
@@ -368,10 +374,52 @@ pub(crate) fn save_generated_explanation(
             .unwrap_or(input.file_path.as_str());
         format!("project:{}", &sha256_hex(root)[..20])
     });
-    let project_root = input
-        .project_root
-        .clone()
-        .unwrap_or_else(|| input.file_path.clone());
+    let current_file_state = tx.query_row(
+        "SELECT content_hash, last_analyzed_hash, language
+         FROM files
+         WHERE id = ?1 AND project_id = ?2",
+        params![input.file_id, project_id],
+        |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+            ))
+        },
+    );
+    let (current_content_hash, current_analyzed_hash, current_language) = match current_file_state {
+        Ok(state) => state,
+        Err(SqliteError::QueryReturnedNoRows) => {
+            return Err(STALE_GENERATION_PERSISTENCE_ERROR.to_string())
+        }
+        Err(error) => return Err(database_error(error)),
+    };
+    if current_content_hash != input.file_hash
+        || current_analyzed_hash != input.file_hash
+        || current_language != input.language
+    {
+        return Err(STALE_GENERATION_PERSISTENCE_ERROR.to_string());
+    }
+    let snapshot_is_current = tx
+        .query_row(
+            "SELECT EXISTS(
+               SELECT 1 FROM code_snapshots
+               WHERE id = ?1 AND project_id = ?2 AND file_id = ?3 AND content_hash = ?4
+                 AND line_count = ?5
+             )",
+            params![
+                input.snapshot_id,
+                project_id,
+                input.file_id,
+                input.file_hash,
+                input.line_count as i64
+            ],
+            |row| row.get::<_, bool>(0),
+        )
+        .map_err(database_error)?;
+    if !snapshot_is_current {
+        return Err(STALE_GENERATION_PERSISTENCE_ERROR.to_string());
+    }
     let created_at = tx
         .query_row(
             "SELECT created_at FROM explanation_nodes WHERE id = ?1",
@@ -382,50 +430,6 @@ pub(crate) fn save_generated_explanation(
     let risk_summary = join_notes(Some(&input.risk_notes));
     let depends_on_lines = serialize_line_numbers(&input.depends_on_lines)?;
     let affects_lines = serialize_line_numbers(&input.affects_lines)?;
-
-    tx.execute(
-        "INSERT INTO projects (id, root_path, created_at, updated_at)
-         VALUES (?1, ?2, ?3, ?3)
-         ON CONFLICT(id) DO UPDATE SET root_path = excluded.root_path, updated_at = excluded.updated_at",
-        params![project_id, project_root, now],
-    )
-    .map_err(database_error)?;
-    tx.execute(
-        "INSERT INTO files
-         (id, project_id, path, language, content_hash, last_analyzed_hash, status, updated_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?5, 'valid', ?6)
-         ON CONFLICT(id) DO UPDATE SET
-           project_id = excluded.project_id,
-           path = excluded.path,
-           language = excluded.language,
-           content_hash = excluded.content_hash,
-           last_analyzed_hash = excluded.last_analyzed_hash,
-           status = excluded.status,
-           updated_at = excluded.updated_at",
-        params![
-            input.file_id,
-            project_id,
-            input.file_path,
-            input.language,
-            input.file_hash,
-            now
-        ],
-    )
-    .map_err(database_error)?;
-    tx.execute(
-        "INSERT OR IGNORE INTO code_snapshots
-         (id, project_id, file_id, content_hash, line_count, snapshot_reason, created_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, 'llm_generation', ?6)",
-        params![
-            input.snapshot_id,
-            project_id,
-            input.file_id,
-            input.file_hash,
-            input.line_count as i64,
-            now
-        ],
-    )
-    .map_err(database_error)?;
 
     tx.execute(
         "INSERT INTO explanation_nodes

@@ -31,6 +31,7 @@ interface FileExplorerProps {
   workspaceName: string;
   onSelectFile: (fileId: string) => void;
   onSelectExplanation: (explanationId: string) => void;
+  onExpandDirectory?: (directoryId: string) => void;
 }
 
 export function FileExplorer({
@@ -44,7 +45,8 @@ export function FileExplorer({
   loadingFileId,
   workspaceName,
   onSelectFile,
-  onSelectExplanation
+  onSelectExplanation,
+  onExpandDirectory
 }: FileExplorerProps) {
   const [activeView, setActiveView] = useState<"files" | "guide">(projectGuide ? "guide" : "files");
   const [expandedDirectoryIds, setExpandedDirectoryIds] = useState<Set<string>>(new Set());
@@ -95,6 +97,10 @@ export function FileExplorer({
   }, [projectNodes, selectedFileId]);
 
   const toggleDirectory = (directoryId: string) => {
+    const directory = projectNodes.find((node) => node.id === directoryId);
+    if (directory?.lazy) {
+      onExpandDirectory?.(directoryId);
+    }
     setExpandedDirectoryIds((current) => {
       const next = new Set(current);
       if (next.has(directoryId)) {
@@ -156,6 +162,7 @@ export function FileExplorer({
                 <Folder size={16} aria-hidden="true" />
               )}
               <span>{node.name}</span>
+              {node.lazy ? <span className="row-meta">Load on demand</span> : null}
             </button>
             {expanded ? renderNodes(node.children, depth + 1) : null}
           </div>
@@ -352,7 +359,7 @@ export function FileExplorer({
   );
 }
 
-function FileIcon({ previewKind }: { previewKind?: "code" | "text" | "unavailable" }) {
+function FileIcon({ previewKind }: { previewKind?: "code" | "text" | "image" | "unavailable" }) {
   if (previewKind === "text") {
     return <FileText size={16} aria-hidden="true" />;
   }

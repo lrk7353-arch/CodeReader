@@ -97,7 +97,7 @@ export type EditorLanguage =
   | "xml"
   | "yaml";
 
-export type FilePreviewKind = "code" | "text" | "unavailable";
+export type FilePreviewKind = "code" | "text" | "image" | "unavailable";
 
 export interface FileCapability {
   previewKind: FilePreviewKind;
@@ -109,6 +109,7 @@ export interface FileCapability {
 }
 
 export interface CodeFile {
+  grantId?: string;
   id: string;
   name: string;
   path: string;
@@ -117,6 +118,7 @@ export interface CodeFile {
   relativePath?: string;
   language: EditorLanguage;
   code: string;
+  imageDataUrl?: string;
   fileHash?: string;
   snapshotId?: string;
   codeNodes?: CodeNode[];
@@ -164,10 +166,14 @@ export interface ProjectTreeNode {
   path: string;
   relativePath: string;
   kind: "directory" | "file";
+  lazy?: boolean;
+  truncated?: boolean;
   capability?: FileCapability;
 }
 
 export interface ProjectScanResult {
+  grantId?: string;
+  projectId?: string;
   rootPath: string;
   files: ProjectFileEntry[];
   nodes: ProjectTreeNode[];

@@ -1,3 +1,5 @@
+#[cfg(not(test))]
+use crate::app_error::AppError;
 use rusqlite::params;
 use serde::{Deserialize, Serialize};
 use std::path::Path;
@@ -44,9 +46,9 @@ pub struct SaveFeedbackPayload {
 pub fn save_reading_state(
     app: AppHandle,
     request: SaveReadingStateRequest,
-) -> Result<SaveReadingStatePayload, String> {
-    let database_path = super::database_path(&app)?;
-    save_reading_state_at_path(&database_path, request)
+) -> Result<SaveReadingStatePayload, AppError> {
+    let database_path = super::database_path(&app).map_err(AppError::database)?;
+    save_reading_state_at_path(&database_path, request).map_err(AppError::database)
 }
 
 #[cfg(not(test))]
@@ -54,9 +56,9 @@ pub fn save_reading_state(
 pub fn save_explanation_feedback(
     app: AppHandle,
     request: SaveFeedbackRequest,
-) -> Result<SaveFeedbackPayload, String> {
-    let database_path = super::database_path(&app)?;
-    save_feedback_at_path(&database_path, request)
+) -> Result<SaveFeedbackPayload, AppError> {
+    let database_path = super::database_path(&app).map_err(AppError::database)?;
+    save_feedback_at_path(&database_path, request).map_err(AppError::database)
 }
 
 pub(crate) fn save_reading_state_at_path(
