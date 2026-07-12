@@ -130,5 +130,10 @@ jobs:
       - name: Frontend tests
         run: npm test
 
+      - name: Test Windows installer-path normalization
+        if: matrix.name == 'Windows x64' || matrix.name == 'Windows ARM64'
+        shell: pwsh
+        run: ./scripts/windows-package-smoke.ps1 -SelfTest
+
       - name: Native compile check
         run: cargo check --locked --manifest-path src-tauri/Cargo.toml --target ${{ matrix.target }}

@@ -162,6 +162,7 @@ jobs:
         if: matrix.platform == 'windows'
         shell: pwsh
         run: |
+          ./scripts/windows-package-smoke.ps1 -SelfTest
           ./scripts/windows-package-smoke.ps1 `
             -Architecture "${{ matrix.arch }}" `
             -ReleaseTag "$env:RELEASE_TAG" `

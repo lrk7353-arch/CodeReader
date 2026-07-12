@@ -3,9 +3,13 @@ import { validateLinuxPackageMetadata } from "./linux-package-smoke.mjs";
 
 function metadataCapture({ debArch = "amd64", debDepends, rpmArch = "x86_64", rpmRequires } = {}) {
   return (command, args) => {
+    if (command === "dpkg-deb" && args.at(-1) === "Package") return "code-reader";
     if (command === "dpkg-deb" && args.at(-1) === "Architecture") return debArch;
     if (command === "dpkg-deb" && args.at(-1) === "Depends") {
       return debDepends ?? "libwebkit2gtk-4.1-0 (>= 2.40), libgtk-3-0";
+    }
+    if (command === "rpm" && args.includes("--qf") && args.at(-2) === "%{NAME}") {
+      return "code-reader";
     }
     if (command === "rpm" && args.includes("--qf")) return rpmArch;
     if (command === "rpm" && args[0] === "-qpR") {
@@ -17,14 +21,14 @@ function metadataCapture({ debArch = "amd64", debDepends, rpmArch = "x86_64", rp
 
 describe("Linux release package metadata", () => {
   it("accepts x64 WebKitGTK package metadata", () => {
-    expect(() =>
+    expect(
       validateLinuxPackageMetadata({
         deb: "CodeReader.deb",
         rpm: "CodeReader.rpm",
         arch: "x64",
         captureOutput: metadataCapture()
       })
-    ).not.toThrow();
+    ).toEqual({ debName: "code-reader", rpmName: "code-reader" });
   });
 
   it("accepts ARM64 WebKitGTK package metadata", () => {
@@ -55,5 +59,20 @@ describe("Linux release package metadata", () => {
         captureOutput: metadataCapture({ debDepends: "libgtk-3-0" })
       })
     ).toThrow(/WebKitGTK/);
+  });
+
+  it("rejects unsafe package metadata before it can become an uninstall command", () => {
+    const unsafeDeb = (command, args) => {
+      if (command === "dpkg-deb" && args.at(-1) === "Package") return "code-reader;rm";
+      return metadataCapture()(command, args);
+    };
+    expect(() =>
+      validateLinuxPackageMetadata({
+        deb: "CodeReader.deb",
+        rpm: "CodeReader.rpm",
+        arch: "x64",
+        captureOutput: unsafeDeb
+      })
+    ).toThrow(/Unsafe Debian package name/);
   });
 });

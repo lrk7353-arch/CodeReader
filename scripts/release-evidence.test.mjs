@@ -6,7 +6,7 @@ import { describe, expect, it } from "vitest";
 import { expectedReleaseAssetNames } from "./release-assets.mjs";
 import { verifyNativeSmokeEvidence, verifySpdxSbom } from "./release-evidence.mjs";
 
-const VERSION = "1.0.0-rc.1";
+const VERSION = "1.0.0-rc.2";
 const TAG = `v${VERSION}`;
 const SHA = "a".repeat(40);
 
@@ -100,7 +100,7 @@ describe("native release smoke evidence", () => {
 
   it("rejects a package changed after smoke", () => {
     const input = fixture();
-    writeFileSync(join(input, "CodeReader_1.0.0-rc.1_linux_arm64.rpm"), "changed");
+    writeFileSync(join(input, "CodeReader_1.0.0-rc.2_linux_arm64.rpm"), "changed");
     expect(() =>
       verifyNativeSmokeEvidence({ input, version: VERSION, tag: TAG, commitSha: SHA })
     ).toThrow(/hash mismatch/);

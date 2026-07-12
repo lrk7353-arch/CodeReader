@@ -79,7 +79,7 @@ describe("public documentation", () => {
     const changelog = read("CHANGELOG.md");
     const history = read("docs/history/version-history.zh-CN.md");
 
-    expect(changelog).toContain("1.0.0-rc.1");
+    expect(changelog).toContain("1.0.0-rc.2");
     expect(changelog).toContain("0.11.0-beta.4");
     expect(changelog).toContain("0.10.0");
     expect(changelog).toContain("0.1.0");

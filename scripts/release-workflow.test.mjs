@@ -41,6 +41,8 @@ describe("production workflows", () => {
       release.indexOf("environment: production-release")
     );
     expect(release).toContain("needs: verify-native-smoke");
+    expect(release).toContain("windows-package-smoke.ps1 -SelfTest");
+    expect(quality).toContain("Test Windows installer-path normalization");
     expect(tauri).toContain('"libwebkit2gtk-4.1-0"');
     expect(tauri).toContain('"webkit2gtk4.1"');
   });
