@@ -59,6 +59,7 @@ describe("Linux native journey evidence", () => {
   });
 
   it("keeps native probes, migration recovery, reinstall restore and asset binding mandatory", () => {
+    const runner = readFileSync("scripts/native-journey-linux.mjs", "utf8");
     const session = readFileSync("scripts/native-journey-linux-session.sh", "utf8");
     const ui = readFileSync("scripts/native-journey-ui-linux.py", "utf8");
     const workflow = readFileSync(".github/workflows/native-journey.yml", "utf8");
@@ -93,5 +94,10 @@ describe("Linux native journey evidence", () => {
       workflow.indexOf("gh release upload")
     );
     expect(workflow).not.toContain("sed -n '/fn migrate_to_v1");
+    expect(runner).not.toMatch(/run\(\s*["']bash["']\s*,\s*\[\s*["']-(?:l)?c["']/s);
+    expect(runner).not.toContain("shell: true");
+    expect(runner).toContain('"dbus-run-session"');
+    expect(runner).toContain("subprocess.run(");
+    expect(runner).toContain('["python3", driver, "--verify-restore", wrong_project, project]');
   });
 });
