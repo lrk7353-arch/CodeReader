@@ -1266,7 +1266,13 @@ WHERE created_at < CURRENT_DATE;
             ),
             (
                 "frontend",
-                vec!["index.html", "src/main.js", "src/api.js", "src/store.js", "src/view.js"],
+                vec![
+                    "index.html",
+                    "src/main.js",
+                    "src/api.js",
+                    "src/store.js",
+                    "src/view.js",
+                ],
                 vec!["html", "javascript"],
             ),
             (
@@ -1286,10 +1292,15 @@ WHERE created_at < CURRENT_DATE;
             let root = examples_dir.join(directory);
             let scan = scan_project(display_path(&root)).expect("R4 example should scan");
             assert!(!scan.truncated, "{directory} should fit the scan budget");
-            assert_eq!(scan.skipped_entries, 0, "{directory} should scan without errors");
+            assert_eq!(
+                scan.skipped_entries, 0,
+                "{directory} should scan without errors"
+            );
             for required_path in required_paths {
                 assert!(
-                    scan.files.iter().any(|file| file.relative_path == required_path),
+                    scan.files
+                        .iter()
+                        .any(|file| file.relative_path == required_path),
                     "{directory} is missing {required_path}"
                 );
             }

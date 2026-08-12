@@ -824,7 +824,13 @@ mod tests {
         let projects = [
             vec![
                 file("small-entry", "app.ts", "typescript", true, true),
-                file("small-business", "login-controller.ts", "typescript", true, true),
+                file(
+                    "small-business",
+                    "login-controller.ts",
+                    "typescript",
+                    true,
+                    true,
+                ),
                 file("small-data", "user-store.ts", "typescript", true, true),
             ],
             vec![
@@ -852,7 +858,10 @@ mod tests {
             assert!(path.len() <= MAX_READING_PATH_STEPS);
             assert!(path.iter().any(|step| step.role == "entry"));
             assert!(path.iter().any(|step| step.role == "business"));
-            if files.iter().any(|item| item.relative_path.ends_with(".sql")) {
+            if files
+                .iter()
+                .any(|item| item.relative_path.ends_with(".sql"))
+            {
                 assert!(path.iter().any(|step| step.role == "data"));
             }
         }
