@@ -46,14 +46,9 @@ function args(argv) {
   return values;
 }
 
-function run(command, commandArgs, options = {}) {
-  const result = spawnSync(command, commandArgs, { stdio: "inherit", shell: false, ...options });
-  if (result.status !== 0) fail(`${command} failed with ${result.status ?? "unknown"}.`);
-}
-
 function query(database, sql) {
   const result = spawnSync("sqlite3", [database, sql], { encoding: "utf8", shell: false });
-  if (result.status !== 0) fail(result.stderr || "SQLite journey probe failed.");
+  if (result.status !== 0) fail("SQLite journey probe failed.");
   return result.stdout.trim().split("\n");
 }
 
@@ -102,7 +97,7 @@ export function runLinuxJourney(argv = process.argv.slice(2)) {
       GTK_A11Y: "always",
       APPIMAGE_EXTRACT_AND_RUN: "1"
     };
-    run(
+    const reinstall = spawnSync(
       "dbus-run-session",
       [
         "--",
@@ -116,8 +111,9 @@ export function runLinuxJourney(argv = process.argv.slice(2)) {
         resolve(value["wrong-project"] ?? fail("Missing --wrong-project")),
         resolve(value.project ?? fail("Missing --project"))
       ],
-      { env }
+      { env, stdio: "inherit", shell: false }
     );
+    if (reinstall.status !== 0) fail("Reinstall journey probe failed.");
     const database = resolve(profile, "data/com.codereader.desktop/codereader.sqlite");
     const restored = query(
       database,
@@ -160,7 +156,12 @@ export function runLinuxJourney(argv = process.argv.slice(2)) {
     GTK_A11Y: "always",
     APPIMAGE_EXTRACT_AND_RUN: "1"
   };
-  run("gsettings", ["set", "org.gnome.desktop.interface", "enable-animations", "false"], { env });
+  const motionSetting = spawnSync(
+    "gsettings",
+    ["set", "org.gnome.desktop.interface", "enable-animations", "false"],
+    { env, stdio: "inherit", shell: false }
+  );
+  if (motionSetting.status !== 0) fail("Reduced-motion setup failed.");
   env.CODEREADER_JOURNEY_FIXTURE_010 = resolve(
     value["fixture-010"] ?? fail("Missing --fixture-010")
   );
@@ -173,9 +174,12 @@ export function runLinuxJourney(argv = process.argv.slice(2)) {
   env.CODEREADER_JOURNEY_WRONG_PROJECT = resolve(
     value["wrong-project"] ?? fail("Missing --wrong-project")
   );
-  run("bash", ["scripts/native-journey-linux-session.sh", executable, project, driver, stub], {
-    env
-  });
+  const session = spawnSync(
+    "bash",
+    ["scripts/native-journey-linux-session.sh", executable, project, driver, stub],
+    { env, stdio: "inherit", shell: false }
+  );
+  if (session.status !== 0) fail("Linux native journey session failed.");
 
   // Every phase is emitted by its own probe. Merely reaching the end of the
   // session cannot manufacture a passing record.
