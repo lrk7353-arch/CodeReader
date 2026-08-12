@@ -94,7 +94,12 @@ describe("Linux native journey evidence", () => {
       workflow.indexOf("gh release upload")
     );
     expect(workflow).not.toContain("sed -n '/fn migrate_to_v1");
-    expect(runner).not.toMatch(/run\(\s*["']bash["']\s*,\s*\[\s*["']-(?:l)?c["']/s);
+    expect(runner).not.toContain("function run(command");
+    expect(runner).not.toMatch(/spawnSync\(\s*(?!["'])[A-Za-z_$]/);
+    const spawnCommands = [...runner.matchAll(/spawnSync\(\s*(["'][^"']+["'])/g)].map(
+      (match) => match[1]
+    );
+    expect(spawnCommands).toEqual(['"sqlite3"', '"dbus-run-session"', '"gsettings"', '"bash"']);
     expect(runner).not.toContain("shell: true");
     expect(runner).toContain('"dbus-run-session"');
     expect(runner).toContain("subprocess.run(");
