@@ -14,6 +14,24 @@ const REQUIRED = [
   "long-content",
   "zoom-200-contrast"
 ];
+const REINSTALL_PROBE = `
+import subprocess, sys, time
+executable, driver, wrong_project, project = sys.argv[1:]
+app = subprocess.Popen([executable], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+try:
+    time.sleep(1)
+    subprocess.run(
+        ["python3", driver, "--verify-restore", wrong_project, project],
+        check=True,
+    )
+finally:
+    app.terminate()
+    try:
+        app.wait(timeout=5)
+    except subprocess.TimeoutExpired:
+        app.kill()
+        app.wait()
+`;
 
 function fail(message) {
   throw new Error(message);
@@ -85,10 +103,14 @@ export function runLinuxJourney(argv = process.argv.slice(2)) {
       APPIMAGE_EXTRACT_AND_RUN: "1"
     };
     run(
-      "bash",
+      "dbus-run-session",
       [
+        "--",
+        "xvfb-run",
+        "-a",
+        "python3",
         "-c",
-        'dbus-run-session -- xvfb-run -a bash -c \'"$1" >/tmp/codereader-reinstall.log 2>&1 & pid=$!; trap "kill $pid 2>/dev/null || true" EXIT; python3 "$2" --verify-restore "$3" "$4"\' bash "$0" "$1" "$2" "$3"',
+        REINSTALL_PROBE,
         executable,
         driver,
         resolve(value["wrong-project"] ?? fail("Missing --wrong-project")),
