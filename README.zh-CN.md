@@ -2,9 +2,9 @@
 
 [English](README.md) | [简体中文](README.zh-CN.md) | [版本沿革](docs/history/version-history.zh-CN.md) | [发布说明](docs/release/public-release-notes.zh-CN.md)
 
-CodeReader 是一款本地优先的桌面阅读器，用于阅读源代码、纯文本与 Markdown，并在用户明确配置模型后生成可复核的 AI 解释。它不托管你的项目文件，不是云端协作服务，也不是自动修改代码的编辑器。
+CodeReader 是一款本地优先的桌面代码认知工具。它从项目地图和推荐阅读路径出发，让你在真实代码与分层解释之间往返，保存理解状态、个人问题与复查项。它也能阅读纯文本和 Markdown，但不是云端协作服务、通用聊天或自动修改代码的编辑器。
 
-> 当前通道：1.0.0-rc.2 候选版。候选版用于完成完整的生产环境验证；稳定版将使用 1.0.0 版本号发布。
+> 当前通道：1.0.0-rc.3 候选版。候选版用于完成完整的生产环境验证；稳定版将使用 1.0.0 版本号发布。
 
 ## 适用场景与边界
 
@@ -12,7 +12,8 @@ CodeReader 是一款本地优先的桌面阅读器，用于阅读源代码、纯
 - 文件树会展示普通文件；不能安全预览的文件仍保留在列表中，并说明不能预览的原因。
 - 阅读 JavaScript、TypeScript、Python、SQL、纯文本、Markdown，以及受大小限制的本地图片预览。
 - 保存阅读进度、解释、项目指引、提示词版本和模型配置到本机。
-- 当文件变化时，将可能过期的解释标记为需要重新生成。
+- 明确区分“访问过”“用户已理解”和“代码变化后需复查”；模型生成解释不会自动增加掌握度。
+- 保存个人笔记、问题、风险及通俗/详细偏好，并在代码变化时把受影响解释加入复查。
 - 使用你明确配置的 OpenAI 兼容 HTTPS 服务，或明确配置的本机回环地址模型服务。
 
 CodeReader 不会获得任意文件系统权限：每次访问都以你在原生选择器中选定的文件或目录为界。它不会自动安装更新，也不会把源码上传到 CodeReader 自有服务器。
@@ -42,9 +43,9 @@ macOS 是下一版本目标，1.0 不提供 macOS 安装包，也不应使用其
 发布页的文件名固定包含版本、平台、架构和格式，例如：
 
 ~~~text
-CodeReader_1.0.0-rc.2_windows_x64_setup.exe
-CodeReader_1.0.0-rc.2_windows_x64.msi
-CodeReader_1.0.0-rc.2_linux_arm64.AppImage
+CodeReader_1.0.0-rc.3_windows_x64_setup.exe
+CodeReader_1.0.0-rc.3_windows_x64.msi
+CodeReader_1.0.0-rc.3_linux_arm64.AppImage
 ~~~
 
 | 使用环境 | 推荐选择 | 何时选择其他格式 |
@@ -74,7 +75,7 @@ CodeReader 当前没有 Authenticode 代码签名证书。除非某个 Release �
 MSI 面向受管设备、软件分发或管理员部署。下载匹配架构的 .msi 后，可在资源管理器中双击安装，也可以由组织的软件管理工具分发。命令行安装示例：
 
 ~~~powershell
-msiexec /i .\CodeReader_1.0.0-rc.2_windows_x64.msi
+msiexec /i .\CodeReader_1.0.0-rc.3_windows_x64.msi
 ~~~
 
 安装包本身可能请求系统权限；这取决于设备策略和安装方式。
@@ -84,7 +85,7 @@ msiexec /i .\CodeReader_1.0.0-rc.2_windows_x64.msi
 下载匹配架构的 .deb 后，在下载目录运行：
 
 ~~~bash
-sudo apt install ./CodeReader_1.0.0-rc.2_linux_x64.deb
+sudo apt install ./CodeReader_1.0.0-rc.3_linux_x64.deb
 ~~~
 
 包管理器会解析 WebKitGTK 和 GTK 依赖。安装后可从应用菜单启动 CodeReader。
@@ -94,7 +95,7 @@ sudo apt install ./CodeReader_1.0.0-rc.2_linux_x64.deb
 下载匹配架构的 .rpm 后运行：
 
 ~~~bash
-sudo dnf install ./CodeReader_1.0.0-rc.2_linux_x64.rpm
+sudo dnf install ./CodeReader_1.0.0-rc.3_linux_x64.rpm
 ~~~
 
 发行版会解析 WebKitGTK 和 GTK 依赖。使用其他 RPM 包管理器时，请使用该发行版推荐的本地 RPM 安装命令。
@@ -104,8 +105,8 @@ sudo dnf install ./CodeReader_1.0.0-rc.2_linux_x64.rpm
 AppImage 是便携文件，不会自动解决图形运行时依赖：
 
 ~~~bash
-chmod +x CodeReader_1.0.0-rc.2_linux_x64.AppImage
-./CodeReader_1.0.0-rc.2_linux_x64.AppImage
+chmod +x CodeReader_1.0.0-rc.3_linux_x64.AppImage
+./CodeReader_1.0.0-rc.3_linux_x64.AppImage
 ~~~
 
 宿主机仍需提供 WebKitGTK 4.1 与相应 GTK 运行时。若启动失败，请优先选择同一 Release 的 .deb 或 .rpm，或按发行版文档安装运行时。
@@ -113,9 +114,10 @@ chmod +x CodeReader_1.0.0-rc.2_linux_x64.AppImage
 ### 第一次打开项目
 
 1. 启动 CodeReader。
-2. 选择“打开项目”或“打开文件”。
-3. 在系统原生选择器中选择文件或文件夹。可以选择任意你有权限访问的位置。
-4. 如需 AI 解释，配置 OpenAI 兼容服务或本机模型服务，并在发送前查看并确认有限的上下文与服务地址。
+2. 优先选择“继续阅读”或“打开项目”；“体验可验证示例”可以在不配置模型时预览完整阅读结构。“打开单个文件”位于“更多”菜单。
+3. 在系统原生选择器中选择项目文件夹。CodeReader 会给出项目地图和推荐路径，从入口、核心业务逐步走向数据层与测试。
+4. 在“真实代码”和“为什么重要”之间阅读；只有你明确确认“已理解”时，关键路径掌握度才会增加。可以为当前目标写笔记、问题或风险。
+5. 如需重新生成 AI 解释，配置 OpenAI 兼容服务或本机模型服务，并在发送前查看并确认有限的上下文与服务地址。模型不可用时，已有代码、解释和个人记录仍可查看。
 
 目录中的所有普通文件会显示在左侧树中。代码、Markdown、文本和受支持图片显示在阅读区；二进制、过大、特殊文件或不安全编码文件仍可见，但会显示元数据或不可预览原因，并不会替换当前正在阅读的可预览文件。
 
@@ -129,16 +131,16 @@ chmod +x CodeReader_1.0.0-rc.2_linux_x64.AppImage
 Windows PowerShell 示例：
 
 ~~~powershell
-Get-FileHash .\CodeReader_1.0.0-rc.2_windows_x64_setup.exe -Algorithm SHA256
+Get-FileHash .\CodeReader_1.0.0-rc.3_windows_x64_setup.exe -Algorithm SHA256
 Get-Content .\SHA256SUMS
-gh attestation verify .\CodeReader_1.0.0-rc.2_windows_x64_setup.exe -R lrk7353-arch/CodeReader
+gh attestation verify .\CodeReader_1.0.0-rc.3_windows_x64_setup.exe -R lrk7353-arch/CodeReader
 ~~~
 
 Linux 示例：
 
 ~~~bash
 sha256sum -c SHA256SUMS
-gh attestation verify CodeReader_1.0.0-rc.2_linux_x64.deb -R lrk7353-arch/CodeReader
+gh attestation verify CodeReader_1.0.0-rc.3_linux_x64.deb -R lrk7353-arch/CodeReader
 ~~~
 
 命令输出的 SHA-256 必须与 <code>SHA256SUMS</code> 中同名文件完全一致。证明验证失败、Release 缺少要求的元数据，或文件名/架构不匹配时，请停止安装并在仓库提交 Issue。
@@ -169,6 +171,8 @@ gh attestation verify CodeReader_1.0.0-rc.2_linux_x64.deb -R lrk7353-arch/CodeRe
 | 文件树中看得到文件但阅读区没有内容 | 这通常表示文件是二进制、过大、特殊文件或编码不安全。它仍保留在列表中，不会覆盖当前阅读内容。 |
 | 无法直接输入一个路径打开文件 | 这是安全边界：请使用“打开文件”或“打开项目”的原生选择器授予访问范围。你可以选择任意有权限的本地位置。 |
 | AI 解释失败或连接超时 | 检查模型地址、模型名、网络或本机服务状态；重新生成前确认服务地址与即将发送的有限上下文。不要在反馈报告中粘贴 API 密钥、源码或模型回答。 |
+| 重启后无法直接恢复最近项目 | 目录权限不会被界面层永久持有。点击“继续阅读”，在原生目录选择器中重新选择同一项目；项目身份不匹配或目标已删除时，CodeReader 会保留安全预览并回到可用推荐项。 |
+| 修改代码后出现“需复查” | 这是认知状态而不是错误。重新阅读受影响解释并确认后再恢复为当前；未受影响节点应保持原状态。 |
 | 升级后进入恢复状态 | 不要删除数据库或备份。保留提示信息和脱敏反馈报告，在 GitHub Issue 中说明版本、系统、稳定错误码与复现步骤。 |
 
 反馈报告会在复制前显示脱敏预览，但你手动补充的文字不会自动替你删除敏感信息。
@@ -180,6 +184,8 @@ gh attestation verify CodeReader_1.0.0-rc.2_linux_x64.deb -R lrk7353-arch/CodeRe
 - AppImage 依赖宿主机图形运行时，不能替代发行版包的依赖管理。
 - CodeReader 只检查官方 GitHub Release 的更新信息，不会自动下载或安装更新。
 - AI 解释会向你确认的模型服务发送有限上下文；不配置模型时，阅读功能仍可使用。
+- 当前三类仓库自有项目只建立了可重复的功能验证基础；“一分钟内获得解释”“五分钟理解结构”等仍是验证目标，不是公开 SLA，也不能替代维护者真实使用判断。
+- 真实 OS 键盘/焦点、原生重启重新授权、reduced-motion、长内容和完整缩放/对比度仍有待补充原生人工证据；这不应被表述为已完成无障碍验收。
 
 ## 获取帮助与参与
 

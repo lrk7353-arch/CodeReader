@@ -25,4 +25,13 @@ describe("createOperationGate", () => {
     expect(gate.isCurrent(expandProjectA)).toBe(false);
     expect(gate.isCurrent(openProjectB)).toBe(true);
   });
+
+  it("rejects a delayed project A guide after project B starts refreshing", () => {
+    const gate = createOperationGate();
+    const projectA = gate.begin("project-a", true);
+    const projectB = gate.begin("project-b", true);
+
+    expect(gate.isCurrent(projectA)).toBe(false);
+    expect(gate.isCurrent(projectB)).toBe(true);
+  });
 });

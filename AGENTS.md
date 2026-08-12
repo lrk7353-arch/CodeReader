@@ -4,6 +4,8 @@
 
 CodeReader is a maintained local-first production desktop reader, not an MVP experiment.
 
+CodeReader 首先是一个真实软件、一个完整产品。可靠、能用、好用，优先于功能数量、技术炫技、模型广度、视觉新鲜感、自动化速度和发布时间。测试通过只证明对应门禁；如果真实项目中的黄金路径不可用，功能就尚未完成。
+
 - The supported `1.0` release targets Windows and Linux on x64 and ARM64. macOS is a next-version target.
 - Users may open any file or directory selected through the native picker. The renderer must not gain arbitrary filesystem or network authority.
 - Existing `0.10.x` and `0.11.x` explanations, progress, prompts, model configuration, and credential references are compatibility obligations.
@@ -59,14 +61,20 @@ skills, agents, IDEs, or automation tools.
 
 ## Heavy-Work Delegation
 
-For large, repetitive, or high-token implementation work, prefer delegating before doing the full job directly:
+Codex/Sol is the only default execution tree for substantial implementation work. Do not delegate implementation, repair, review, or rollback to external coding software unless the maintainer later gives explicit, renewed authorization.
 
-1. Use Zcode first when the task is large enough to benefit from a GUI assistant. Zcode currently has no reliable CLI path, so Codex should prepare a clear task brief for the user to paste/run in Zcode, then review the resulting diff and gates.
-2. If Zcode is unavailable or the task needs terminal-driven automation, use `opencode` with GLM 5.2.
-3. If that path times out or becomes unstable, use Windows Claude Code with GLM 5.2 through the DoubaoSeed coding-plan mapping.
-4. If both GLM 5.2 paths are not viable, use `opencode` with MiniMax M3 through the official MiniMax CN token plan.
-5. If those preferred routes fail, use `opencode` or Claude Code with another suitable model.
-6. Codex should stay in the reviewer/owner role when delegating: define the task, inspect the diff, run gates, fix gaps, and decide whether the result is safe to keep.
-7. If all external executors fail or produce unsafe half-finished changes, preserve useful drafts separately and only then implement the smallest verified slice directly.
+- The root Codex agent owns task decomposition, worktree protection, final gates, stage state, and commits. It does not replace the main delivery agent for routine stage implementation.
+- The main delivery agent uses `gpt-5.6-sol` at `medium` effort and works one approved R-stage at a time. It self-tests and reports its candidate result, but cannot cross a stage gate on its own.
+- The supervising agent uses `gpt-5.6-sol` at `high` effort. It remains idle while a stage is being built; after a candidate is declared complete, it independently compares the result with the architecture decision, implementation plan, this contract, and the stage exit criteria. It reports `PASS` or a structured issue list and does not edit files.
+- The repair agent uses `gpt-5.6-sol` at `medium` effort. It remains idle unless the supervisor confirms an issue, then repairs only that issue and its regression coverage. The same supervisor rechecks the repair.
+- A stage may be committed only after supervision passes, all P0–P2 issues are closed, any retained P3 has an owner and rationale, and the root agent reruns the applicable final gates. No branch is pushed and no pull request or public release is created without separate maintainer authorization.
+- If the required Sol model is unavailable, a repair cannot safely address the finding, or native hardware/credentials are required, stop that stage and report the exact blocker. Do not silently substitute a model or executor.
 
-Never merge generated work just because a tool wrote it. Generated changes must pass the same code review, tests, formatting, lint, and git hygiene rules as hand-written changes.
+### Product-reset stage gates (R0–R5)
+
+1. R0 establishes governance, accepted decisions, reproducible behavior/compatibility baselines, and entry-point classification.
+2. R1 first unifies cognition-state semantics and the additive compatibility data model.
+3. R2 then reshapes information architecture around project recovery and the three-pane reading flow.
+4. R3 completes the code-cognition loop, persistence, change review, and target-bound asynchronous behavior.
+5. R4 validates the real-product journey and public positioning with real projects; automated checks do not replace maintainer usability acceptance.
+6. R5 is a release candidate gate only: it requires the supported native package matrix and release evidence, and cannot claim 1.0/public release without actual signing verification where claimed, credentials/hardware evidence, and maintainer approval.

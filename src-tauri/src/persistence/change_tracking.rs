@@ -258,6 +258,22 @@ pub(super) fn apply_change_detection(
         .map_err(database_error)?;
     }
 
+    for explanation_id in &detection.affected_explanation_ids {
+        conn.execute(
+            "UPDATE user_reading_states
+             SET review_state = 'needs_review',
+                 state = CASE
+                   WHEN state IN ('questioned', 'suspicious') THEN state
+                   ELSE 'needs_reexplain'
+                 END,
+                 revision = revision + 1,
+                 updated_at = ?1
+             WHERE project_id = ?2 AND explanation_id = ?3",
+            params![created_at, project_id, explanation_id],
+        )
+        .map_err(database_error)?;
+    }
+
     let before_hash = before_snapshot_id
         .and_then(|snapshot_id| {
             conn.query_row(

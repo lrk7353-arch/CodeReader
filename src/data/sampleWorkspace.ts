@@ -198,7 +198,8 @@ export const sampleProjectGuide: ProjectGuide = {
     understood: 0,
     questioned: 0,
     suspicious: 0,
-    needsReexplain: 0
+    needsReexplain: 0,
+    masteryPercent: 0
   }
 };
 

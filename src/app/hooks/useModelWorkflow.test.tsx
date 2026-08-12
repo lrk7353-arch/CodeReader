@@ -83,7 +83,8 @@ describe("useModelWorkflow generation flow", () => {
     expect(mocks.generateExplanation).toHaveBeenCalledWith(
       codeFile(),
       explanation(),
-      expect.stringMatching(/^generation:/)
+      expect.stringMatching(/^generation:/),
+      "plain"
     );
 
     await act(async () => {
@@ -182,6 +183,84 @@ describe("useModelWorkflow generation flow", () => {
       await deferred.promise;
     });
     expect(onGenerated).not.toHaveBeenCalled();
+  });
+
+  it("binds generation to the requested explanation depth", async () => {
+    const deferred = createDeferred<GenerateExplanationResult>();
+    mocks.generateExplanation.mockReturnValue(deferred.promise);
+    const onGenerated = vi.fn();
+    let latest: ReturnType<typeof useModelWorkflow> | undefined;
+
+    function Probe({ displayMode }: { displayMode: "plain" | "detailed" }) {
+      latest = useModelWorkflow({
+        file: codeFile(),
+        explanation: explanation(),
+        contextBundle: contextBundle(),
+        contextStatus: "ready",
+        displayMode,
+        onGenerated,
+        onWorkspaceStatus: vi.fn()
+      });
+      return null;
+    }
+
+    const view = render(<Probe displayMode="plain" />);
+    await waitFor(() => expect(current(latest).config?.configured).toBe(true));
+    act(() => current(latest).generation.request());
+    act(() => void current(latest).generation.confirm());
+    await waitFor(() => expect(current(latest).generation.status).toBe("generating"));
+
+    view.rerender(<Probe displayMode="detailed" />);
+    await waitFor(() => expect(current(latest).generation.status).toBe("idle"));
+    await act(async () => {
+      deferred.resolve(generationResult());
+      await deferred.promise;
+    });
+
+    expect(mocks.generateExplanation).toHaveBeenCalledWith(
+      codeFile(),
+      explanation(),
+      expect.stringMatching(/^generation:/),
+      "plain"
+    );
+    expect(onGenerated).not.toHaveBeenCalled();
+  });
+
+  it("keeps the selected code and saved explanation intact when the model is offline", async () => {
+    mocks.generateExplanation.mockRejectedValueOnce({
+      code: "llm.connection",
+      message: "provider payload and local paths must not reach the UI"
+    });
+    const originalFile = codeFile();
+    const originalExplanation = explanation();
+    const onGenerated = vi.fn();
+    const onWorkspaceStatus = vi.fn();
+    let latest: ReturnType<typeof useModelWorkflow> | undefined;
+
+    function Probe() {
+      latest = useModelWorkflow({
+        file: originalFile,
+        explanation: originalExplanation,
+        contextBundle: contextBundle(),
+        contextStatus: "ready",
+        onGenerated,
+        onWorkspaceStatus
+      });
+      return null;
+    }
+
+    render(<Probe />);
+    await waitFor(() => expect(current(latest).config?.configured).toBe(true));
+    act(() => current(latest).generation.request());
+    await act(async () => current(latest).generation.confirm());
+
+    expect(current(latest).generation.status).toBe("error");
+    expect(current(latest).generation.error).toBe("无法连接模型服务");
+    expect(onGenerated).not.toHaveBeenCalled();
+    expect(originalFile.code).toBe("def compute():\n    return 1\n");
+    expect(originalFile.explanations[0]).toEqual(originalExplanation);
+    expect(onWorkspaceStatus).toHaveBeenLastCalledWith("无法连接模型服务");
+    expect(current(latest).generation.lastGeneration?.errorDetail).toBe("code: llm.connection");
   });
 });
 

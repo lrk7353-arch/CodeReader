@@ -10,6 +10,10 @@ interface LineSelection {
   endLine: number;
 }
 
+interface UnexplainedNavigationTarget extends LineSelection {
+  targetType: "function" | "block" | "line";
+}
+
 export function buildSelectableExplanations(file: CodeFile): Explanation[] {
   if (file.capability?.canExplain === false) {
     return [];
@@ -56,6 +60,95 @@ export function buildRangeExplanation(file: CodeFile, selection: LineSelection):
 
 export function rangeExplanationId(fileId: string, selection: LineSelection) {
   return `range:${fileId}:${selection.startLine}-${selection.endLine}`;
+}
+
+export function buildUnexplainedNavigationTarget(
+  file: CodeFile,
+  target: {
+    targetType: ExplanationTargetType;
+    startLine?: number;
+    endLine?: number;
+  }
+): Explanation | undefined {
+  if (!isUnexplainedNavigationTargetType(target.targetType)) {
+    return undefined;
+  }
+  const lineCount = Math.max(1, file.code.split(/\r\n|\r|\n/).length);
+  const startLine = target.startLine;
+  const endLine = target.endLine ?? startLine;
+  if (
+    startLine === undefined ||
+    endLine === undefined ||
+    !Number.isInteger(startLine) ||
+    !Number.isInteger(endLine) ||
+    startLine < 1 ||
+    endLine < startLine ||
+    endLine > lineCount
+  ) {
+    return undefined;
+  }
+
+  const node =
+    target.targetType === "line"
+      ? undefined
+      : file.codeNodes?.find(
+          (item) =>
+            item.nodeType === target.targetType &&
+            item.startLine === startLine &&
+            item.endLine === endLine
+        );
+  if (target.targetType !== "line" && !node) return undefined;
+
+  const version = file.fileHash ?? file.snapshotId ?? codeVersion(file.code);
+  const createdAt = new Date().toISOString();
+  const selectedLines = selectedCodeLines(file.code, startLine, endLine);
+  const label = node?.name ?? `line ${startLine}`;
+  return {
+    id: unexplainedNavigationTargetId(file.id, target.targetType, startLine, endLine, version),
+    filePath: file.path,
+    fileHash: file.fileHash,
+    targetType: target.targetType,
+    targetName: label,
+    startLine,
+    endLine,
+    symbolId: node?.symbolId,
+    codeHash: node?.codeHash ?? `line:${version}:${startLine}`,
+    anchorText: node?.anchorText ?? firstNonEmptyLine(selectedLines),
+    codeMeaning: "这是当前代码版本中的结构目标，尚未生成解释。",
+    localMeaning: `该目标精确绑定到第 ${startLine}${endLine === startLine ? "" : `-${endLine}`} 行。`,
+    globalMeaning: "生成解释前，CodeReader 会保留这个目标与当前代码版本的绑定。",
+    riskNotes: [],
+    readerNotes: ["这是导航创建的内存目标，生成解释前不会写入持久化状态。"],
+    status: "new_unexplained",
+    readingState: "unread",
+    createdAt,
+    updatedAt: createdAt
+  };
+}
+
+function isUnexplainedNavigationTargetType(
+  targetType: ExplanationTargetType
+): targetType is UnexplainedNavigationTarget["targetType"] {
+  return targetType === "function" || targetType === "block" || targetType === "line";
+}
+
+function unexplainedNavigationTargetId(
+  fileId: string,
+  targetType: UnexplainedNavigationTarget["targetType"],
+  startLine: number,
+  endLine: number,
+  version: string
+) {
+  return `unexplained:${encodeURIComponent(fileId)}:${targetType}:${startLine}-${endLine}:${encodeURIComponent(version)}`;
+}
+
+function codeVersion(code: string) {
+  let hash = 2166136261;
+  for (let index = 0; index < code.length; index += 1) {
+    hash ^= code.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return `content-${(hash >>> 0).toString(16)}`;
 }
 
 export function findExplanationForSelection(

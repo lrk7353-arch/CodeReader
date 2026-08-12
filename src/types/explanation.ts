@@ -28,6 +28,50 @@ export type ReadingState =
   | "suspicious"
   | "needs_reexplain";
 
+/** The R1 source of truth. ReadingState remains a legacy IPC/data projection. */
+export type VisitState = "unread" | "read";
+export type MasteryState = "unconfirmed" | "understood";
+export type ReviewState = "current" | "needs_review";
+
+export interface CognitionState {
+  visitState: VisitState;
+  masteryState: MasteryState;
+  reviewState: ReviewState;
+}
+
+export type UserAnnotationKind = "note" | "question" | "risk";
+
+export interface UserAnnotation {
+  id: string;
+  projectId: string;
+  explanationId: string;
+  kind: UserAnnotationKind;
+  body: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ReaderPreference {
+  projectId: string;
+  displayMode: "plain" | "detailed";
+  updatedAt: string;
+}
+
+export interface RelatedTarget {
+  id: string;
+  projectId: string;
+  explanationId: string;
+  relatedExplanationId: string;
+  relationKind: string;
+  relatedFileId?: string;
+  relatedTargetType?: ExplanationTargetType;
+  relatedTargetName?: string;
+  relatedStartLine?: number;
+  relatedEndLine?: number;
+  relatedStatus?: ExplanationStatus;
+  createdAt: string;
+}
+
 export type ExplanationFeedbackType =
   | "helpful"
   | "suspicious"
@@ -62,6 +106,9 @@ export interface Explanation {
   readerNotes?: string[];
   status: ExplanationStatus;
   readingState: ReadingState;
+  cognitionState?: CognitionState;
+  cognitionRevision?: number;
+  annotations?: UserAnnotation[];
   createdAt: string;
   updatedAt: string;
 }
@@ -123,12 +170,23 @@ export interface CodeFile {
   snapshotId?: string;
   codeNodes?: CodeNode[];
   explanations: Explanation[];
+  readerPreference?: ReaderPreference;
+  relatedTargets?: RelatedTarget[];
   changeSummary?: ChangeSummary;
   databasePath?: string;
   parseError?: boolean;
   capability?: FileCapability;
   source?: "sample" | "local";
   isLoaded?: boolean;
+}
+
+export interface ReaderResumeState {
+  projectId: string;
+  fileId?: string;
+  explanationId?: string;
+  selectionStartLine?: number;
+  selectionEndLine?: number;
+  updatedAt: string;
 }
 
 export interface ChangeSummary {
@@ -207,6 +265,7 @@ export interface ReadingPathStep {
   role: ProjectFileRole;
   reason: string;
   readingState: ReadingState;
+  cognitionState?: CognitionState;
 }
 
 export interface ReadingProgress {
@@ -217,6 +276,7 @@ export interface ReadingProgress {
   questioned: number;
   suspicious: number;
   needsReexplain: number;
+  masteryPercent: number;
 }
 
 export interface ProjectGuide {

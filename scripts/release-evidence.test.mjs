@@ -4,7 +4,13 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { expectedReleaseAssetNames } from "./release-assets.mjs";
-import { verifyNativeSmokeEvidence, verifySpdxSbom } from "./release-evidence.mjs";
+import {
+  buildNativeJourneyTemplate,
+  REQUIRED_NATIVE_JOURNEY_CHECKS,
+  verifyNativeJourneyEvidence,
+  verifyNativeSmokeEvidence,
+  verifySpdxSbom
+} from "./release-evidence.mjs";
 
 const VERSION = "1.0.0-rc.2";
 const TAG = `v${VERSION}`;
@@ -127,5 +133,110 @@ describe("final release SBOM", () => {
     const path = join(root, "CodeReader.spdx.json");
     writeFileSync(path, JSON.stringify({ spdxVersion: "CycloneDX" }));
     expect(() => verifySpdxSbom(path)).toThrow(/SPDX 2.3/);
+  });
+});
+
+describe("native product journey evidence", () => {
+  function journeyFixture() {
+    const root = mkdtempSync(join(tmpdir(), "codereader-native-journey-"));
+    for (const platform of ["windows", "linux"]) {
+      for (const arch of ["x64", "arm64"]) {
+        const evidence = buildNativeJourneyTemplate({
+          platform,
+          arch,
+          tag: TAG,
+          commitSha: SHA,
+          observedAt: "2026-08-12T00:00:00.000Z"
+        });
+        evidence.status = "pass";
+        evidence.checks = REQUIRED_NATIVE_JOURNEY_CHECKS.map((name) => ({
+          name,
+          status: "pass"
+        }));
+        writeFileSync(
+          join(root, `native-journey-${platform}-${arch}.json`),
+          JSON.stringify(evidence)
+        );
+      }
+    }
+    return root;
+  }
+
+  it("requires all four target-bound native product journeys", () => {
+    expect(
+      verifyNativeJourneyEvidence({ input: journeyFixture(), tag: TAG, commitSha: SHA })
+    ).toHaveLength(4);
+  });
+
+  it("rejects an unexpected journey record alongside the four targets", () => {
+    const input = journeyFixture();
+    writeFileSync(join(input, "native-journey-unknown-x64.json"), "{}");
+    expect(() => verifyNativeJourneyEvidence({ input, tag: TAG, commitSha: SHA })).toThrow(
+      /exactly the four expected/
+    );
+  });
+
+  it("keeps a generated template pending and Windows explicitly unsigned", () => {
+    const template = buildNativeJourneyTemplate({
+      platform: "windows",
+      arch: "arm64",
+      tag: TAG,
+      commitSha: SHA
+    });
+    expect(template).toMatchObject({
+      status: "manual_required",
+      windowsAuthenticodeSigned: false
+    });
+    expect(template.checks).toHaveLength(REQUIRED_NATIVE_JOURNEY_CHECKS.length);
+    expect(template.checks.every((check) => check.status === "pending")).toBe(true);
+  });
+
+  it("rejects a missing or pending journey check", () => {
+    const input = journeyFixture();
+    const path = join(input, "native-journey-linux-x64.json");
+    const evidence = JSON.parse(readFileSync(path, "utf8"));
+    evidence.checks[0].status = "pending";
+    writeFileSync(path, JSON.stringify(evidence));
+    expect(() => verifyNativeJourneyEvidence({ input, tag: TAG, commitSha: SHA })).toThrow(
+      /non-passing/
+    );
+  });
+
+  it("rejects a Windows signing claim without actual Authenticode verification", () => {
+    const input = journeyFixture();
+    const path = join(input, "native-journey-windows-x64.json");
+    const evidence = JSON.parse(readFileSync(path, "utf8"));
+    evidence.windowsAuthenticodeSigned = true;
+    writeFileSync(path, JSON.stringify(evidence));
+    expect(() => verifyNativeJourneyEvidence({ input, tag: TAG, commitSha: SHA })).toThrow(
+      /without a passing Authenticode verification/
+    );
+  });
+
+  it.each([
+    ["unknown top-level field", "linux", "x64", (evidence) => (evidence.details = "no")],
+    ["details payload", "windows", "x64", (evidence) => (evidence.details = { log: "no" })],
+    ["unknown check field", "linux", "arm64", (evidence) => (evidence.checks[0].details = "no")],
+    ["invalid observedAt", "windows", "arm64", (evidence) => (evidence.observedAt = "today")],
+    [
+      "Linux-only platform field mismatch",
+      "linux",
+      "x64",
+      (evidence) => (evidence.windowsAuthenticodeSigned = false)
+    ],
+    [
+      "unsigned Windows verification payload",
+      "windows",
+      "x64",
+      (evidence) =>
+        (evidence.authenticodeVerification = { status: "pass", thumbprint: "a".repeat(40) })
+    ]
+  ])("rejects %s", (_label, platform, arch, mutate) => {
+    const input = journeyFixture();
+    const path = join(input, `native-journey-${platform}-${arch}.json`);
+    const evidence = JSON.parse(readFileSync(path, "utf8"));
+    mutate(evidence);
+    writeFileSync(path, JSON.stringify(evidence));
+    expect(() => verifyNativeJourneyEvidence({ input, tag: TAG, commitSha: SHA })).toThrow();
   });
 });

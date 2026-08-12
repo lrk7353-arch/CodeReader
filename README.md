@@ -2,9 +2,9 @@
 
 [English](README.md) | [简体中文](README.zh-CN.md) | [Version history / 版本沿革](docs/history/version-history.zh-CN.md) | [Release guide / 发布说明](docs/release/public-release-notes.zh-CN.md)
 
-CodeReader is a local-first desktop application for reading source code and Markdown with persistent, reviewable AI explanations. It opens user-selected files and directories, preserves reading progress, and detects when explanations become stale after files change.
+CodeReader is a local-first desktop tool for building a reviewable understanding of a codebase. It starts from a project map and reading path, keeps real code beside layered explanations, and preserves user-confirmed understanding, personal questions, and change-review work.
 
-> Current channel: `1.0.0-rc.2` release candidate. Release candidates are intended for full production validation before the stable `1.0.0` publication.
+> Current channel: `1.0.0-rc.3` release candidate. Release candidates are intended for full production validation before the stable `1.0.0` publication.
 
 ## Product scope
 
@@ -13,7 +13,9 @@ CodeReader is a local-first desktop application for reading source code and Mark
 - Read JavaScript, TypeScript, Python, SQL, text, Markdown, and bounded image previews.
 - Generate structured explanations from bounded, previewable context.
 - Keep explanations, reading state, project guidance, prompt versions, and model settings locally.
-- Detect code changes and mark affected explanations stale.
+- Keep visit, user-confirmed mastery, and change-review state separate; generating an explanation never marks it understood.
+- Save personal notes, questions, risks, and plain/detailed reading preference locally.
+- Detect code changes and queue affected explanations for review while retaining unaffected state.
 - Use OpenAI-compatible HTTPS providers or explicitly configured local loopback models.
 - Run without a CodeReader-hosted backend or mandatory telemetry.
 
@@ -49,10 +51,10 @@ gh attestation verify <downloaded-package> -R lrk7353-arch/CodeReader
 
 ## First run and local data
 
-1. Start CodeReader.
-2. Choose **Open project** or **Open file** and select any target available to your operating-system account.
-3. Configure an OpenAI-compatible model or a local loopback model if AI explanations are needed.
-4. Review the exact bounded context and provider destination before approving external transmission.
+1. Start CodeReader, then choose **Continue reading**, **Open project**, or the verifiable example. Single-file reading is available from **More**.
+2. Select a project through the native picker and follow its project map and recommended reading path.
+3. Move between real code and layered explanations; mastery changes only when you explicitly confirm understanding. Notes, questions, and risks remain user-owned records.
+4. Configure an OpenAI-compatible model or local loopback model only when a new AI explanation is needed, and review the bounded context and destination before transmission. Existing reading material remains available when the model is offline.
 
 CodeReader stores its SQLite database in the platform application-data directory and stores API credentials in the operating-system credential store. Source code is not uploaded to a CodeReader service.
 
@@ -101,6 +103,10 @@ Uninstall is not a data-erasure tool. Preserve local reading data and verified m
 | AppImage does not start | Check its executable permission and the host WebKitGTK 4.1 runtime; try the matching `.deb` or `.rpm` when available. |
 | A file is visible but not shown in the reader | It may be binary, oversized, special, or use an unsafe encoding. CodeReader keeps it in the tree and retains the currently readable document. |
 | Model request fails | Check the model endpoint, model name, network or local service. Do not put API keys, source code, prompts, or model output into a feedback report. |
+| Continue reading asks for the project again | Renderer access is not permanent. Reauthorize the same directory through the native picker; a mismatch or deleted target falls back safely instead of opening an unrelated location. |
+| A target says it needs review | The code changed. Re-read the affected explanation and confirm it again; unaffected targets should retain their state. |
+
+Current representative project fixtures make the workflow repeatable, but the one-minute explanation and five-minute comprehension goals are validation targets, not published SLAs. Native maintainer usability acceptance and deferred keyboard, focus, long-content, reduced-motion, zoom, and contrast evidence remain required before claiming the product reset complete.
 
 The [Chinese guide](README.zh-CN.md) provides the same workflow in Simplified Chinese, including recovery guidance for supported 0.10.x and 0.11.x upgrades.
 

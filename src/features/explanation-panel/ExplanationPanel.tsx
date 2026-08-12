@@ -12,13 +12,24 @@ import type {
   ChangeSummary as ChangeSummaryData,
   CodeFile,
   ContextBundle,
+  CognitionState,
   Explanation,
   ExplanationFeedbackType,
-  ReadingState
+  ProjectGuide,
+  ReaderPreference,
+  ReadingState,
+  UserAnnotation,
+  UserAnnotationKind
 } from "../../types/explanation";
 import { ContextPreview, type ContextPreviewStatus } from "../context-preview/ContextPreview";
 import { ChangeSummary } from "../change-summary/ChangeSummary";
 import { ReadingStateControls } from "../reading-state/ReadingStateControls";
+import { cognitionFor } from "../reading-state/cognition";
+import {
+  CognitionTools,
+  type RelatedNavigationTarget,
+  type ReviewQueueItem
+} from "./CognitionTools";
 
 interface ExplanationPanelProps {
   file: CodeFile;
@@ -33,7 +44,24 @@ interface ExplanationPanelProps {
   onFeedback: (feedbackType: ExplanationFeedbackType) => void;
   onGenerate: () => void;
   onSelectAffected: () => void;
-  onReadingStateChange: (state: ReadingState) => void;
+  onReadingStateChange: (state: CognitionState | ReadingState) => void;
+  allFiles: CodeFile[];
+  canGoBack: boolean;
+  displayMode: ReaderPreference["displayMode"];
+  projectGuide?: ProjectGuide;
+  projectName: string;
+  readerBusy: boolean;
+  onAddAnnotation: (kind: UserAnnotationKind, body: string) => Promise<boolean>;
+  onChangeDisplayMode: (mode: ReaderPreference["displayMode"]) => Promise<boolean>;
+  onEditAnnotation: (
+    annotation: UserAnnotation,
+    kind: UserAnnotationKind,
+    body: string
+  ) => Promise<boolean>;
+  onGoBack: () => Promise<void>;
+  onNavigateRelated: (target: RelatedNavigationTarget) => Promise<boolean>;
+  onNavigateReview: (item: ReviewQueueItem) => Promise<void>;
+  onRemoveAnnotation: (annotation: UserAnnotation) => Promise<boolean>;
 }
 
 export function ExplanationPanel({
@@ -49,7 +77,20 @@ export function ExplanationPanel({
   onFeedback,
   onGenerate,
   onSelectAffected,
-  onReadingStateChange
+  onReadingStateChange,
+  allFiles,
+  canGoBack,
+  displayMode,
+  projectGuide,
+  projectName,
+  readerBusy,
+  onAddAnnotation,
+  onChangeDisplayMode,
+  onEditAnnotation,
+  onGoBack,
+  onNavigateRelated,
+  onNavigateReview,
+  onRemoveAnnotation
 }: ExplanationPanelProps) {
   const [generationElapsedSeconds, setGenerationElapsedSeconds] = useState(0);
 
@@ -115,6 +156,24 @@ export function ExplanationPanel({
 
       <StatusNotice explanation={explanation} />
 
+      <CognitionTools
+        busy={readerBusy}
+        displayMode={displayMode}
+        explanation={explanation}
+        file={file}
+        files={allFiles}
+        projectGuide={projectGuide}
+        projectName={projectName}
+        canGoBack={canGoBack}
+        onAddAnnotation={onAddAnnotation}
+        onChangeDisplayMode={onChangeDisplayMode}
+        onEditAnnotation={onEditAnnotation}
+        onNavigate={onNavigateRelated}
+        onNavigateReview={onNavigateReview}
+        onRemoveAnnotation={onRemoveAnnotation}
+        onGoBack={onGoBack}
+      />
+
       {generationStatus === "generating" ? (
         <div className="generation-inline-progress" role="status" aria-live="polite">
           <LoaderCircle className="spin-icon" size={15} aria-hidden="true" />
@@ -128,34 +187,40 @@ export function ExplanationPanel({
           <h3>代码层意义</h3>
           <p>{explanation.codeMeaning}</p>
         </section>
-        <section className="meaning-section">
-          <h3>局部组成意义</h3>
-          <p>{explanation.localMeaning ?? "当前目标暂无局部解释。"}</p>
-        </section>
+        {displayMode === "detailed" ? (
+          <section className="meaning-section">
+            <h3>局部组成意义</h3>
+            <p>{explanation.localMeaning ?? "当前目标暂无局部解释。"}</p>
+          </section>
+        ) : null}
         <section className="meaning-section">
           <h3>项目全局意义</h3>
           <p>{explanation.globalMeaning ?? "当前目标暂无项目级解释。"}</p>
         </section>
       </div>
 
-      <details className="detail-drawer">
-        <summary>
-          <AlertTriangle size={15} aria-hidden="true" />
-          风险与阅读提示
-        </summary>
-        <ul>
-          {explanation.priorKnowledge ? <li>前置知识：{explanation.priorKnowledge}</li> : null}
-          {(explanation.riskNotes ?? []).map((note) => (
-            <li key={note}>{note}</li>
-          ))}
-          {(explanation.readerNotes ?? []).map((note) => (
-            <li key={note}>{note}</li>
-          ))}
-          {explanation.reviewSuggestion ? <li>审阅建议：{explanation.reviewSuggestion}</li> : null}
-        </ul>
-      </details>
+      {displayMode === "detailed" ? (
+        <details className="detail-drawer">
+          <summary>
+            <AlertTriangle size={15} aria-hidden="true" />
+            风险与阅读提示
+          </summary>
+          <ul>
+            {explanation.priorKnowledge ? <li>前置知识：{explanation.priorKnowledge}</li> : null}
+            {(explanation.riskNotes ?? []).map((note) => (
+              <li key={note}>{note}</li>
+            ))}
+            {(explanation.readerNotes ?? []).map((note) => (
+              <li key={note}>{note}</li>
+            ))}
+            {explanation.reviewSuggestion ? (
+              <li>审阅建议：{explanation.reviewSuggestion}</li>
+            ) : null}
+          </ul>
+        </details>
+      ) : null}
 
-      {explanation.trustReason ? (
+      {displayMode === "detailed" && explanation.trustReason ? (
         <details className="detail-drawer">
           <summary>
             <CircleHelp size={15} aria-hidden="true" />
@@ -170,7 +235,9 @@ export function ExplanationPanel({
         </details>
       ) : null}
 
-      <ContextPreview bundle={contextBundle} error={contextError} status={contextStatus} />
+      {displayMode === "detailed" ? (
+        <ContextPreview bundle={contextBundle} error={contextError} status={contextStatus} />
+      ) : null}
 
       {generationError ? (
         <div className="generation-error-block">
@@ -188,10 +255,7 @@ export function ExplanationPanel({
         </div>
       ) : null}
 
-      <ReadingStateControls
-        currentState={explanation.readingState}
-        onChange={onReadingStateChange}
-      />
+      <ReadingStateControls cognition={cognitionFor(explanation)} onChange={onReadingStateChange} />
 
       <div className="action-row" aria-label="Explanation actions">
         <button type="button" onClick={() => onFeedback("helpful")} title="这条解释有帮助">

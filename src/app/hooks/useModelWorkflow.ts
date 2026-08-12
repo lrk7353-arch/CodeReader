@@ -15,7 +15,8 @@ import type {
   Explanation,
   GenerateExplanationResult,
   ModelConfig,
-  SaveModelConfigInput
+  SaveModelConfigInput,
+  ReaderPreference
 } from "../../types/explanation";
 import { errorMessage, safeErrorDetail } from "../appError";
 import { createOperationGate } from "./operationGate";
@@ -29,6 +30,7 @@ interface UseModelWorkflowOptions {
   contextStatus: ContextPreviewStatus;
   onGenerated: (result: GenerateExplanationResult) => void;
   onWorkspaceStatus: (message: string) => void;
+  displayMode?: ReaderPreference["displayMode"];
 }
 
 export function useModelWorkflow({
@@ -37,7 +39,8 @@ export function useModelWorkflow({
   contextBundle,
   contextStatus,
   onGenerated,
-  onWorkspaceStatus
+  onWorkspaceStatus,
+  displayMode = "plain"
 }: UseModelWorkflowOptions) {
   const [config, setConfig] = useState<ModelConfig>();
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -57,7 +60,7 @@ export function useModelWorkflow({
   } | null>(null);
   const generationGateRef = useRef(createOperationGate());
   const activeGenerationIdRef = useRef<string | null>(null);
-  const targetKey = `${file.id}:${file.fileHash ?? "no-hash"}:${explanation?.id ?? "none"}:${contextBundle?.contextId ?? "none"}`;
+  const targetKey = `${file.projectId ?? "no-project"}:${file.id}:${file.fileHash ?? "no-hash"}:${file.snapshotId ?? "no-snapshot"}:${explanation?.id ?? "none"}:${explanation?.codeHash ?? "no-code-hash"}:${contextBundle?.contextId ?? "none"}:${displayMode}`;
   const renderedTargetRef = useRef(targetKey);
   if (renderedTargetRef.current !== targetKey) {
     renderedTargetRef.current = targetKey;
@@ -108,7 +111,7 @@ export function useModelWorkflow({
     setConfirmOpen(false);
     setGenerationStatus("idle");
     setGenerationError("");
-  }, [explanation?.id, file.id]);
+  }, [targetKey]);
 
   const requestGeneration = useCallback(() => {
     if (!isDesktopRuntime()) {
@@ -144,7 +147,7 @@ export function useModelWorkflow({
     activeGenerationIdRef.current = operationId;
     const timestamp = new Date().toISOString();
     try {
-      const result = await generateExplanation(file, explanation, operationId);
+      const result = await generateExplanation(file, explanation, operationId, displayMode);
       if (!generationGateRef.current.isCurrent(operation)) return;
       onGenerated(result);
       setGenerationStatus("idle");
@@ -177,7 +180,16 @@ export function useModelWorkflow({
         activeGenerationIdRef.current = null;
       }
     }
-  }, [config, contextBundle, explanation, file, onGenerated, onWorkspaceStatus, targetKey]);
+  }, [
+    config,
+    contextBundle,
+    displayMode,
+    explanation,
+    file,
+    onGenerated,
+    onWorkspaceStatus,
+    targetKey
+  ]);
 
   const persistConfig = useCallback(
     async (input: SaveModelConfigInput) => {

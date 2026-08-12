@@ -1,5 +1,5 @@
 import { History, Plus, Save, X } from "lucide-react";
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import type {
   PromptVersionInfo,
   PromptVersionStatus,
@@ -37,6 +37,8 @@ export function PromptRegistryDialog({
   const [registerNotes, setRegisterNotes] = useState("");
   const [registerSystemTemplate, setRegisterSystemTemplate] = useState("");
   const [registerUserTemplate, setRegisterUserTemplate] = useState("");
+  const [registryLayout, setRegistryLayout] = useState<"wide" | "compact">("wide");
+  const registryContentRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (!open) {
@@ -64,6 +66,18 @@ export function PromptRegistryDialog({
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [busy, onClose, open]);
+
+  useEffect(() => {
+    const content = registryContentRef.current;
+    if (!open || !content || typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(([entry]) => {
+      if (entry.contentRect.width > 0) {
+        setRegistryLayout(entry.contentRect.width <= 620 ? "compact" : "wide");
+      }
+    });
+    observer.observe(content);
+    return () => observer.disconnect();
+  }, [open]);
 
   if (!open) {
     return null;
@@ -107,7 +121,7 @@ export function PromptRegistryDialog({
   return (
     <div className="modal-backdrop" role="presentation" onMouseDown={onClose}>
       <section
-        className="settings-dialog"
+        className="settings-dialog prompt-registry-dialog"
         role="dialog"
         aria-modal="true"
         aria-labelledby="prompt-registry-title"
@@ -139,70 +153,76 @@ export function PromptRegistryDialog({
           </div>
         </header>
 
-        <div className="settings-form">
-          <table className="prompt-registry-table">
-            <thead>
-              <tr>
-                <th>版本</th>
-                <th>状态</th>
-                <th>灰度</th>
-                <th>回滚来源</th>
-                <th>备注</th>
-                <th>模板</th>
-                <th>更新时间</th>
-                <th aria-label="操作" />
-              </tr>
-            </thead>
-            <tbody>
-              {versions.length === 0 ? (
+        <div
+          className="settings-form prompt-registry-content"
+          data-layout={registryLayout}
+          ref={registryContentRef}
+        >
+          <div className="prompt-registry-wide">
+            <table className="prompt-registry-table">
+              <thead>
                 <tr>
-                  <td colSpan={8} className="prompt-registry-empty">
-                    暂无已注册版本。
-                  </td>
+                  <th>版本</th>
+                  <th>状态</th>
+                  <th>灰度</th>
+                  <th>回滚来源</th>
+                  <th>备注</th>
+                  <th>模板</th>
+                  <th>更新时间</th>
+                  <th aria-label="操作" />
                 </tr>
-              ) : (
-                versions.map((entry) => (
-                  <tr key={entry.version}>
-                    <td>{entry.version}</td>
-                    <td>{entry.status}</td>
-                    <td>{entry.rolloutPercent}%</td>
-                    <td>{entry.rollbackFrom ?? "—"}</td>
-                    <td>{entry.notes ?? "—"}</td>
-                    <td>
-                      {entry.systemPromptTemplate || entry.userPromptTemplate ? "自定义" : "默认"}
-                    </td>
-                    <td>{entry.updatedAt}</td>
-                    <td>
-                      <div className="prompt-registry-row-actions">
-                        <button
-                          type="button"
-                          className="prompt-registry-edit"
-                          disabled={busy}
-                          onClick={() => editVersion(entry)}
-                          title={`编辑 ${entry.version}`}
-                        >
-                          编辑
-                        </button>
-                        {entry.status !== "active" ? (
-                          <button
-                            type="button"
-                            className="prompt-registry-rollback"
-                            disabled={busy || !activeVersion}
-                            onClick={() => setRollbackTarget(entry.version)}
-                            title={`回滚到 ${entry.version}`}
-                          >
-                            回滚
-                          </button>
-                        ) : (
-                          <span className="prompt-registry-current">当前生效</span>
-                        )}
-                      </div>
+              </thead>
+              <tbody>
+                {versions.length === 0 ? (
+                  <tr>
+                    <td colSpan={8} className="prompt-registry-empty">
+                      暂无已注册版本。
                     </td>
                   </tr>
-                ))
-              )}
-            </tbody>
-          </table>
+                ) : (
+                  versions.map((entry) => (
+                    <tr key={entry.version}>
+                      <td data-label="版本">{entry.version}</td>
+                      <td data-label="状态">{entry.status}</td>
+                      <td data-label="灰度">{entry.rolloutPercent}%</td>
+                      <td data-label="回滚来源">{entry.rollbackFrom ?? "—"}</td>
+                      <td data-label="备注">{entry.notes ?? "—"}</td>
+                      <td data-label="模板">
+                        {entry.systemPromptTemplate || entry.userPromptTemplate ? "自定义" : "默认"}
+                      </td>
+                      <td data-label="更新时间">{entry.updatedAt}</td>
+                      <td data-label="操作">
+                        <div className="prompt-registry-row-actions">
+                          <button
+                            type="button"
+                            className="prompt-registry-edit"
+                            disabled={busy}
+                            onClick={() => editVersion(entry)}
+                            title={`编辑 ${entry.version}`}
+                          >
+                            编辑
+                          </button>
+                          {entry.status !== "active" ? (
+                            <button
+                              type="button"
+                              className="prompt-registry-rollback"
+                              disabled={busy || !activeVersion}
+                              onClick={() => setRollbackTarget(entry.version)}
+                              title={`回滚到 ${entry.version}`}
+                            >
+                              回滚
+                            </button>
+                          ) : (
+                            <span className="prompt-registry-current">当前生效</span>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
 
           {rollbackTarget ? (
             <div className="prompt-registry-rollback-form">

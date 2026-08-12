@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 
 const quality = readFileSync(".github/workflows/quality.yml", "utf8");
 const release = readFileSync(".github/workflows/release.yml", "utf8");
+const publish = readFileSync(".github/workflows/publish.yml", "utf8");
 const security = readFileSync(".github/workflows/security.yml", "utf8");
 const tauri = readFileSync("src-tauri/tauri.conf.json", "utf8");
 
@@ -47,6 +48,42 @@ describe("production workflows", () => {
     expect(tauri).toContain('"webkit2gtk4.1"');
   });
 
+  it("cannot publish without target-bound native journeys and maintainer approval", () => {
+    const runBlocks = [
+      ...publish.matchAll(
+        /\n\s+run:\s*(?:\||>)?\s*\n?([\s\S]*?)(?=\n\s+- (?:name:|uses:)|\n\s{0,6}[a-zA-Z-]+:|$)/g
+      )
+    ]
+      .map((match) => match[0])
+      .join("\n");
+    expect(runBlocks).not.toContain("${{ inputs.tag }}");
+    expect(publish).toContain("RELEASE_TAG: ${{ inputs.tag }}");
+    expect(publish).toContain('[[ ! "$RELEASE_TAG" =~ ^v1\\.[0-9]+\\.[0-9]+(-rc\\.[0-9]+)?$ ]]');
+    expect(publish).toContain("gh release download");
+    expect(publish).toContain("git describe --tags --exact-match HEAD");
+    expect(publish).toContain("gh release view");
+    expect(publish).toContain("--json isDraft");
+    expect(publish).toContain("--pattern 'native-journey-*.json'");
+    expect(publish).toContain("release-evidence.mjs verify-journeys");
+    expect(publish).toContain('sha "${{ steps.target.outputs.sha }}"');
+    expect(publish).toContain("name: verified-native-journeys\n");
+    expect(publish).not.toContain("name: verified-native-journeys-${{ inputs.tag }}");
+    expect(publish).toContain("publish:\n    runs-on:");
+    expect(publish).toContain("environment: production-release-publish");
+    expect(publish).toContain('gh release edit "$RELEASE_TAG" --draft=false');
+    expect(publish.indexOf("environment: production-release-publish")).toBeLessThan(
+      publish.indexOf("gh release download")
+    );
+    expect(publish.indexOf("gh release download")).toBeLessThan(
+      publish.indexOf("release-evidence.mjs verify-journeys")
+    );
+    expect(publish.indexOf("release-evidence.mjs verify-journeys")).toBeLessThan(
+      publish.indexOf('gh release edit "$RELEASE_TAG" --draft=false')
+    );
+    expect(release).toContain("draft: true");
+    expect(release).not.toContain("--draft=false");
+  });
+
   it("uses immutable tag checkouts, locked dependencies, and least privilege", () => {
     expect(release).toContain("ref: refs/tags/${{ env.RELEASE_TAG }}");
     expect(release).toContain("cargo metadata --locked");
@@ -71,7 +108,7 @@ describe("production workflows", () => {
   });
 
   it("pins every action to an immutable full commit SHA", () => {
-    const workflows = `${quality}\n${release}\n${security}`;
+    const workflows = `${quality}\n${release}\n${publish}\n${security}`;
     const actionRefs = [...workflows.matchAll(/^\s*-?\s*uses:\s+[^@\s]+@([^\s#]+)/gm)].map(
       (match) => match[1]
     );

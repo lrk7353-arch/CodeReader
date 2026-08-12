@@ -1,9 +1,29 @@
 // @vitest-environment jsdom
-import { render, screen } from "@testing-library/react";
+import { act, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import type { PromptVersionInfo, UpsertPromptVersionInput } from "../../types/explanation";
 import { PromptRegistryDialog } from "./PromptRegistryDialog";
+
+let promptResizeCallback: ResizeObserverCallback | undefined;
+class PromptResizeObserver {
+  constructor(callback: ResizeObserverCallback) {
+    promptResizeCallback = callback;
+  }
+  observe() {}
+  unobserve() {}
+  disconnect() {}
+}
+vi.stubGlobal("ResizeObserver", PromptResizeObserver);
+
+function resizePromptRegistry(width: number) {
+  act(() => {
+    promptResizeCallback?.(
+      [{ contentRect: { width } } as ResizeObserverEntry],
+      {} as ResizeObserver
+    );
+  });
+}
 
 function sampleVersions(overrides: Partial<PromptVersionInfo>[] = []): PromptVersionInfo[] {
   const base: PromptVersionInfo[] = [
@@ -42,8 +62,8 @@ interface RenderOptions {
   onUpsert?: (input: UpsertPromptVersionInput) => void;
 }
 
-function renderDialog(options: RenderOptions = {}) {
-  const props = {
+function renderDialogProps(options: RenderOptions = {}) {
+  return {
     busy: options.busy ?? false,
     error: options.error,
     open: options.open ?? true,
@@ -53,6 +73,10 @@ function renderDialog(options: RenderOptions = {}) {
     onRollback: options.onRollback ?? vi.fn(),
     onUpsert: options.onUpsert ?? vi.fn()
   };
+}
+
+function renderDialog(options: RenderOptions = {}) {
+  const props = renderDialogProps(options);
   render(<PromptRegistryDialog {...props} />);
   return props;
 }
@@ -61,9 +85,32 @@ describe("PromptRegistryDialog interactions", () => {
   it("renders the registered versions when open", () => {
     renderDialog();
 
-    expect(screen.getByText("code-explanation-v0.1")).toBeInTheDocument();
+    expect(screen.getByRole("dialog", { name: "Prompt 版本管理" })).toHaveClass(
+      "prompt-registry-dialog"
+    );
+    expect(screen.getByText("code-explanation-v0.1")).toHaveAttribute("data-label", "版本");
     expect(screen.getByText("code-explanation-v0.2-rc1")).toBeInTheDocument();
     expect(screen.getByText("当前生效")).toBeInTheDocument();
+    expect(screen.getAllByText("canary")[0]).toHaveAttribute("data-label", "状态");
+    expect(screen.getByText("30%")).toHaveAttribute("data-label", "灰度");
+  });
+
+  it("switches between a grouped 503px layout and the complete wide table", () => {
+    const { container } = render(<PromptRegistryDialog {...renderDialogProps()} />);
+    const content = container.querySelector(".prompt-registry-content");
+    const table = screen.getByRole("table");
+
+    resizePromptRegistry(503);
+    expect(content).toHaveAttribute("data-layout", "compact");
+    expect(table).toHaveClass("prompt-registry-table");
+    expect(table.querySelectorAll("td[data-label]")).toHaveLength(16);
+    expect(table.querySelector('td[data-label="版本"]')).toHaveTextContent("code-explanation-v0.1");
+    expect(table.querySelector('td[data-label="操作"] button')).toBeInTheDocument();
+
+    resizePromptRegistry(800);
+    expect(content).toHaveAttribute("data-layout", "wide");
+    expect(screen.getAllByRole("columnheader")).toHaveLength(8);
+    expect(screen.getByRole("columnheader", { name: "更新时间" })).toBeInTheDocument();
   });
 
   it("closes on cancel button", async () => {

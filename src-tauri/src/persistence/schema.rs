@@ -2,7 +2,7 @@ use rusqlite::{params, Connection};
 
 use super::database_error;
 
-pub(super) const LATEST_DATABASE_VERSION: i64 = 4;
+pub(super) const LATEST_DATABASE_VERSION: i64 = 6;
 
 #[cfg(test)]
 pub(super) fn migrate(conn: &mut Connection) -> Result<(), String> {
@@ -65,6 +65,8 @@ fn apply_migration(conn: &Connection, version: i64) -> Result<(), String> {
         2 => migrate_to_v2(conn),
         3 => migrate_to_v3(conn),
         4 => migrate_to_v4(conn),
+        5 => migrate_to_v5(conn),
+        6 => migrate_to_v6(conn),
         _ => Err(format!(
             "No SQLite migration is registered for version {version}."
         )),
@@ -119,7 +121,47 @@ fn verify_required_schema(conn: &Connection) -> Result<(), String> {
         ),
         (
             "user_reading_states",
-            &["id", "project_id", "explanation_id", "state", "updated_at"],
+            &[
+                "id",
+                "project_id",
+                "explanation_id",
+                "state",
+                "visit_state",
+                "mastery_state",
+                "review_state",
+                "revision",
+                "updated_at",
+            ],
+        ),
+        (
+            "user_annotations",
+            &["id", "project_id", "explanation_id", "kind", "body"],
+        ),
+        (
+            "project_reader_preferences",
+            &["project_id", "display_mode", "updated_at"],
+        ),
+        (
+            "reader_resume_state",
+            &[
+                "slot",
+                "project_id",
+                "file_id",
+                "explanation_id",
+                "selection_start_line",
+                "selection_end_line",
+                "updated_at",
+            ],
+        ),
+        (
+            "explanation_relationships",
+            &[
+                "id",
+                "project_id",
+                "explanation_id",
+                "related_explanation_id",
+                "relation_kind",
+            ],
         ),
         (
             "project_guides",
@@ -198,6 +240,81 @@ fn migrate_to_v4(conn: &Connection) -> Result<(), String> {
            );
          CREATE UNIQUE INDEX IF NOT EXISTS uq_prompt_versions_single_active
            ON prompt_versions(status) WHERE status = 'active';",
+    )
+    .map_err(database_error)
+}
+
+fn migrate_to_v5(conn: &Connection) -> Result<(), String> {
+    ensure_column(
+        conn,
+        "user_reading_states",
+        "visit_state",
+        "TEXT NOT NULL DEFAULT 'unread'",
+    )?;
+    ensure_column(
+        conn,
+        "user_reading_states",
+        "mastery_state",
+        "TEXT NOT NULL DEFAULT 'unconfirmed'",
+    )?;
+    ensure_column(
+        conn,
+        "user_reading_states",
+        "review_state",
+        "TEXT NOT NULL DEFAULT 'current'",
+    )?;
+    ensure_column(
+        conn,
+        "user_reading_states",
+        "revision",
+        "INTEGER NOT NULL DEFAULT 0",
+    )?;
+    conn.execute_batch(
+        "UPDATE user_reading_states
+         SET visit_state = CASE WHEN state = 'unread' THEN 'unread' ELSE 'read' END,
+             mastery_state = CASE WHEN state = 'understood' THEN 'understood' ELSE 'unconfirmed' END,
+             review_state = CASE WHEN state = 'needs_reexplain' THEN 'needs_review' ELSE 'current' END;
+         CREATE TABLE IF NOT EXISTS user_annotations (
+           id TEXT PRIMARY KEY, project_id TEXT NOT NULL, explanation_id TEXT NOT NULL,
+           kind TEXT NOT NULL, body TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+         );
+         CREATE TABLE IF NOT EXISTS project_reader_preferences (
+           project_id TEXT PRIMARY KEY, display_mode TEXT NOT NULL DEFAULT 'plain', updated_at TEXT NOT NULL
+         );
+         CREATE TABLE IF NOT EXISTS explanation_relationships (
+           id TEXT PRIMARY KEY, project_id TEXT NOT NULL, explanation_id TEXT NOT NULL,
+           related_explanation_id TEXT NOT NULL, relation_kind TEXT NOT NULL, created_at TEXT NOT NULL,
+           UNIQUE(project_id, explanation_id, related_explanation_id, relation_kind)
+         );
+         INSERT OR IGNORE INTO user_annotations (id, project_id, explanation_id, kind, body, created_at, updated_at)
+         SELECT 'annotation:legacy-state:' || id, project_id, explanation_id,
+                CASE WHEN state = 'questioned' THEN 'question' ELSE 'risk' END,
+                '', updated_at, updated_at
+           FROM user_reading_states WHERE state IN ('questioned', 'suspicious');
+         INSERT OR IGNORE INTO user_annotations (id, project_id, explanation_id, kind, body, created_at, updated_at)
+         SELECT 'annotation:legacy-note:' || id, project_id, explanation_id, 'note', note, updated_at, updated_at
+           FROM user_reading_states WHERE note IS NOT NULL AND trim(note) <> '';
+         INSERT OR IGNORE INTO user_annotations (id, project_id, explanation_id, kind, body, created_at, updated_at)
+         SELECT 'annotation:legacy-feedback:' || id, project_id, explanation_id, 'note', user_note, created_at, created_at
+         FROM explanation_feedback WHERE feedback_type = 'user_note' AND user_note IS NOT NULL AND trim(user_note) <> '';
+         CREATE INDEX IF NOT EXISTS idx_user_annotations_target ON user_annotations(project_id, explanation_id, updated_at);
+         CREATE INDEX IF NOT EXISTS idx_explanation_relationships_target ON explanation_relationships(project_id, explanation_id);",
+    ).map_err(database_error)
+}
+
+fn migrate_to_v6(conn: &Connection) -> Result<(), String> {
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS reader_resume_state (
+           slot TEXT PRIMARY KEY CHECK(slot = 'current'),
+           project_id TEXT NOT NULL,
+           file_id TEXT,
+           explanation_id TEXT,
+           selection_start_line INTEGER,
+           selection_end_line INTEGER,
+           updated_at TEXT NOT NULL,
+           CHECK(selection_start_line IS NULL OR selection_start_line >= 1),
+           CHECK(selection_end_line IS NULL OR selection_end_line >= selection_start_line)
+         );",
     )
     .map_err(database_error)
 }
@@ -531,6 +648,84 @@ mod tests {
             )
             .expect("prompt table query succeeds");
         assert_eq!(prompt_table_count, 1);
+    }
+
+    #[test]
+    fn v5_preserves_all_legacy_states_notes_and_is_idempotent() {
+        let mut conn = Connection::open_in_memory().expect("database opens");
+        for version in 1..=4 {
+            run_migration(&conn, version).expect("historical schema builds");
+        }
+        for (id, state, note) in [
+            ("unread", "unread", None),
+            ("read", "read", None),
+            ("understood", "understood", None),
+            ("questioned", "questioned", None),
+            ("suspicious", "suspicious", Some("legacy risk note")),
+            ("review", "needs_reexplain", None),
+        ] {
+            conn.execute(
+                "INSERT INTO user_reading_states (id, project_id, explanation_id, state, note, updated_at)
+                 VALUES (?1, 'project:fixture', ?2, ?3, ?4, 'before')",
+                params![format!("reading:{id}"), format!("exp:{id}"), state, note],
+            )
+            .expect("legacy reading state inserts");
+        }
+        conn.execute(
+            "INSERT INTO explanation_feedback (id, project_id, explanation_id, feedback_type, user_note, created_at)
+             VALUES ('feedback:note', 'project:fixture', 'exp:read', 'user_note', 'legacy user note', 'before')",
+            [],
+        )
+        .expect("legacy user note inserts");
+
+        migrate(&mut conn).expect("v5 migration succeeds");
+        let expected = [
+            ("exp:unread", "unread", "unconfirmed", "current"),
+            ("exp:read", "read", "unconfirmed", "current"),
+            ("exp:understood", "read", "understood", "current"),
+            ("exp:questioned", "read", "unconfirmed", "current"),
+            ("exp:suspicious", "read", "unconfirmed", "current"),
+            ("exp:review", "read", "unconfirmed", "needs_review"),
+        ];
+        for (explanation_id, visit, mastery, review) in expected {
+            let actual: (String, String, String) = conn
+                .query_row(
+                    "SELECT visit_state, mastery_state, review_state FROM user_reading_states
+                     WHERE project_id = 'project:fixture' AND explanation_id = ?1",
+                    params![explanation_id],
+                    |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+                )
+                .expect("orthogonal state reads");
+            assert_eq!(
+                actual,
+                (visit.to_string(), mastery.to_string(), review.to_string())
+            );
+        }
+        let annotations: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM user_annotations WHERE project_id = 'project:fixture'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("annotations count");
+        assert_eq!(
+            annotations, 4,
+            "question, risk, legacy note, and user note survive"
+        );
+        let integrity: String = conn
+            .query_row("PRAGMA integrity_check", [], |row| row.get(0))
+            .expect("integrity check runs");
+        assert_eq!(integrity, "ok");
+
+        migrate(&mut conn).expect("repeat startup is idempotent");
+        let annotations_after_restart: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM user_annotations WHERE project_id = 'project:fixture'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("annotation count after restart");
+        assert_eq!(annotations_after_restart, annotations);
     }
 
     #[test]
