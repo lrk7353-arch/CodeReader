@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import { buildJourneyFromPhases } from "./native-journey-linux.mjs";
 
@@ -15,27 +15,33 @@ const NAMES = [
   "zoom-200-contrast"
 ];
 const phases = Object.fromEntries(NAMES.map((name) => [name, { status: "pass", probe: name }]));
+const nativeArch = process.arch === "arm64" ? "arm64" : "x64";
+const nonNativeArch = nativeArch === "arm64" ? "x64" : "arm64";
 
 describe("Linux native journey evidence", () => {
   it("binds an all-pass record to the native target without portable-path leaks", () => {
-    vi.stubGlobal("process", { ...process, arch: "x64" });
     const evidence = buildJourneyFromPhases({
       tag: "v1.0.0-rc.3",
       sha: "a".repeat(40),
-      arch: "x64",
+      arch: nativeArch,
       phases,
       observedAt: "2026-08-12T00:00:00.000Z"
     });
     expect(evidence.status).toBe("pass");
+    expect(evidence.arch).toBe(nativeArch);
     expect(evidence.windowsAuthenticodeSigned).toBeNull();
     expect(evidence.checks).toHaveLength(10);
     expect(JSON.stringify(evidence)).not.toContain("/home/");
-    vi.unstubAllGlobals();
   });
 
   it("refuses evidence for a non-native architecture", () => {
     expect(() =>
-      buildJourneyFromPhases({ tag: "v1.0.0-rc.3", sha: "b".repeat(40), arch: "arm64", phases })
+      buildJourneyFromPhases({
+        tag: "v1.0.0-rc.3",
+        sha: "b".repeat(40),
+        arch: nonNativeArch,
+        phases
+      })
     ).toThrow(/native runner/);
   });
 
@@ -46,7 +52,7 @@ describe("Linux native journey evidence", () => {
       buildJourneyFromPhases({
         tag: "v1.0.0-rc.3",
         sha: "a".repeat(40),
-        arch: "x64",
+        arch: nativeArch,
         phases: incomplete
       })
     ).toThrow(/independent passing probe/);
