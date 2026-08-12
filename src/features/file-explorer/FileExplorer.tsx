@@ -144,6 +144,7 @@ export function FileExplorer({
         return (
           <div className="tree-directory" key={node.id}>
             <button
+              data-path-origin={`directory:${node.id}`}
               className="directory-row"
               type="button"
               style={rowStyle}
@@ -198,6 +199,7 @@ export function FileExplorer({
       return (
         <div className="file-group" key={node.id}>
           <button
+            data-path-origin={`file:${node.id}`}
             className={rowClass}
             type="button"
             style={rowStyle}
@@ -261,6 +263,7 @@ export function FileExplorer({
                   >
                     {visibleTargets.map((explanation) => (
                       <button
+                        data-path-origin={`explanation:${explanation.id}`}
                         className={
                           explanation.id === selectedExplanationId
                             ? "target-row active"

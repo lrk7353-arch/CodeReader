@@ -1249,7 +1249,74 @@ WHERE created_at < CURRENT_DATE;
             .files
             .iter()
             .filter(|file| file.capability.can_explain)
-            .all(|file| file.language == "typescript" || file.language == "javascript"));
+            .all(|file| matches!(
+                file.language.as_str(),
+                "typescript" | "javascript" | "python" | "sql"
+            )));
+    }
+
+    #[test]
+    fn scans_all_three_r4_validation_project_shapes() {
+        let examples_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../examples");
+        let cases = [
+            (
+                "small",
+                vec!["app.ts", "login-controller.ts", "user-store.ts"],
+                vec!["typescript"],
+            ),
+            (
+                "frontend",
+                vec![
+                    "index.html",
+                    "src/main.js",
+                    "src/api.js",
+                    "src/store.js",
+                    "src/view.js",
+                ],
+                vec!["html", "javascript"],
+            ),
+            (
+                "fullstack",
+                vec![
+                    "frontend/main.js",
+                    "backend/main.py",
+                    "backend/service.py",
+                    "backend/repository.py",
+                    "data/schema.sql",
+                ],
+                vec!["javascript", "python", "sql"],
+            ),
+        ];
+
+        for (directory, required_paths, required_languages) in cases {
+            let root = examples_dir.join(directory);
+            let scan = scan_project(display_path(&root)).expect("R4 example should scan");
+            assert!(!scan.truncated, "{directory} should fit the scan budget");
+            assert_eq!(
+                scan.skipped_entries, 0,
+                "{directory} should scan without errors"
+            );
+            for required_path in required_paths {
+                assert!(
+                    scan.files
+                        .iter()
+                        .any(|file| file.relative_path == required_path),
+                    "{directory} is missing {required_path}"
+                );
+            }
+            for required_language in required_languages {
+                assert!(
+                    scan.files.iter().any(|file| {
+                        file.language == required_language && file.capability.can_preview
+                    }),
+                    "{directory} is missing previewable {required_language}"
+                );
+            }
+            assert!(
+                scan.files.iter().any(|file| file.capability.can_explain),
+                "{directory} needs at least one explainable target"
+            );
+        }
     }
 
     #[test]

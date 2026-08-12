@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 import type { CodeFile } from "../../types/explanation";
-import { resolveWorkspaceName, shouldApplyInitialWorkspaceHydration } from "./useWorkspaceFiles";
+import {
+  recentProjectNameFromRoot,
+  resolveNavigationExplanation,
+  resolveWorkspaceName,
+  shouldApplyInitialWorkspaceHydration
+} from "./useWorkspaceFiles";
 
 describe("useWorkspaceFiles helpers", () => {
   it("does not let late sample hydration overwrite a touched workspace", () => {
@@ -29,6 +34,40 @@ describe("useWorkspaceFiles helpers", () => {
     ).toBe("scratch");
 
     expect(resolveWorkspaceName([codeFile({ source: "sample" })])).toBe("examples");
+  });
+
+  it("retains only a display name for the recent-project recovery entry", () => {
+    expect(recentProjectNameFromRoot("/home/alice/private/code-reader")).toBe("code-reader");
+    expect(recentProjectNameFromRoot("C:\\Users\\alice\\private\\reader-app\\")).toBe("reader-app");
+    expect(recentProjectNameFromRoot("/")).toBe("");
+  });
+
+  it("validates a related target before navigation can replace the current context", () => {
+    const available = codeFile({
+      explanations: [
+        {
+          id: "exp:available",
+          filePath: "/tmp/model.py",
+          targetType: "function",
+          startLine: 4,
+          endLine: 8,
+          codeMeaning: "available",
+          status: "valid",
+          readingState: "read",
+          createdAt: "2026-08-09T00:00:00.000Z",
+          updatedAt: "2026-08-09T00:00:00.000Z"
+        }
+      ]
+    });
+    expect(
+      resolveNavigationExplanation(available, {
+        fileId: available.id,
+        explanationId: "exp:missing"
+      })
+    ).toBeUndefined();
+    expect(
+      resolveNavigationExplanation(available, { fileId: available.id, startLine: 6 })?.id
+    ).toBe("exp:available");
   });
 });
 

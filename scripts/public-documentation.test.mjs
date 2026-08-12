@@ -81,13 +81,15 @@ describe("public documentation", () => {
     const readme = read("README.md");
     const chineseReadme = read("README.zh-CN.md");
 
+    expect(changelog).toContain("1.0.0-rc.3");
     expect(changelog).toContain("1.0.0-rc.2");
-    expect(readme).toContain("Current channel: `1.0.0-rc.2`");
-    expect(chineseReadme).toContain("1.0.0-rc.2 候选版");
+    expect(readme).toContain("Current channel: `1.0.0-rc.3`");
+    expect(chineseReadme).toContain("1.0.0-rc.3 候选版");
     expect(changelog).toContain("0.11.0-beta.4");
     expect(changelog).toContain("0.10.0");
     expect(changelog).toContain("0.1.0");
     expect(history).toContain("升级与数据兼容性");
+    expect(history).toContain("1.0.0-rc.3");
     expect(history).toContain("0.10.x");
     expect(history).toContain("0.11.x");
     expect(history).toContain("不支持的操作");
@@ -96,5 +98,88 @@ describe("public documentation", () => {
 
     expectLocalMarkdownLinksToExist(changelog, root);
     expectLocalMarkdownLinksToExist(history, resolve(root, "docs/history"));
+  });
+
+  it("describes the approved product-reset decision consistently", () => {
+    const documentationIndex = read("docs/README.md");
+    const decision = read("docs/architecture/2026-08-09-product-reset-decision.md");
+    const plan = read("docs/plans/2026-08-09-product-reset-plan.md");
+    const r0Baseline = read("docs/plans/2026-08-09-product-reset-r0-baseline.md");
+    const r0Evidence = read("docs/plans/2026-08-09-product-reset-r0-evidence.md");
+
+    expect(documentationIndex).toContain("Current accepted product reset records:");
+    expect(documentationIndex).toContain("accepted decision restoring");
+    expect(documentationIndex).toContain("accepted product, architecture");
+    expect(documentationIndex).not.toContain("Current product reset proposals:");
+    expect(documentationIndex).not.toContain("proposed decision restoring");
+    expect(decision).toContain("**状态：** Accepted");
+    expect(plan).toContain("**状态：** Accepted");
+    expect(r0Baseline).toContain("[R0 隔离门禁证据](2026-08-09-product-reset-r0-evidence.md)");
+    expect(r0Evidence).toContain("`vite@8.1.4`");
+    expect(r0Evidence).not.toMatch(/\/(?:home|Users)\//i);
+
+    expectLocalMarkdownLinksToExist(documentationIndex, resolve(root, "docs"));
+    expectLocalMarkdownLinksToExist(r0Baseline, resolve(root, "docs/plans"));
+  });
+
+  it("keeps R4 positioning honest about validation targets and maintainer acceptance", () => {
+    const readme = read("README.md");
+    const chineseReadme = read("README.zh-CN.md");
+    const changelog = read("CHANGELOG.md");
+    const history = read("docs/history/version-history.zh-CN.md");
+    const publicSpec = read("docs/release/public-release-notes.zh-CN.md");
+    const evidence = read("docs/plans/2026-08-12-product-reset-r4-evidence.md");
+    const deferred = read("docs/plans/待处理问题及其优先级.md");
+
+    expect(readme).toContain("project map and reading path");
+    expect(readme).toContain("validation targets, not published SLAs");
+    expect(chineseReadme).toContain("从项目地图和推荐阅读路径出发");
+    expect(chineseReadme).toContain("不是公开 SLA");
+    expect(changelog).toContain("产品复位候选");
+    expect(history).not.toContain("未发布的产品复位候选");
+    expect(history).toContain("R4 的三类真实项目人工使用验收已经完成并通过");
+    expect(history).toContain("当前未完成范围仅是 R5");
+    expect(publicSpec).toContain("只是内部验证目标，不是 SLA");
+    expect(evidence).toContain("维护者已完成人工使用并整体通过");
+    expect(evidence).toContain("Sol `high` 独立监督");
+    expect(evidence).toContain("R4 通过不等于 R5、1.0 或公开发布完成");
+    expect(evidence).toContain("不冒充外部用户项目或真实用户研究");
+    expect(deferred).toContain("R4 维护者真实使用验收");
+
+    for (const [owner, markdown] of [
+      [root, readme],
+      [root, chineseReadme],
+      [root, changelog],
+      [resolve(root, "docs/history"), history],
+      [resolve(root, "docs/release"), publicSpec],
+      [resolve(root, "docs/plans"), evidence],
+      [resolve(root, "docs/plans"), deferred]
+    ]) {
+      expect(markdown).not.toMatch(/\uFFFD|(?:Ã.|Â.|â..)/);
+      expectLocalMarkdownLinksToExist(markdown, owner);
+    }
+  });
+
+  it("keeps R5 package smoke separate from the complete native product journey", () => {
+    const runbook = read("docs/release/github-release.md");
+    const evidence = read("docs/plans/2026-08-12-product-reset-r5-evidence.md");
+    const deferred = read("docs/plans/待处理问题及其优先级.md");
+
+    expect(runbook).toContain("Package smoke and the complete product journey are separate gates");
+    expect(runbook).toContain("verify-journeys");
+    expect(evidence).toContain("候选执行中，未 `PASS`，未公开发布");
+    expect(evidence).toContain("Windows ARM64");
+    expect(evidence).toContain("windowsAuthenticodeSigned: false");
+    expect(deferred).toContain("已转入 R5 原生旅程门禁");
+    expect(deferred).toContain("当前状态：R5 阻塞项");
+
+    for (const [owner, markdown] of [
+      [resolve(root, "docs/release"), runbook],
+      [resolve(root, "docs/plans"), evidence],
+      [resolve(root, "docs/plans"), deferred]
+    ]) {
+      expect(markdown).not.toMatch(/\uFFFD|(?:Ã.|Â.|â..)/);
+      expectLocalMarkdownLinksToExist(markdown, owner);
+    }
   });
 });

@@ -1,0 +1,74 @@
+name: Publish Approved Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing v1.x draft release tag
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: publish-approved-release
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 10
+    environment: production-release-publish
+    permissions:
+      contents: write
+    env:
+      RELEASE_TAG: ${{ inputs.tag }}
+    steps:
+      - name: Validate the requested release tag before using it
+        run: |
+          if [[ ! "$RELEASE_TAG" =~ ^v1\.[0-9]+\.[0-9]+(-rc\.[0-9]+)?$ ]]; then
+            echo "Invalid v1 release tag." >&2
+            exit 1
+          fi
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        with:
+          ref: refs/tags/${{ env.RELEASE_TAG }}
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+        with:
+          node-version: 22
+      - name: Resolve and confirm the immutable target tag
+        id: target
+        run: |
+          test "$(git describe --tags --exact-match HEAD)" = "$RELEASE_TAG"
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+      - name: Revalidate the exact current draft after maintainer approval
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          test "$(gh release view "$RELEASE_TAG" --json tagName --jq .tagName)" = "$RELEASE_TAG"
+          test "$(gh release view "$RELEASE_TAG" --json isDraft --jq .isDraft)" = "true"
+      - name: Download the current four controlled native journey records
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir verified-native-journeys
+          gh release download "$RELEASE_TAG" \
+            --pattern 'native-journey-*.json' \
+            --dir verified-native-journeys
+      - name: Reverify current journeys against the immutable target tag
+        run: |
+          node scripts/release-evidence.mjs verify-journeys \
+            --input verified-native-journeys \
+            --tag "$RELEASE_TAG" \
+            --sha "${{ steps.target.outputs.sha }}"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: verified-native-journeys
+          path: verified-native-journeys/native-journey-*.json
+          if-no-files-found: error
+          retention-days: 90
+      - name: Publish the just-reverified draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release edit "$RELEASE_TAG" --draft=false

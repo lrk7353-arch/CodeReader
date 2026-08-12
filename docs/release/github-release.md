@@ -67,8 +67,8 @@ For the current solo-maintainer repository, `main` requires a pull request and e
 Create an annotated, signed tag when a signing identity is available:
 
 ```bash
-git tag -a v1.0.0-rc.2 -m "CodeReader 1.0.0-rc.2"
-git push origin v1.0.0-rc.2
+git tag -a v1.0.0-rc.3 -m "CodeReader 1.0.0-rc.3"
+git push origin v1.0.0-rc.3
 ```
 
 Pushing a `v1.*` tag starts `.github/workflows/release.yml`. A manual run may be used only with an existing tag.
@@ -100,6 +100,21 @@ The release workflow runs on native Windows/Linux x64/ARM64 GitHub-hosted runner
 This automation is deliberately narrower than full product acceptance. An RPM container on the native Linux host validates RPM installation and runtime compatibility but is not evidence of a complete Fedora desktop user journey.
 
 ## Maintainer native-hardware acceptance
+
+Package smoke and the complete product journey are separate gates. After creating the immutable candidate tag, run the full journey on native Windows and Linux x64/ARM64 hardware. Generate one template per target and replace `pending` only with directly observed results:
+
+```bash
+node scripts/release-evidence.mjs journey-template --platform linux --arch x64 --tag v1.0.0-rc.3 --sha <40-character-commit> --output docs/release/evidence/v1.0.0-rc.3/native-journey-linux-x64.json
+node scripts/release-evidence.mjs verify-journeys --input docs/release/evidence/v1.0.0-rc.3 --tag v1.0.0-rc.3 --sha <40-character-commit>
+```
+
+Repeat generation for `linux/arm64`, `windows/x64`, and `windows/arm64`. The journey covers the native picker, project open, explanation, restart/reauthorization/restore, both supported legacy upgrades, uninstall data policy, keyboard/focus, reduced motion, long content, and 200% zoom/contrast. Do not put source, prompts, model responses, credentials, logs, personal paths, or free-form notes into these records.
+
+Upload exactly these four records as assets of the draft Release; do not put them in the commit they describe. The records use a strict whitelist schema: only release identity, target, observation time, status, the fixed check names/statuses, and the platform-appropriate Authenticode fields are accepted. Free-form `details`, notes, logs, source, prompts, model responses, credentials, and unknown nested fields are rejected.
+
+Publication is only performed by `.github/workflows/publish.yml`. Dispatch it with the existing immutable tag. The single write-capable job first pauses for maintainer approval in the protected `production-release-publish` environment. After approval it validates the tag syntax before using it, checks out that exact tag, reconfirms the current Release is still the matching draft, downloads exactly four current `native-journey-*.json` assets, and runs `verify-journeys` against the tag's resolved SHA. Only the immediately following step may publish that same draft. This post-approval revalidation prevents evidence or draft state changed during approval from being trusted. Keep the environment restricted to required reviewers. Do not grant another workflow or local script permission to change the draft state.
+
+The workflow separately creates `native-smoke-*.json` after installing each built package. That smoke proves package metadata, installation, visible-window launch, uninstall, and package hashes. It does not prove the product journey. Both evidence layers are mandatory.
 
 Before publishing, verify each of the four platform/architecture combinations on native hardware or its GitHub-hosted native runner:
 
@@ -154,7 +169,7 @@ When Azure Trusted Signing, SignPath, or a conventional certificate is configure
 
 ## Publish and post-release checks
 
-1. Publish the reviewed draft manually.
+1. Dispatch `Publish Approved Release` for the immutable candidate tag and approve the protected `production-release-publish` environment. After approval, the protected job revalidates the current journey assets and publishes the existing draft only if they pass; do not publish through the GitHub UI or a local `gh release edit` command.
 2. Install again from the public Release assets, not workflow artifacts.
 3. Confirm the in-app update checker sees the correct channel/version and official Release URL.
 4. Verify checksums and attestations using the public URLs.

@@ -29,6 +29,9 @@ mod model_config;
 #[path = "persistence/user_activity.rs"]
 mod user_activity;
 
+#[path = "persistence/resume_state.rs"]
+mod resume_state;
+
 #[path = "persistence/change_tracking.rs"]
 mod change_tracking;
 
@@ -88,23 +91,102 @@ pub(crate) use prompt_registry::{
 };
 #[cfg(not(test))]
 #[doc(hidden)]
+pub use resume_state::{
+    __cmd__load_reader_resume_state, __cmd__save_reader_resume_state,
+    __tauri_command_name_load_reader_resume_state, __tauri_command_name_save_reader_resume_state,
+};
+#[cfg(not(test))]
+pub use resume_state::{load_reader_resume_state, save_reader_resume_state};
+#[allow(unused_imports)]
+pub(crate) use resume_state::{load_reader_resume_state_at_path, save_reader_resume_state_at_path};
+#[allow(unused_imports)]
+pub use resume_state::{ReaderResumeStatePayload, SaveReaderResumeStateRequest};
+#[cfg(not(test))]
+#[doc(hidden)]
+pub use user_activity::__cmd__create_related_target;
+#[cfg(not(test))]
+#[doc(hidden)]
+pub use user_activity::__cmd__create_user_annotation;
+#[cfg(not(test))]
+#[doc(hidden)]
+pub use user_activity::__cmd__delete_reader_preference;
+#[cfg(not(test))]
+#[doc(hidden)]
+pub use user_activity::__cmd__delete_related_target;
+#[cfg(not(test))]
+#[doc(hidden)]
+pub use user_activity::__cmd__delete_user_annotation;
+#[cfg(not(test))]
+pub use user_activity::__cmd__save_cognition_state;
+#[cfg(not(test))]
+#[doc(hidden)]
 pub use user_activity::__cmd__save_explanation_feedback;
+#[cfg(not(test))]
+#[doc(hidden)]
+pub use user_activity::__cmd__save_reader_preference;
 #[cfg(not(test))]
 #[doc(hidden)]
 pub use user_activity::__cmd__save_reading_state;
 #[cfg(not(test))]
 #[doc(hidden)]
+pub use user_activity::__cmd__update_related_target;
+#[cfg(not(test))]
+#[doc(hidden)]
+pub use user_activity::__cmd__update_user_annotation;
+#[cfg(not(test))]
+#[doc(hidden)]
+pub use user_activity::__tauri_command_name_create_related_target;
+#[cfg(not(test))]
+#[doc(hidden)]
+pub use user_activity::__tauri_command_name_create_user_annotation;
+#[cfg(not(test))]
+#[doc(hidden)]
+pub use user_activity::__tauri_command_name_delete_reader_preference;
+#[cfg(not(test))]
+#[doc(hidden)]
+pub use user_activity::__tauri_command_name_delete_related_target;
+#[cfg(not(test))]
+#[doc(hidden)]
+pub use user_activity::__tauri_command_name_delete_user_annotation;
+#[cfg(not(test))]
+pub use user_activity::__tauri_command_name_save_cognition_state;
+#[cfg(not(test))]
+#[doc(hidden)]
 pub use user_activity::__tauri_command_name_save_explanation_feedback;
+#[cfg(not(test))]
+#[doc(hidden)]
+pub use user_activity::__tauri_command_name_save_reader_preference;
 #[cfg(not(test))]
 #[doc(hidden)]
 pub use user_activity::__tauri_command_name_save_reading_state;
 #[cfg(not(test))]
-pub use user_activity::{save_explanation_feedback, save_reading_state};
+#[doc(hidden)]
+pub use user_activity::__tauri_command_name_update_related_target;
+#[cfg(not(test))]
+#[doc(hidden)]
+pub use user_activity::__tauri_command_name_update_user_annotation;
+#[cfg(not(test))]
+pub use user_activity::{
+    create_related_target, create_user_annotation, delete_reader_preference, delete_related_target,
+    delete_user_annotation, save_reader_preference, update_related_target, update_user_annotation,
+};
 #[allow(unused_imports)]
-pub(crate) use user_activity::{save_feedback_at_path, save_reading_state_at_path};
+pub(crate) use user_activity::{
+    create_related_target_at_path, create_user_annotation_at_path,
+    delete_reader_preference_at_path, delete_related_target_at_path,
+    delete_user_annotation_at_path, save_cognition_state_at_path, save_feedback_at_path,
+    save_reader_preference_at_path, save_reading_state_at_path, update_related_target_at_path,
+    update_user_annotation_at_path,
+};
+#[cfg(not(test))]
+pub use user_activity::{save_cognition_state, save_explanation_feedback, save_reading_state};
 #[allow(unused_imports)]
 pub use user_activity::{
-    SaveFeedbackPayload, SaveFeedbackRequest, SaveReadingStatePayload, SaveReadingStateRequest,
+    CreateRelatedTargetRequest, CreateUserAnnotationRequest, DeleteReaderPreferenceRequest,
+    DeleteRelatedTargetRequest, DeleteUserAnnotationRequest, SaveCognitionStatePayload,
+    SaveCognitionStateRequest, SaveFeedbackPayload, SaveFeedbackRequest,
+    SaveReaderPreferenceRequest, SaveReadingStatePayload, SaveReadingStateRequest,
+    UpdateRelatedTargetRequest, UpdateUserAnnotationRequest,
 };
 
 const DATABASE_FILE_NAME: &str = "codereader.sqlite";
@@ -175,6 +257,8 @@ pub struct HydratedCodeFilePayload {
     explanations: Vec<ExplanationPayload>,
     database_path: String,
     project_id: String,
+    reader_preference: Option<ReaderPreferencePayload>,
+    related_targets: Vec<RelatedTargetPayload>,
     change_summary: Option<ChangeSummaryPayload>,
 }
 
@@ -231,8 +315,50 @@ pub struct ExplanationPayload {
     pub(crate) reader_notes: Vec<String>,
     pub(crate) status: String,
     pub(crate) reading_state: String,
+    pub(crate) visit_state: String,
+    pub(crate) mastery_state: String,
+    pub(crate) review_state: String,
+    pub(crate) cognition_revision: i64,
+    pub(crate) annotations: Vec<UserAnnotationPayload>,
     pub(crate) created_at: String,
     pub(crate) updated_at: String,
+}
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UserAnnotationPayload {
+    pub(crate) id: String,
+    pub(crate) project_id: String,
+    pub(crate) explanation_id: String,
+    pub(crate) kind: String,
+    pub(crate) body: String,
+    pub(crate) created_at: String,
+    pub(crate) updated_at: String,
+}
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReaderPreferencePayload {
+    pub(crate) project_id: String,
+    pub(crate) display_mode: String,
+    pub(crate) updated_at: String,
+}
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RelatedTargetPayload {
+    pub(crate) id: String,
+    pub(crate) project_id: String,
+    pub(crate) explanation_id: String,
+    pub(crate) related_explanation_id: String,
+    pub(crate) relation_kind: String,
+    pub(crate) related_file_id: Option<String>,
+    pub(crate) related_target_type: Option<String>,
+    pub(crate) related_target_name: Option<String>,
+    pub(crate) related_start_line: Option<usize>,
+    pub(crate) related_end_line: Option<usize>,
+    pub(crate) related_status: Option<String>,
+    pub(crate) created_at: String,
 }
 
 #[derive(Clone)]
@@ -843,6 +969,51 @@ mod tests {
     }
 
     #[test]
+    fn failed_v5_migration_restores_the_verified_backup_without_overwriting_data() {
+        let database_path = temp_database_path("v5-failure-restore");
+        let conn = open_database(&database_path).expect("current database opens");
+        conn.execute(
+            "INSERT INTO projects (id, root_path, created_at, updated_at)
+             VALUES ('project:restore', '/fixture', 'before', 'before')",
+            [],
+        )
+        .expect("fixture row inserts");
+        conn.execute_batch(
+            "DROP TABLE user_reading_states;
+             PRAGMA user_version = 4;",
+        )
+        .expect("fixture forces an additive migration failure");
+        drop(conn);
+
+        let error = open_database(&database_path).expect_err("v5 migration must fail safely");
+        assert!(error.contains("user_reading_states"));
+        let backup = latest_backup_path(&database_path).expect("verified backup exists");
+        let restored =
+            Connection::open(&database_path).expect("restored database remains readable");
+        assert_eq!(
+            schema::database_version(&restored).expect("restored version reads"),
+            4
+        );
+        let project_count: i64 = restored
+            .query_row(
+                "SELECT COUNT(*) FROM projects WHERE id = 'project:restore'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("original project remains after restore");
+        assert_eq!(project_count, 1);
+        drop(restored);
+        let backup_conn = Connection::open(&backup).expect("backup opens");
+        assert_eq!(
+            schema::database_version(&backup_conn).expect("backup version reads"),
+            4
+        );
+        drop(backup_conn);
+        let _ = std::fs::remove_file(backup);
+        let _ = std::fs::remove_file(database_path);
+    }
+
+    #[test]
     fn supported_historical_databases_import_migrate_and_reopen_without_loss() {
         let fixtures = [
             (
@@ -1016,7 +1187,397 @@ mod tests {
             .find(|explanation| explanation.id == "exp:target:sample:file")
             .expect("file explanation should exist");
         assert_eq!(file_explanation.reading_state, "understood");
+        assert_eq!(file_explanation.visit_state, "read");
+        assert_eq!(file_explanation.mastery_state, "understood");
+        assert_eq!(file_explanation.review_state, "current");
 
+        let _ = std::fs::remove_file(database_path);
+    }
+
+    #[test]
+    fn legacy_marker_replacement_preserves_empty_notes_and_new_cognition_saves() {
+        let database_path = temp_database_path("legacy-markers");
+        hydrate_code_file_at_path(&database_path, sample_request()).expect("hydrate prepares db");
+        let target = "exp:target:sample:file".to_string();
+
+        save_reading_state_at_path(
+            &database_path,
+            SaveReadingStateRequest {
+                project_id: "project:sample".to_string(),
+                explanation_id: target.clone(),
+                state: "questioned".to_string(),
+                note: None,
+            },
+        )
+        .expect("empty questioned state persists a marker");
+
+        let saved = save_cognition_state_at_path(
+            &database_path,
+            SaveCognitionStateRequest {
+                project_id: "project:sample".to_string(),
+                explanation_id: target.clone(),
+                visit_state: "read".to_string(),
+                mastery_state: "understood".to_string(),
+                review_state: "current".to_string(),
+                expected_revision: Some(1),
+            },
+        )
+        .expect("new cognition save preserves the legacy marker projection");
+        assert_eq!(saved.state, "questioned");
+
+        save_reading_state_at_path(
+            &database_path,
+            SaveReadingStateRequest {
+                project_id: "project:sample".to_string(),
+                explanation_id: target.clone(),
+                state: "suspicious".to_string(),
+                note: Some("legacy note".to_string()),
+            },
+        )
+        .expect("risk marker and legacy note persist");
+
+        let reopened = hydrate_code_file_at_path(&database_path, sample_request())
+            .expect("reopen returns cognition and annotations");
+        let explanation = reopened
+            .explanations
+            .iter()
+            .find(|item| item.id == target)
+            .expect("target exists");
+        assert_eq!(explanation.reading_state, "suspicious");
+        assert_eq!(explanation.annotations.len(), 2);
+        assert!(!explanation
+            .annotations
+            .iter()
+            .any(|item| item.kind == "question"));
+        assert!(explanation
+            .annotations
+            .iter()
+            .any(|item| item.kind == "risk"));
+        assert!(explanation
+            .annotations
+            .iter()
+            .any(|item| item.kind == "note" && item.body == "legacy note"));
+
+        let stale = save_cognition_state_at_path(
+            &database_path,
+            SaveCognitionStateRequest {
+                project_id: "project:sample".to_string(),
+                explanation_id: target,
+                visit_state: "read".to_string(),
+                mastery_state: "unconfirmed".to_string(),
+                review_state: "needs_review".to_string(),
+                expected_revision: Some(1),
+            },
+        )
+        .expect_err("stale revision is rejected");
+        assert!(stale.contains("stale"));
+
+        let _ = std::fs::remove_file(database_path);
+    }
+
+    #[test]
+    fn legacy_ipc_creates_its_own_marker_after_new_question_and_risk_annotations() {
+        let database_path = temp_database_path("legacy-marker-origin");
+        let project_id = "project:sample".to_string();
+        let explanation_id = "exp:target:sample:file".to_string();
+        hydrate_code_file_at_path(&database_path, sample_request())
+            .expect("hydrate prepares target");
+        let new_question = create_user_annotation_at_path(
+            &database_path,
+            CreateUserAnnotationRequest {
+                project_id: project_id.clone(),
+                explanation_id: explanation_id.clone(),
+                kind: "question".to_string(),
+                body: "new question remains orthogonal".to_string(),
+            },
+        )
+        .expect("new question creates");
+        let new_risk = create_user_annotation_at_path(
+            &database_path,
+            CreateUserAnnotationRequest {
+                project_id: project_id.clone(),
+                explanation_id: explanation_id.clone(),
+                kind: "risk".to_string(),
+                body: "new risk remains orthogonal".to_string(),
+            },
+        )
+        .expect("new risk creates");
+
+        let questioned = save_reading_state_at_path(
+            &database_path,
+            SaveReadingStateRequest {
+                project_id: project_id.clone(),
+                explanation_id: explanation_id.clone(),
+                state: "questioned".to_string(),
+                note: None,
+            },
+        )
+        .expect("legacy question save creates a legacy marker");
+        assert_eq!(questioned.state, "questioned");
+        let suspicious = save_reading_state_at_path(
+            &database_path,
+            SaveReadingStateRequest {
+                project_id: project_id.clone(),
+                explanation_id: explanation_id.clone(),
+                state: "suspicious".to_string(),
+                note: None,
+            },
+        )
+        .expect("legacy risk save creates a legacy marker");
+        assert_eq!(suspicious.state, "suspicious");
+
+        let conn = open_database(&database_path).expect("database opens");
+        let annotations: Vec<(String, String)> = conn
+            .prepare(
+                "SELECT id, kind FROM user_annotations
+                 WHERE project_id = ?1 AND explanation_id = ?2 ORDER BY id",
+            )
+            .expect("annotation query prepares")
+            .query_map(params![project_id, explanation_id], |row| {
+                Ok((row.get(0)?, row.get(1)?))
+            })
+            .expect("annotation query runs")
+            .collect::<Result<Vec<_>, _>>()
+            .expect("annotations collect");
+        assert!(annotations
+            .iter()
+            .any(|(id, kind)| id == &new_question.id && kind == "question"));
+        assert!(annotations
+            .iter()
+            .any(|(id, kind)| id == &new_risk.id && kind == "risk"));
+        let legacy_markers = annotations
+            .iter()
+            .filter(|(id, _)| id.starts_with("annotation:legacy-state:"))
+            .collect::<Vec<_>>();
+        assert_eq!(legacy_markers.len(), 1);
+        assert_eq!(legacy_markers[0].1, "risk");
+        drop(conn);
+
+        for marker in ["questioned", "suspicious"] {
+            for next_state in ["unread", "read", "understood", "needs_reexplain"] {
+                save_reading_state_at_path(
+                    &database_path,
+                    SaveReadingStateRequest {
+                        project_id: project_id.clone(),
+                        explanation_id: explanation_id.clone(),
+                        state: marker.to_string(),
+                        note: None,
+                    },
+                )
+                .expect("legacy marker saves");
+                let saved = save_reading_state_at_path(
+                    &database_path,
+                    SaveReadingStateRequest {
+                        project_id: project_id.clone(),
+                        explanation_id: explanation_id.clone(),
+                        state: next_state.to_string(),
+                        note: None,
+                    },
+                )
+                .expect("non-marker state replaces legacy marker");
+                assert_eq!(saved.state, next_state);
+
+                let conn = open_database(&database_path).expect("database opens");
+                let marker_count: i64 = conn
+                    .query_row(
+                        "SELECT COUNT(*) FROM user_annotations
+                         WHERE project_id = ?1 AND explanation_id = ?2
+                           AND id LIKE 'annotation:legacy-state:%'",
+                        params![project_id, explanation_id],
+                        |row| row.get(0),
+                    )
+                    .expect("marker count reads");
+                assert_eq!(marker_count, 0);
+                drop(conn);
+
+                let reopened = hydrate_code_file_at_path(&database_path, sample_request())
+                    .expect("restart hydrates replacement state");
+                let target = reopened
+                    .explanations
+                    .iter()
+                    .find(|item| item.id == "exp:target:sample:file")
+                    .expect("target hydrates");
+                assert_eq!(target.reading_state, next_state);
+            }
+        }
+
+        let reopened = hydrate_code_file_at_path(&database_path, sample_request())
+            .expect("restart hydrates legacy projection");
+        let target = reopened
+            .explanations
+            .iter()
+            .find(|item| item.id == "exp:target:sample:file")
+            .expect("target hydrates");
+        assert_eq!(target.reading_state, "needs_reexplain");
+        assert!(target
+            .annotations
+            .iter()
+            .any(|item| item.id == new_question.id));
+        assert!(target.annotations.iter().any(|item| item.id == new_risk.id));
+        let _ = std::fs::remove_file(database_path);
+    }
+
+    #[test]
+    fn constrained_r1_records_round_trip_through_restart() {
+        let database_path = temp_database_path("r1-record-crud");
+        let project_id = "project:sample".to_string();
+        let explanation_id = "exp:target:sample:file".to_string();
+        hydrate_code_file_at_path(&database_path, sample_request())
+            .expect("hydrate prepares targets");
+
+        let annotation = create_user_annotation_at_path(
+            &database_path,
+            CreateUserAnnotationRequest {
+                project_id: project_id.clone(),
+                explanation_id: explanation_id.clone(),
+                kind: "note".to_string(),
+                body: "remember this boundary".to_string(),
+            },
+        )
+        .expect("annotation creates within the explanation target");
+        update_user_annotation_at_path(
+            &database_path,
+            UpdateUserAnnotationRequest {
+                project_id: project_id.clone(),
+                explanation_id: explanation_id.clone(),
+                id: annotation.id.clone(),
+                kind: "question".to_string(),
+                body: "why is this boundary needed?".to_string(),
+            },
+        )
+        .expect("annotation updates within the explanation target");
+        let preference = save_reader_preference_at_path(
+            &database_path,
+            SaveReaderPreferenceRequest {
+                project_id: project_id.clone(),
+                display_mode: "detailed".to_string(),
+            },
+        )
+        .expect("project preference saves");
+        assert_eq!(preference.display_mode, "detailed");
+        let relation = create_related_target_at_path(
+            &database_path,
+            CreateRelatedTargetRequest {
+                project_id: project_id.clone(),
+                explanation_id: explanation_id.clone(),
+                related_explanation_id: "exp:target:sample:function".to_string(),
+                relation_kind: "depends_on".to_string(),
+            },
+        )
+        .expect("related target creates inside the project");
+        update_related_target_at_path(
+            &database_path,
+            UpdateRelatedTargetRequest {
+                project_id: project_id.clone(),
+                explanation_id: explanation_id.clone(),
+                id: relation.id.clone(),
+                related_explanation_id: "exp:target:sample:function".to_string(),
+                relation_kind: "clarifies".to_string(),
+            },
+        )
+        .expect("related target updates inside the project");
+
+        let reopened = hydrate_code_file_at_path(&database_path, sample_request())
+            .expect("restart hydration restores R1 records");
+        assert_eq!(
+            reopened
+                .reader_preference
+                .expect("preference hydrates")
+                .display_mode,
+            "detailed"
+        );
+        assert_eq!(reopened.related_targets.len(), 1);
+        assert_eq!(reopened.related_targets[0].relation_kind, "clarifies");
+        assert_eq!(
+            reopened.related_targets[0].related_file_id.as_deref(),
+            Some("file:sample")
+        );
+        assert_eq!(
+            reopened.related_targets[0].related_target_type.as_deref(),
+            Some("function")
+        );
+        assert_eq!(reopened.related_targets[0].related_start_line, Some(1));
+        let reopened_target = reopened
+            .explanations
+            .iter()
+            .find(|explanation| explanation.id == explanation_id)
+            .expect("annotated explanation hydrates");
+        assert!(reopened_target
+            .annotations
+            .iter()
+            .any(|item| item.id == annotation.id && item.kind == "question"));
+        assert_eq!(
+            reopened_target.reading_state, "unread",
+            "new question annotations never become legacy state markers"
+        );
+
+        update_user_annotation_at_path(
+            &database_path,
+            UpdateUserAnnotationRequest {
+                project_id: project_id.clone(),
+                explanation_id: explanation_id.clone(),
+                id: annotation.id.clone(),
+                kind: "risk".to_string(),
+                body: "a new risk annotation is orthogonal".to_string(),
+            },
+        )
+        .expect("new risk annotation updates");
+        let with_new_risk = hydrate_code_file_at_path(&database_path, sample_request())
+            .expect("new risk hydration succeeds");
+        assert_eq!(
+            with_new_risk
+                .explanations
+                .iter()
+                .find(|item| item.id == explanation_id)
+                .expect("target persists")
+                .reading_state,
+            "unread"
+        );
+
+        delete_user_annotation_at_path(
+            &database_path,
+            DeleteUserAnnotationRequest {
+                project_id: project_id.clone(),
+                explanation_id: explanation_id.clone(),
+                id: annotation.id,
+            },
+        )
+        .expect("annotation deletes within the explanation target");
+        let without_new_risk = hydrate_code_file_at_path(&database_path, sample_request())
+            .expect("deleted annotation hydration succeeds");
+        assert_eq!(
+            without_new_risk
+                .explanations
+                .iter()
+                .find(|item| item.id == explanation_id)
+                .expect("target persists")
+                .reading_state,
+            "unread"
+        );
+        delete_related_target_at_path(
+            &database_path,
+            DeleteRelatedTargetRequest {
+                project_id: project_id.clone(),
+                explanation_id: explanation_id.clone(),
+                id: relation.id,
+            },
+        )
+        .expect("related target deletes within the explanation target");
+        delete_reader_preference_at_path(
+            &database_path,
+            DeleteReaderPreferenceRequest { project_id },
+        )
+        .expect("preference deletes within the project");
+        assert!(create_user_annotation_at_path(
+            &database_path,
+            CreateUserAnnotationRequest {
+                project_id: "project:other".to_string(),
+                explanation_id,
+                kind: "note".to_string(),
+                body: "must not cross project boundary".to_string(),
+            },
+        )
+        .is_err());
         let _ = std::fs::remove_file(database_path);
     }
 
@@ -1122,6 +1683,55 @@ mod tests {
         assert_eq!(saved.code_meaning, "读取输入。");
         assert_eq!(saved.trust_label.as_deref(), Some("context_needed"));
 
+        save_cognition_state_at_path(
+            &database_path,
+            SaveCognitionStateRequest {
+                project_id: "project:test".to_string(),
+                explanation_id: "exp:test".to_string(),
+                visit_state: "read".to_string(),
+                mastery_state: "understood".to_string(),
+                review_state: "current".to_string(),
+                expected_revision: Some(0),
+            },
+        )
+        .expect("understood state saves");
+        save_cognition_state_at_path(
+            &database_path,
+            SaveCognitionStateRequest {
+                project_id: "project:test".to_string(),
+                explanation_id: "exp:test".to_string(),
+                visit_state: "read".to_string(),
+                mastery_state: "understood".to_string(),
+                review_state: "needs_review".to_string(),
+                expected_revision: Some(1),
+            },
+        )
+        .expect("review state saves");
+        let conn = open_database(&database_path).expect("database opens for legacy marker");
+        conn.execute(
+            "INSERT INTO user_annotations (id, project_id, explanation_id, kind, body, created_at, updated_at)
+             VALUES ('annotation:legacy-state:reading:test:risk', 'project:test', 'exp:test', 'risk', '', '2', '2')",
+            [],
+        )
+        .expect("legacy marker inserts");
+        conn.execute(
+            "UPDATE user_reading_states SET state = 'suspicious' WHERE project_id = 'project:test' AND explanation_id = 'exp:test'",
+            [],
+        )
+        .expect("legacy projection fixture updates");
+        drop(conn);
+        let regenerated = save_generated_explanation(&database_path, input.clone())
+            .expect("regeneration preserves cognition and annotations");
+        assert_eq!(regenerated.reading_state, "suspicious");
+        assert_eq!(regenerated.visit_state, "read");
+        assert_eq!(regenerated.mastery_state, "understood");
+        assert_eq!(regenerated.review_state, "needs_review");
+        assert_eq!(regenerated.cognition_revision, 2);
+        assert!(regenerated
+            .annotations
+            .iter()
+            .any(|annotation| annotation.id.starts_with("annotation:legacy-state:")));
+
         let hydrated = hydrate_code_file_at_path(
             &database_path,
             HydrateCodeFileRequest {
@@ -1222,6 +1832,17 @@ mod tests {
         hydrate_code_file_at_path(&database_path, sample_request())
             .expect("baseline should hydrate");
         mark_explanation_valid(&database_path, "exp:target:sample:function");
+        let connection = open_database(&database_path).expect("database opens");
+        connection
+            .execute(
+                "UPDATE user_reading_states
+                 SET state = 'understood', visit_state = 'read', mastery_state = 'understood',
+                     review_state = 'current', revision = 4
+                 WHERE project_id = 'project:sample' AND explanation_id = 'exp:target:sample:function'",
+                [],
+            )
+            .expect("understood cognition saves");
+        drop(connection);
 
         let moved = changed_request(
             "hash:moved",
@@ -1259,6 +1880,9 @@ mod tests {
         assert_eq!(explanation.status, "valid");
         assert_eq!(explanation.start_line, Some(3));
         assert_eq!(explanation.end_line, Some(5));
+        assert_eq!(explanation.mastery_state, "understood");
+        assert_eq!(explanation.review_state, "current");
+        assert_eq!(explanation.cognition_revision, 4);
         assert_eq!(
             hydrated
                 .explanations
@@ -1316,6 +1940,17 @@ mod tests {
         hydrate_code_file_at_path(&database_path, sample_request())
             .expect("baseline should hydrate");
         mark_explanation_valid(&database_path, "exp:target:sample:function");
+        let connection = open_database(&database_path).expect("database opens");
+        connection
+            .execute(
+                "UPDATE user_reading_states
+                 SET state = 'understood', visit_state = 'read', mastery_state = 'understood',
+                     review_state = 'current', revision = 4
+                 WHERE project_id = 'project:sample' AND explanation_id = 'exp:target:sample:function'",
+                [],
+            )
+            .expect("understood cognition saves");
+        drop(connection);
 
         let modified = changed_request(
             "hash:modified",
@@ -1352,6 +1987,10 @@ mod tests {
             .expect("existing explanation should remain available");
         assert_eq!(explanation.status, "invalid");
         assert_eq!(explanation.code_meaning, "function meaning");
+        assert_eq!(explanation.mastery_state, "understood");
+        assert_eq!(explanation.review_state, "needs_review");
+        assert_eq!(explanation.reading_state, "needs_reexplain");
+        assert_eq!(explanation.cognition_revision, 5);
         assert!(hydrated
             .change_summary
             .as_ref()

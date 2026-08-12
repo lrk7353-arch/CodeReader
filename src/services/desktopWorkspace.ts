@@ -2,6 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import type {
   CodeFile,
   ChangeSummary,
+  CognitionState,
   ContextBundle,
   Explanation,
   ExplanationFeedbackType,
@@ -10,12 +11,29 @@ import type {
   ProjectGuide,
   ProjectScanResult,
   PromptVersionInfo,
+  ReaderPreference,
+  ReaderResumeState,
   ReadingState,
+  RelatedTarget,
   RollbackPromptVersionInput,
   RollbackPromptVersionResult,
   SaveModelConfigInput,
-  UpsertPromptVersionInput
+  UpsertPromptVersionInput,
+  UserAnnotation,
+  UserAnnotationKind
 } from "../types/explanation";
+
+export async function loadReaderResumeState(): Promise<ReaderResumeState | null> {
+  ensureDesktopRuntime();
+  return invoke<ReaderResumeState | null>("load_reader_resume_state");
+}
+
+export async function saveReaderResumeState(
+  state: Omit<ReaderResumeState, "updatedAt">
+): Promise<ReaderResumeState> {
+  ensureDesktopRuntime();
+  return invoke<ReaderResumeState>("save_reader_resume_state", { request: state });
+}
 
 export function isDesktopRuntime() {
   return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
@@ -74,9 +92,18 @@ export async function hydrateCodeFilePersistence(
 ): Promise<CodeFile> {
   ensureDesktopRuntime();
   const persisted = await invoke<{
-    explanations: Explanation[];
+    explanations: Array<
+      Explanation & {
+        visitState?: CognitionState["visitState"];
+        masteryState?: CognitionState["masteryState"];
+        reviewState?: CognitionState["reviewState"];
+        cognitionRevision?: number;
+      }
+    >;
     databasePath: string;
     projectId: string;
+    readerPreference?: ReaderPreference;
+    relatedTargets?: RelatedTarget[];
     changeSummary?: ChangeSummary;
   }>("hydrate_code_file_persistence", {
     request: {
@@ -92,7 +119,21 @@ export async function hydrateCodeFilePersistence(
     ...file,
     databasePath: persisted.databasePath,
     projectId: persisted.projectId,
-    explanations: Array.isArray(persisted.explanations) ? persisted.explanations : seedExplanations,
+    readerPreference: persisted.readerPreference,
+    relatedTargets: Array.isArray(persisted.relatedTargets) ? persisted.relatedTargets : [],
+    explanations: Array.isArray(persisted.explanations)
+      ? persisted.explanations.map((explanation) => ({
+          ...explanation,
+          cognitionState:
+            explanation.visitState && explanation.masteryState && explanation.reviewState
+              ? {
+                  visitState: explanation.visitState,
+                  masteryState: explanation.masteryState,
+                  reviewState: explanation.reviewState
+                }
+              : explanation.cognitionState
+        }))
+      : seedExplanations,
     changeSummary: persisted.changeSummary
   };
 }
@@ -273,6 +314,101 @@ export async function persistReadingState(
       }
     }
   );
+}
+
+export async function persistCognitionState(
+  projectId: string,
+  explanationId: string,
+  cognitionState: CognitionState,
+  expectedRevision?: number
+) {
+  ensureDesktopRuntime();
+  return invoke<{
+    explanationId: string;
+    visitState: CognitionState["visitState"];
+    masteryState: CognitionState["masteryState"];
+    reviewState: CognitionState["reviewState"];
+    state: ReadingState;
+    revision: number;
+    updatedAt: string;
+  }>("save_cognition_state", {
+    request: { projectId, explanationId, ...cognitionState, expectedRevision }
+  });
+}
+
+export async function createUserAnnotation(
+  projectId: string,
+  explanationId: string,
+  kind: UserAnnotationKind,
+  body: string
+) {
+  ensureDesktopRuntime();
+  return invoke<UserAnnotation>("create_user_annotation", {
+    request: { projectId, explanationId, kind, body }
+  });
+}
+
+export async function updateUserAnnotation(
+  projectId: string,
+  explanationId: string,
+  id: string,
+  kind: UserAnnotationKind,
+  body: string
+) {
+  ensureDesktopRuntime();
+  return invoke<UserAnnotation>("update_user_annotation", {
+    request: { projectId, explanationId, id, kind, body }
+  });
+}
+
+export async function deleteUserAnnotation(projectId: string, explanationId: string, id: string) {
+  ensureDesktopRuntime();
+  return invoke<void>("delete_user_annotation", { request: { projectId, explanationId, id } });
+}
+
+export async function saveReaderPreference(
+  projectId: string,
+  displayMode: ReaderPreference["displayMode"]
+) {
+  ensureDesktopRuntime();
+  return invoke<ReaderPreference>("save_reader_preference", {
+    request: { projectId, displayMode }
+  });
+}
+
+export async function deleteReaderPreference(projectId: string) {
+  ensureDesktopRuntime();
+  return invoke<void>("delete_reader_preference", { request: { projectId } });
+}
+
+export async function createRelatedTarget(
+  projectId: string,
+  explanationId: string,
+  relatedExplanationId: string,
+  relationKind: string
+) {
+  ensureDesktopRuntime();
+  return invoke<RelatedTarget>("create_related_target", {
+    request: { projectId, explanationId, relatedExplanationId, relationKind }
+  });
+}
+
+export async function updateRelatedTarget(
+  projectId: string,
+  explanationId: string,
+  id: string,
+  relatedExplanationId: string,
+  relationKind: string
+) {
+  ensureDesktopRuntime();
+  return invoke<RelatedTarget>("update_related_target", {
+    request: { projectId, explanationId, id, relatedExplanationId, relationKind }
+  });
+}
+
+export async function deleteRelatedTarget(projectId: string, explanationId: string, id: string) {
+  ensureDesktopRuntime();
+  return invoke<void>("delete_related_target", { request: { projectId, explanationId, id } });
 }
 
 export async function persistExplanationFeedback(

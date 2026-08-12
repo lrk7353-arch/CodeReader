@@ -1,10 +1,16 @@
 import type {
   CodeFile,
+  CognitionState,
   ProjectFileRole,
   ProjectGuide,
   ReadingProgress,
   ReadingState
 } from "../../types/explanation";
+import {
+  cognitionFor,
+  keyPathMasteryPercent,
+  readingStateProjection
+} from "../reading-state/cognition";
 
 export const projectRoleLabels: Record<ProjectFileRole, string> = {
   documentation: "项目说明",
@@ -39,19 +45,69 @@ export function deriveGuideProgress(
     if (!file?.explanations.length) {
       return step;
     }
-    const states = file.explanations.map(
-      (explanation) => readingStateOverrides[explanation.id] ?? explanation.readingState
+    const cognitions = file.explanations.map((explanation) =>
+      cognitionFor({
+        cognitionState: explanation.cognitionState,
+        readingState: readingStateOverrides[explanation.id] ?? explanation.readingState
+      })
     );
+    const cognitionState = aggregateCognitionStates(cognitions);
     return {
       ...step,
-      readingState: aggregateReadingStates(states)
+      cognitionState,
+      readingState:
+        legacyStateForExplanations(file.explanations) ?? readingStateProjection(cognitionState)
     };
   });
   return {
     ...guide,
     readingPath,
-    progress: summarizeProgress(readingPath.map((step) => step.readingState))
+    progress: {
+      ...summarizeCognitionProgress(
+        readingPath.map((step) =>
+          cognitionFor({ cognitionState: step.cognitionState, readingState: step.readingState })
+        )
+      )
+    }
   };
+}
+
+export function legacyStateForExplanations(explanations: CodeFile["explanations"]) {
+  const legacyKinds = explanations.flatMap((explanation) =>
+    (explanation.annotations ?? [])
+      .filter((annotation) => annotation.id.startsWith("annotation:legacy-state:"))
+      .map((annotation) => annotation.kind)
+  );
+  if (legacyKinds.includes("risk")) return "suspicious" as const;
+  if (legacyKinds.includes("question")) return "questioned" as const;
+  return undefined;
+}
+
+export function summarizeCognitionProgress(states: CognitionState[]): ReadingProgress {
+  const progress: ReadingProgress = {
+    total: states.length,
+    unread: 0,
+    read: 0,
+    understood: 0,
+    questioned: 0,
+    suspicious: 0,
+    needsReexplain: 0,
+    masteryPercent: keyPathMasteryPercent(states)
+  };
+  for (const state of states) {
+    if (state.visitState === "unread") {
+      progress.unread += 1;
+    } else {
+      progress.read += 1;
+    }
+    if (state.masteryState === "understood") {
+      progress.understood += 1;
+    }
+    if (state.reviewState === "needs_review") {
+      progress.needsReexplain += 1;
+    }
+  }
+  return progress;
 }
 
 export function summarizeProgress(states: ReadingState[]): ReadingProgress {
@@ -62,7 +118,8 @@ export function summarizeProgress(states: ReadingState[]): ReadingProgress {
     understood: 0,
     questioned: 0,
     suspicious: 0,
-    needsReexplain: 0
+    needsReexplain: 0,
+    masteryPercent: 0
   };
   for (const state of states) {
     if (state === "needs_reexplain") {
@@ -94,10 +151,21 @@ export function aggregateReadingStates(states: ReadingState[]): ReadingState {
   return "read";
 }
 
+export function aggregateCognitionStates(states: CognitionState[]): CognitionState {
+  if (states.length === 0)
+    return { visitState: "unread", masteryState: "unconfirmed", reviewState: "current" };
+  return {
+    visitState: states.some((state) => state.visitState === "read") ? "read" : "unread",
+    masteryState:
+      states.length > 0 && states.every((state) => state.masteryState === "understood")
+        ? "understood"
+        : "unconfirmed",
+    reviewState: states.some((state) => state.reviewState === "needs_review")
+      ? "needs_review"
+      : "current"
+  };
+}
+
 export function progressPercent(progress: ReadingProgress) {
-  if (progress.total === 0) {
-    return 0;
-  }
-  const progressed = progress.total - progress.unread;
-  return Math.round((progressed / progress.total) * 100);
+  return progress.masteryPercent;
 }

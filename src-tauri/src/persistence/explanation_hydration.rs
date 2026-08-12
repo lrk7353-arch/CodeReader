@@ -1,4 +1,4 @@
-use rusqlite::{params, Connection, Error as SqliteError, TransactionBehavior};
+use rusqlite::{params, Connection, Error as SqliteError, OptionalExtension, TransactionBehavior};
 use std::collections::HashSet;
 use std::path::Path;
 
@@ -12,7 +12,8 @@ use super::{
     optional_i64_to_usize, optional_usize_to_i64, parse_line_numbers, reading_state_id,
     serialize_line_fingerprints, serialize_line_numbers, snapshot_node_id, stable_project_id,
     CodeNodeInput, ExplanationInput, ExplanationPayload, GeneratedExplanationInput,
-    HydrateCodeFileRequest, HydratedCodeFilePayload, EXPLANATION_SCHEMA_VERSION, PROMPT_VERSION,
+    HydrateCodeFileRequest, HydratedCodeFilePayload, ReaderPreferencePayload, RelatedTargetPayload,
+    UserAnnotationPayload, EXPLANATION_SCHEMA_VERSION, PROMPT_VERSION,
 };
 use crate::app_error::STALE_GENERATION_PERSISTENCE_ERROR;
 use crate::change_detection::detect_changes;
@@ -344,6 +345,8 @@ pub(crate) fn hydrate_code_file_at_path(
     }
 
     let explanations = load_explanations(&tx, &project_id, &request.file.id, &snapshot_id)?;
+    let reader_preference = load_reader_preference(&tx, &project_id)?;
+    let related_targets = load_related_targets(&tx, &project_id)?;
     let change_summary = load_change_summary(&tx, &project_id, &request.file.id, &snapshot_id)?;
     tx.commit().map_err(database_error)?;
 
@@ -351,6 +354,8 @@ pub(crate) fn hydrate_code_file_at_path(
         explanations,
         database_path: display_path(database_path),
         project_id,
+        reader_preference,
+        related_targets,
         change_summary,
     })
 }
@@ -359,6 +364,9 @@ pub(crate) fn save_generated_explanation(
     database_path: &Path,
     input: GeneratedExplanationInput,
 ) -> Result<ExplanationPayload, String> {
+    // The stored payload is always reloaded from the canonical target/node join below.
+    // Keep this input field consumed for wire compatibility with older generators.
+    let _requested_target_name = input.target_name.as_deref();
     let mut conn = open_database(database_path)?;
     // Take the write reservation before comparing the expected file state. A
     // concurrent hydrate cannot advance the file hash between this check and
@@ -562,43 +570,11 @@ pub(crate) fn save_generated_explanation(
     )
     .map_err(database_error)?;
 
-    let reading_state = tx
-        .query_row(
-            "SELECT state FROM user_reading_states
-             WHERE project_id = ?1 AND explanation_id = ?2",
-            params![project_id, input.explanation_id],
-            |row| row.get::<_, String>(0),
-        )
-        .unwrap_or_else(|_| "unread".to_string());
     tx.commit().map_err(database_error)?;
-
-    Ok(ExplanationPayload {
-        id: input.explanation_id,
-        file_path: input.file_path,
-        file_hash: Some(input.file_hash),
-        target_type: input.target_type,
-        target_name: input.target_name,
-        start_line: Some(input.start_line),
-        end_line: Some(input.end_line),
-        symbol_id: input.symbol_id,
-        code_hash: Some(input.code_hash),
-        anchor_text: Some(input.anchor_text),
-        code_meaning: input.code_level_meaning,
-        local_meaning: Some(input.local_composition_meaning),
-        global_meaning: Some(input.project_role_meaning),
-        prior_knowledge: input.prior_knowledge,
-        review_suggestion: input.review_suggestion,
-        trust_label: Some(input.trust_label),
-        trust_reason: Some(input.trust_reason),
-        depends_on_lines: input.depends_on_lines,
-        affects_lines: input.affects_lines,
-        risk_notes: input.risk_notes,
-        reader_notes: input.learning_note.into_iter().collect(),
-        status: "valid".to_string(),
-        reading_state,
-        created_at,
-        updated_at: now,
-    })
+    load_explanations(&conn, &project_id, &input.file_id, &input.snapshot_id)?
+        .into_iter()
+        .find(|explanation| explanation.id == input.explanation_id)
+        .ok_or_else(|| "Generated explanation was saved but could not be reloaded.".to_string())
 }
 
 fn load_explanations(
@@ -633,6 +609,10 @@ fn load_explanations(
                e.affects_lines,
                t.status,
                COALESCE(s.state, 'unread') AS reading_state,
+               COALESCE(s.visit_state, CASE WHEN COALESCE(s.state, 'unread') = 'unread' THEN 'unread' ELSE 'read' END) AS visit_state,
+               COALESCE(s.mastery_state, CASE WHEN COALESCE(s.state, '') = 'understood' THEN 'understood' ELSE 'unconfirmed' END) AS mastery_state,
+               COALESCE(s.review_state, CASE WHEN COALESCE(s.state, '') = 'needs_reexplain' THEN 'needs_review' ELSE 'current' END) AS review_state,
+               COALESCE(s.revision, 0) AS cognition_revision,
                e.created_at,
                e.updated_at
              FROM explanation_nodes e
@@ -688,17 +668,111 @@ fn load_explanations(
                 reader_notes: super::split_notes(learning_note),
                 status: row.get(21)?,
                 reading_state: row.get(22)?,
-                created_at: row.get(23)?,
-                updated_at: row.get(24)?,
+                visit_state: row.get(23)?,
+                mastery_state: row.get(24)?,
+                review_state: row.get(25)?,
+                cognition_revision: row.get(26)?,
+                annotations: Vec::new(),
+                created_at: row.get(27)?,
+                updated_at: row.get(28)?,
             })
         })
         .map_err(database_error)?;
 
     let mut explanations = Vec::new();
     for row in rows {
-        explanations.push(row.map_err(database_error)?);
+        let mut explanation = row.map_err(database_error)?;
+        explanation.annotations = load_annotations(conn, project_id, &explanation.id)?;
+        explanations.push(explanation);
     }
     Ok(explanations)
+}
+
+fn load_annotations(
+    conn: &Connection,
+    project_id: &str,
+    explanation_id: &str,
+) -> Result<Vec<UserAnnotationPayload>, String> {
+    let mut statement = conn
+        .prepare(
+            "SELECT id, project_id, explanation_id, kind, body, created_at, updated_at
+             FROM user_annotations WHERE project_id = ?1 AND explanation_id = ?2
+             ORDER BY updated_at, id",
+        )
+        .map_err(database_error)?;
+    let annotations = statement
+        .query_map(params![project_id, explanation_id], |row| {
+            Ok(UserAnnotationPayload {
+                id: row.get(0)?,
+                project_id: row.get(1)?,
+                explanation_id: row.get(2)?,
+                kind: row.get(3)?,
+                body: row.get(4)?,
+                created_at: row.get(5)?,
+                updated_at: row.get(6)?,
+            })
+        })
+        .map_err(database_error)?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(database_error)?;
+    Ok(annotations)
+}
+
+fn load_reader_preference(
+    conn: &Connection,
+    project_id: &str,
+) -> Result<Option<ReaderPreferencePayload>, String> {
+    conn.query_row(
+        "SELECT project_id, display_mode, updated_at FROM project_reader_preferences WHERE project_id = ?1",
+        params![project_id],
+        |row| {
+            Ok(ReaderPreferencePayload {
+                project_id: row.get(0)?,
+                display_mode: row.get(1)?,
+                updated_at: row.get(2)?,
+            })
+        },
+    )
+    .optional()
+    .map_err(database_error)
+}
+
+fn load_related_targets(
+    conn: &Connection,
+    project_id: &str,
+) -> Result<Vec<RelatedTargetPayload>, String> {
+    let mut statement = conn
+        .prepare(
+            "SELECT r.id, r.project_id, r.explanation_id, r.related_explanation_id,
+                    r.relation_kind, r.created_at, t.file_id, t.target_type,
+                    NULL, t.start_line, t.end_line, t.status
+             FROM explanation_relationships r
+             LEFT JOIN explanation_targets t
+               ON t.project_id = r.project_id AND t.explanation_id = r.related_explanation_id
+             WHERE r.project_id = ?1 ORDER BY r.created_at, r.id",
+        )
+        .map_err(database_error)?;
+    let targets = statement
+        .query_map(params![project_id], |row| {
+            Ok(RelatedTargetPayload {
+                id: row.get(0)?,
+                project_id: row.get(1)?,
+                explanation_id: row.get(2)?,
+                related_explanation_id: row.get(3)?,
+                relation_kind: row.get(4)?,
+                created_at: row.get(5)?,
+                related_file_id: row.get(6)?,
+                related_target_type: row.get(7)?,
+                related_target_name: row.get(8)?,
+                related_start_line: row.get::<_, Option<i64>>(9)?.map(super::i64_to_usize),
+                related_end_line: row.get::<_, Option<i64>>(10)?.map(super::i64_to_usize),
+                related_status: row.get(11)?,
+            })
+        })
+        .map_err(database_error)?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(database_error)?;
+    Ok(targets)
 }
 
 fn code_node_id_for(explanation: &ExplanationInput, nodes: &[CodeNodeInput]) -> Option<String> {

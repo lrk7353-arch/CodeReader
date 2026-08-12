@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 import type { CodeFile, ProjectGuide, ReadingState } from "../../types/explanation";
-import { aggregateReadingStates, deriveGuideProgress, progressPercent } from "./projectGuide";
+import {
+  aggregateReadingStates,
+  deriveGuideProgress,
+  progressPercent,
+  summarizeCognitionProgress
+} from "./projectGuide";
 
 describe("project guide progress", () => {
   it("uses risk and question states before completion states", () => {
@@ -20,8 +25,66 @@ describe("project guide progress", () => {
 
     expect(result.readingPath.map((step) => step.readingState)).toEqual(["understood", "read"]);
     expect(result.progress.understood).toBe(1);
-    expect(result.progress.read).toBe(1);
-    expect(progressPercent(result.progress)).toBe(100);
+    expect(result.progress.read).toBe(2);
+    expect(progressPercent(result.progress)).toBe(50);
+  });
+
+  it("counts only key-path mastery across visit-only, model-new, and review combinations", () => {
+    const guide = projectGuide();
+    const result = deriveGuideProgress(
+      guide,
+      [
+        file("entry", ["read"]),
+        file("business", ["unread", "needs_reexplain"]),
+        file("outside-path", ["understood", "understood", "understood"])
+      ],
+      {}
+    );
+
+    expect(result.progress.total).toBe(2);
+    expect(result.progress.masteryPercent).toBe(0);
+    expect(progressPercent(result.progress)).toBe(0);
+    expect(result.readingPath.map((step) => step.readingState)).toEqual([
+      "read",
+      "needs_reexplain"
+    ]);
+  });
+
+  it("uses the same orthogonal aggregation and half-up percentage as desktop persistence", () => {
+    const progress = summarizeCognitionProgress([
+      { visitState: "read", masteryState: "understood", reviewState: "needs_review" },
+      { visitState: "read", masteryState: "unconfirmed", reviewState: "current" },
+      { visitState: "unread", masteryState: "understood", reviewState: "current" }
+    ]);
+
+    expect(progress).toMatchObject({
+      total: 3,
+      unread: 1,
+      read: 2,
+      understood: 2,
+      needsReexplain: 1,
+      questioned: 0,
+      suspicious: 0,
+      masteryPercent: 67
+    });
+  });
+
+  it("uses only legacy-origin markers for compatibility path display without changing cognition totals", () => {
+    const entry = file("entry", ["understood"]);
+    entry.explanations[0].annotations = [annotation("annotation:legacy-state:entry", "question")];
+    const business = file("business", ["read"]);
+    business.explanations[0].annotations = [annotation("annotation:new-risk", "risk")];
+
+    const result = deriveGuideProgress(projectGuide(), [entry, business]);
+
+    expect(result.readingPath.map((step) => step.readingState)).toEqual(["questioned", "read"]);
+    expect(result.progress).toMatchObject({
+      read: 2,
+      understood: 1,
+      masteryPercent: 50,
+      questioned: 0,
+      suspicious: 0
+    });
   });
 });
 
@@ -42,6 +105,18 @@ function file(id: string, states: ReadingState[]): CodeFile {
       createdAt: "1",
       updatedAt: "1"
     }))
+  };
+}
+
+function annotation(id: string, kind: "question" | "risk") {
+  return {
+    id,
+    projectId: "project:test",
+    explanationId: "test",
+    kind,
+    body: "test",
+    createdAt: "1",
+    updatedAt: "1"
   };
 }
 
@@ -78,7 +153,8 @@ function projectGuide(): ProjectGuide {
       understood: 0,
       questioned: 0,
       suspicious: 0,
-      needsReexplain: 0
+      needsReexplain: 0,
+      masteryPercent: 0
     }
   };
 }

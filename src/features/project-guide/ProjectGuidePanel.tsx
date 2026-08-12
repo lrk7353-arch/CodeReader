@@ -8,8 +8,14 @@ import {
   RefreshCw,
   Route
 } from "lucide-react";
-import type { ProjectFileRole, ProjectGuide, ReadingState } from "../../types/explanation";
+import type {
+  CognitionState,
+  ProjectFileRole,
+  ProjectGuide,
+  ReadingState
+} from "../../types/explanation";
 import { progressPercent, projectRoleLabels, projectRoleOrder } from "./projectGuide";
+import { cognitionFor } from "../reading-state/cognition";
 
 interface ProjectGuidePanelProps {
   guide?: ProjectGuide;
@@ -42,7 +48,7 @@ export function ProjectGuidePanel({ guide, onSelectFile }: ProjectGuidePanelProp
     <div className="project-guide">
       <section className="guide-progress" aria-label="推荐路径阅读进度">
         <div className="guide-section-heading">
-          <span>阅读进度</span>
+          <span>路径掌握度</span>
           <strong>{percent}%</strong>
         </div>
         <div
@@ -55,10 +61,11 @@ export function ProjectGuidePanel({ guide, onSelectFile }: ProjectGuidePanelProp
           <span style={{ width: `${percent}%` }} />
         </div>
         <div className="guide-progress-summary">
-          <span>未读 {guide.progress.unread}</span>
-          <span>已读 {guide.progress.read}</span>
-          <span>已理解 {guide.progress.understood}</span>
-          <span>有疑问 {guide.progress.questioned}</span>
+          <span>
+            已理解 {guide.progress.understood}/{guide.progress.total}
+          </span>
+          <span>已访问 {guide.progress.read}</span>
+          <span>需复查 {guide.progress.needsReexplain}</span>
         </div>
       </section>
 
@@ -70,14 +77,19 @@ export function ProjectGuidePanel({ guide, onSelectFile }: ProjectGuidePanelProp
         <ol>
           {guide.readingPath.map((step) => (
             <li key={step.id}>
-              <button type="button" onClick={() => onSelectFile(step.fileId)} title={step.reason}>
+              <button
+                type="button"
+                data-path-origin={`guide-step:${step.id}`}
+                onClick={() => onSelectFile(step.fileId)}
+                title={step.reason}
+              >
                 <span className="path-position">{step.position}</span>
                 <span className="path-copy">
                   <strong>{fileName(step.relativePath)}</strong>
                   <span>{projectRoleLabels[step.role]}</span>
                   <small>{step.reason}</small>
                 </span>
-                <ReadingStateIcon state={step.readingState} />
+                <CognitionIcon cognition={cognitionFor(step)} legacyState={step.readingState} />
               </button>
             </li>
           ))}
@@ -117,6 +129,7 @@ export function ProjectGuidePanel({ guide, onSelectFile }: ProjectGuidePanelProp
               {items.slice(0, 6).map((item) => (
                 <li key={item.id}>
                   <button
+                    data-path-origin={`guide-item:${item.id}`}
                     type="button"
                     onClick={() => onSelectFile(item.fileId)}
                     title={item.reason}
@@ -134,7 +147,14 @@ export function ProjectGuidePanel({ guide, onSelectFile }: ProjectGuidePanelProp
   );
 }
 
-function ReadingStateIcon({ state }: { state: ReadingState }) {
+function CognitionIcon({
+  cognition,
+  legacyState
+}: {
+  cognition: CognitionState;
+  legacyState: ReadingState;
+}) {
+  const state = legacyState;
   const details: Record<ReadingState, { label: string; icon: typeof Circle }> = {
     unread: { label: "未读", icon: Circle },
     read: { label: "已读", icon: CheckCircle2 },
@@ -143,9 +163,10 @@ function ReadingStateIcon({ state }: { state: ReadingState }) {
     suspicious: { label: "不对劲", icon: AlertCircle },
     needs_reexplain: { label: "需重解", icon: RefreshCw }
   };
-  const { label, icon: Icon } = details[state];
+  const { icon: Icon } = details[state];
+  const cognitionLabel = `${cognition.visitState === "read" ? "已访问" : "未访问"}，${cognition.masteryState === "understood" ? "已理解" : "未确认"}，${cognition.reviewState === "needs_review" ? "需复查" : "当前"}`;
   return (
-    <span className={`path-state ${state}`} title={label} aria-label={label}>
+    <span className={`path-state ${state}`} title={cognitionLabel} aria-label={cognitionLabel}>
       <Icon size={15} aria-hidden="true" />
     </span>
   );

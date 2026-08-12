@@ -5,7 +5,10 @@ import {
   sampleProjectId,
   sampleProjectNodes
 } from "../../data/sampleWorkspace";
-import { buildSelectableExplanations } from "../../features/explanations/selectableExplanations";
+import {
+  buildSelectableExplanations,
+  buildUnexplainedNavigationTarget
+} from "../../features/explanations/selectableExplanations";
 import { deriveGuideProgress } from "../../features/project-guide/projectGuide";
 import {
   generateProjectGuide,
@@ -15,14 +18,18 @@ import {
   isDesktopRuntime,
   loadCodeFile,
   loadProjectGuide,
+  loadReaderResumeState,
   pickAndLoadCodeFile,
-  pickAndScanProject
+  pickAndScanProject,
+  saveReaderResumeState
 } from "../../services/desktopWorkspace";
 import type {
   CodeFile,
   ProjectGuide,
   ProjectScanResult,
-  ReadingState
+  ReaderResumeState,
+  ReadingState,
+  ExplanationTargetType
 } from "../../types/explanation";
 import { errorAction, errorMessage, safeErrorDetail, type ErrorAction } from "../appError";
 import { useWorkspaceSelection } from "./useWorkspaceSelection";
@@ -35,6 +42,24 @@ import { resolveWorkspaceName } from "../utils/workspacePaths";
 import { createOperationGate, type OperationToken } from "./operationGate";
 
 export type PersistenceStatus = "preview" | "initializing" | "ready" | "error";
+export type ResumeInitializationStatus = "loading" | "ready" | "error";
+
+export interface WorkspaceNavigationTarget {
+  projectId?: string;
+  fileId: string;
+  explanationId?: string;
+  startLine?: number;
+  endLine?: number;
+  targetType?: ExplanationTargetType;
+}
+
+type ResumeInitializationResult =
+  | { status: "ready"; state: ReaderResumeState | null }
+  | { status: "error"; error: unknown };
+
+const RECENT_PROJECT_NAME_KEY = "codereader.recent-project-name";
+
+type WorkspaceProjectTransition = { kind: "preserve" } | { kind: "replace"; projectId?: string };
 
 export function useWorkspaceFiles() {
   const [files, setFiles] = useState<CodeFile[]>(sampleFiles);
@@ -54,15 +79,54 @@ export function useWorkspaceFiles() {
   );
   const [isWorkspaceBusy, setIsWorkspaceBusy] = useState(false);
   const [loadingFileId, setLoadingFileId] = useState<string | null>(null);
+  const [recentProjectName, setRecentProjectName] = useState(readRecentProjectName);
+  const readerResumeStateRef = useRef<ReaderResumeState | null>(null);
+  const [resumeInitializationStatus, setResumeInitializationStatus] =
+    useState<ResumeInitializationStatus>(isDesktopRuntime() ? "loading" : "ready");
+  const resumeInitializationPromiseRef = useRef<Promise<ResumeInitializationResult> | null>(null);
+  const resumeInitializationResolveRef = useRef<
+    ((result: ResumeInitializationResult) => void) | null
+  >(null);
+  if (!resumeInitializationPromiseRef.current) {
+    resumeInitializationPromiseRef.current = new Promise((resolve) => {
+      resumeInitializationResolveRef.current = resolve;
+    });
+  }
+  const resumeSaveChainRef = useRef(Promise.resolve());
+  const resumeSaveVersionRef = useRef(0);
   const workspaceTouchedRef = useRef(false);
   const refreshInFlightRef = useRef(false);
   const operationGateRef = useRef(createOperationGate());
+  const workspaceEpochRef = useRef(0);
+  const guideRefreshVersionRef = useRef(0);
+  const activeWorkspaceProjectIdRef = useRef<string | undefined>(sampleProjectId);
 
-  const invalidateWorkspaceOperation = useCallback((targetId: string) => {
-    operationGateRef.current.invalidate(targetId);
-    setIsWorkspaceBusy(false);
-    setLoadingFileId(null);
+  const beginWorkspaceOperation = useCallback(
+    (targetId: string, transition: WorkspaceProjectTransition) => {
+      if (transition.kind === "replace") {
+        workspaceEpochRef.current += 1;
+        activeWorkspaceProjectIdRef.current = transition.projectId;
+      }
+      return operationGateRef.current.begin(targetId, true);
+    },
+    []
+  );
+  const replaceActiveWorkspaceProject = useCallback((projectId?: string) => {
+    activeWorkspaceProjectIdRef.current = projectId;
   }, []);
+
+  const invalidateWorkspaceOperation = useCallback(
+    (targetId: string, transition: WorkspaceProjectTransition) => {
+      if (transition.kind === "replace") {
+        workspaceEpochRef.current += 1;
+        activeWorkspaceProjectIdRef.current = transition.projectId;
+      }
+      operationGateRef.current.invalidate(targetId);
+      setIsWorkspaceBusy(false);
+      setLoadingFileId(null);
+    },
+    []
+  );
 
   const selection = useWorkspaceSelection({ files, readingStates });
   const {
@@ -107,6 +171,7 @@ export function useWorkspaceFiles() {
 
   useEffect(() => {
     if (!isDesktopRuntime()) {
+      resumeInitializationResolveRef.current?.({ status: "ready", state: null });
       setWorkspaceStatus((current) =>
         current.startsWith("示例项目") ? "示例项目：浏览器预览仅保存在内存中" : current
       );
@@ -120,12 +185,22 @@ export function useWorkspaceFiles() {
         setDatabasePath(status.databasePath);
         setPersistenceStatus(status.initialized ? "ready" : "error");
         if (!status.initialized) {
+          const error = new Error(
+            "Local persistence is unavailable; recent position was not read."
+          );
+          setResumeInitializationStatus("error");
+          resumeInitializationResolveRef.current?.({ status: "error", error });
           const backupHint = status.backupPath ? ` 备份位置：${status.backupPath}` : "";
           setWorkspaceStatus(
             `本地数据库未能安全打开，已停止持久化写入并保留原始数据。${backupHint}`
           );
           return;
         }
+        const persistedResume = await loadReaderResumeState();
+        if (cancelled) return;
+        if (!workspaceTouchedRef.current) readerResumeStateRef.current = persistedResume;
+        setResumeInitializationStatus("ready");
+        resumeInitializationResolveRef.current?.({ status: "ready", state: persistedResume });
         const hydratedSamples = await Promise.all(
           sampleFiles.map((file) =>
             hydrateCodeFilePersistence(file, buildSelectableExplanations(file))
@@ -145,6 +220,8 @@ export function useWorkspaceFiles() {
           return;
         }
         setPersistenceStatus("error");
+        setResumeInitializationStatus("error");
+        resumeInitializationResolveRef.current?.({ status: "error", error });
         reportWorkspaceError(error);
       });
 
@@ -152,6 +229,43 @@ export function useWorkspaceFiles() {
       cancelled = true;
     };
   }, [reportWorkspaceError, setWorkspaceStatus]);
+
+  useEffect(() => {
+    if (
+      !isDesktopRuntime() ||
+      persistenceStatus !== "ready" ||
+      selectedFile.source !== "local" ||
+      !selectedFile.projectId
+    ) {
+      return;
+    }
+    const request = {
+      projectId: selectedFile.projectId,
+      fileId: selectedFile.id,
+      explanationId: selectedExplanationId || undefined,
+      selectionStartLine: selection.selectedCodeSelection.startLine,
+      selectionEndLine: selection.selectedCodeSelection.endLine
+    };
+    const saveVersion = ++resumeSaveVersionRef.current;
+    readerResumeStateRef.current = {
+      ...request,
+      updatedAt: readerResumeStateRef.current?.updatedAt ?? ""
+    };
+    resumeSaveChainRef.current = resumeSaveChainRef.current
+      .catch(() => undefined)
+      .then(async () => {
+        const saved = await saveReaderResumeState(request);
+        if (saveVersion === resumeSaveVersionRef.current) readerResumeStateRef.current = saved;
+      })
+      .catch((error) => reportWorkspaceError(error, "保存最近阅读位置失败："));
+  }, [
+    persistenceStatus,
+    reportWorkspaceError,
+    selectedExplanationId,
+    selectedFile,
+    selection.selectedCodeSelection.endLine,
+    selection.selectedCodeSelection.startLine
+  ]);
 
   const hydrateLoadedFile = useCallback(async (file: CodeFile) => {
     if (file.capability?.canExplain === false) {
@@ -174,8 +288,17 @@ export function useWorkspaceFiles() {
       if (!isDesktopRuntime() || projectId === sampleProjectId) {
         return;
       }
+      const workspaceEpoch = workspaceEpochRef.current;
+      if (activeWorkspaceProjectIdRef.current !== projectId) return;
+      const guideRefreshVersion = ++guideRefreshVersionRef.current;
       const guide = await loadProjectGuide(projectId);
-      if (guide && shouldApply()) {
+      if (
+        guide &&
+        workspaceEpoch === workspaceEpochRef.current &&
+        guideRefreshVersion === guideRefreshVersionRef.current &&
+        activeWorkspaceProjectIdRef.current === projectId &&
+        shouldApply()
+      ) {
         setProjectGuide(guide);
       }
     },
@@ -197,7 +320,7 @@ export function useWorkspaceFiles() {
       ) {
         return;
       }
-      const operation = operationGateRef.current.begin(file.id);
+      const operation = beginWorkspaceOperation(file.id, { kind: "preserve" });
       refreshInFlightRef.current = true;
       if (announce) {
         setIsWorkspaceBusy(true);
@@ -255,6 +378,7 @@ export function useWorkspaceFiles() {
       }
     },
     [
+      beginWorkspaceOperation,
       hydrateLoadedFile,
       reportWorkspaceError,
       refreshPersistedProjectGuide,
@@ -292,7 +416,7 @@ export function useWorkspaceFiles() {
       existingOperation?: OperationToken
     ) => {
       const path = fileId;
-      const operation = existingOperation ?? operationGateRef.current.begin(fileId, true);
+      const operation = existingOperation ?? beginWorkspaceOperation(fileId, { kind: "preserve" });
       setIsWorkspaceBusy(true);
       setLoadingFileId(fileId);
       setWorkspaceStatus(`正在加载 ${relativePath ?? path}`);
@@ -324,6 +448,7 @@ export function useWorkspaceFiles() {
       }
     },
     [
+      beginWorkspaceOperation,
       hydrateLoadedFile,
       refreshPersistedProjectGuide,
       reportWorkspaceError,
@@ -337,14 +462,14 @@ export function useWorkspaceFiles() {
     (fileId: string) => {
       const file = files.find((item) => item.id === fileId) ?? files[0] ?? sampleFiles[0];
       if (file.capability?.canPreview === false) {
-        invalidateWorkspaceOperation(file.id);
+        invalidateWorkspaceOperation(file.id, { kind: "preserve" });
         workspaceTouchedRef.current = true;
         setWorkspaceStatus(file.capability.reason ?? "该文件暂不支持预览。");
         return;
       }
       if (file.source === "local" && !file.isLoaded) {
         workspaceTouchedRef.current = true;
-        const operation = operationGateRef.current.begin(file.id, true);
+        const operation = beginWorkspaceOperation(file.id, { kind: "preserve" });
         if (!file.grantId) {
           setWorkspaceStatus("File authorization expired. Reopen the folder.");
           return;
@@ -358,15 +483,109 @@ export function useWorkspaceFiles() {
         );
         return;
       }
-      invalidateWorkspaceOperation(file.id);
+      invalidateWorkspaceOperation(file.id, { kind: "preserve" });
       setActiveLoadedFile(file);
     },
     [
+      beginWorkspaceOperation,
       files,
       invalidateWorkspaceOperation,
       loadAndSelectFile,
       setActiveLoadedFile,
       setWorkspaceStatus
+    ]
+  );
+
+  const navigateToExplanation = useCallback(
+    async (target: WorkspaceNavigationTarget) => {
+      const file = files.find((item) => item.id === target.fileId);
+      if (!file || (target.projectId && file.projectId !== target.projectId)) {
+        setWorkspaceStatus("相关目标不在当前项目中，已保留原阅读位置。");
+        return false;
+      }
+      const operation = beginWorkspaceOperation(
+        `navigate:${target.fileId}:${target.explanationId ?? "line"}`,
+        {
+          kind: "preserve"
+        }
+      );
+      let candidate = file;
+      setIsWorkspaceBusy(true);
+      setLoadingFileId(file.id);
+      try {
+        if (file.source === "local" && !file.isLoaded) {
+          if (!file.grantId) {
+            setWorkspaceStatus("相关文件授权已失效，请重新打开项目；当前阅读位置保持不变。");
+            return false;
+          }
+          const loaded = await loadCodeFile(file.id, file.grantId);
+          if (!operationGateRef.current.isCurrent(operation)) return false;
+          candidate = await hydrateLoadedFile({
+            ...loaded,
+            projectRoot: file.projectRoot ?? loaded.projectRoot,
+            relativePath: file.relativePath ?? loaded.relativePath
+          });
+          if (!operationGateRef.current.isCurrent(operation)) return false;
+        }
+        let requested = resolveNavigationExplanation(candidate, target);
+        if (!target.explanationId && target.targetType) {
+          requested = buildUnexplainedNavigationTarget(candidate, {
+            targetType: target.targetType,
+            startLine: target.startLine,
+            endLine: target.endLine
+          });
+          if (!requested) {
+            setWorkspaceStatus("相关结构目标已失效或超出当前代码范围，已保留原阅读位置。");
+            return false;
+          }
+          candidate = {
+            ...candidate,
+            explanations: [
+              ...candidate.explanations.filter((item) => item.id !== requested?.id),
+              requested
+            ]
+          };
+        }
+        if (target.explanationId && !requested) {
+          setWorkspaceStatus("相关解释已删除或失效，已保留原阅读位置。");
+          return false;
+        }
+        if (!operationGateRef.current.isCurrent(operation)) return false;
+        if (candidate !== file) upsertFile(candidate);
+        setActiveLoadedFile(candidate);
+        if (requested) setSelectedExplanationId(requested.id);
+        const startLine = target.startLine ?? requested?.startLine;
+        if (startLine) {
+          setSelectedCodeSelection({
+            startLine,
+            endLine: target.endLine ?? requested?.endLine ?? startLine
+          });
+        }
+        setWorkspaceStatus(
+          `已跳转到 ${candidate.relativePath ?? candidate.name}${startLine ? ` 第 ${startLine} 行` : ""}`
+        );
+        return true;
+      } catch (error) {
+        if (operationGateRef.current.isCurrent(operation)) {
+          setWorkspaceStatus(`相关代码跳转失败，已保留原阅读位置：${errorMessage(error)}`);
+        }
+        return false;
+      } finally {
+        if (operationGateRef.current.isCurrent(operation)) {
+          setIsWorkspaceBusy(false);
+          setLoadingFileId(null);
+        }
+      }
+    },
+    [
+      beginWorkspaceOperation,
+      files,
+      hydrateLoadedFile,
+      setActiveLoadedFile,
+      setSelectedCodeSelection,
+      setSelectedExplanationId,
+      setWorkspaceStatus,
+      upsertFile
     ]
   );
 
@@ -377,7 +596,9 @@ export function useWorkspaceFiles() {
         setWorkspaceStatus("Folder authorization expired. Reopen the folder.");
         return;
       }
-      const operation = operationGateRef.current.begin(`expand:${grantId}:${directoryId}`);
+      const operation = beginWorkspaceOperation(`expand:${grantId}:${directoryId}`, {
+        kind: "preserve"
+      });
       try {
         const expanded = await expandGrantedDirectory(grantId, directoryId);
         if (!operationGateRef.current.isCurrent(operation)) return;
@@ -422,11 +643,14 @@ export function useWorkspaceFiles() {
         }
       }
     },
-    [files, projectNodes, reportWorkspaceError, setWorkspaceStatus]
+    [beginWorkspaceOperation, files, projectNodes, reportWorkspaceError, setWorkspaceStatus]
   );
 
   async function openSampleProject() {
-    const operation = operationGateRef.current.begin("sample-project", true);
+    const operation = beginWorkspaceOperation("sample-project", {
+      kind: "replace",
+      projectId: sampleProjectId
+    });
     workspaceTouchedRef.current = true;
     setIsWorkspaceBusy(true);
     setWorkspaceStatus("正在恢复无 API Key 示例项目");
@@ -452,7 +676,7 @@ export function useWorkspaceFiles() {
       setWorkspaceStatus("本地文件打开需要在 Tauri 桌面端运行。");
       return;
     }
-    const operation = operationGateRef.current.begin("open-file", true);
+    const operation = beginWorkspaceOperation("open-file", { kind: "replace" });
     workspaceTouchedRef.current = true;
     setIsWorkspaceBusy(true);
     try {
@@ -469,6 +693,7 @@ export function useWorkspaceFiles() {
       setReadingStates({});
       setFiles([hydratedFile]);
       setActiveLoadedFile(hydratedFile);
+      replaceActiveWorkspaceProject(hydratedFile.projectId);
       setWorkspaceStatus(`已加载 ${hydratedFile.path}`);
     } catch (error) {
       if (operationGateRef.current.isCurrent(operation)) reportWorkspaceError(error);
@@ -477,12 +702,12 @@ export function useWorkspaceFiles() {
     }
   }
 
-  async function openProject() {
+  async function openProjectWithResume(resume?: ReaderResumeState | null) {
     if (!isDesktopRuntime()) {
       setWorkspaceStatus("本地项目打开需要在 Tauri 桌面端运行。");
       return;
     }
-    const operation = operationGateRef.current.begin("open-project", true);
+    const operation = beginWorkspaceOperation("open-project", { kind: "replace" });
     workspaceTouchedRef.current = true;
     setIsWorkspaceBusy(true);
     try {
@@ -492,6 +717,7 @@ export function useWorkspaceFiles() {
         setWorkspaceStatus("已取消打开项目");
         return;
       }
+      rememberRecentProjectName(project.rootPath, setRecentProjectName);
       setProjectNodes(project.nodes);
       setReadingStates({});
       if (project.files.length === 0) {
@@ -512,7 +738,16 @@ export function useWorkspaceFiles() {
       setProjectGuide(guide);
       setGuideFocusToken((current) => current + 1);
 
-      const projectOpenPlan = buildProjectOpenPlan(project, guide?.readingPath[0]?.fileId);
+      const resumeMatchesProject = Boolean(resume && guide && resume.projectId === guide.projectId);
+      const resumeFileExists = Boolean(
+        resumeMatchesProject &&
+        resume?.fileId &&
+        project.files.some((file) => file.id === resume.fileId)
+      );
+      const projectOpenPlan = buildProjectOpenPlan(
+        project,
+        resumeFileExists ? resume?.fileId : guide?.readingPath[0]?.fileId
+      );
       const { placeholders, previewableFiles } = projectOpenPlan;
       if (previewableFiles.length === 0) {
         setFiles(placeholders);
@@ -543,10 +778,46 @@ export function useWorkspaceFiles() {
         setWorkspaceAction(errorAction(error));
         return;
       }
+      let recoveryMessage = "";
+      let restoredExplanationId = "";
+      let restoredSelection: { startLine: number; endLine: number } | undefined;
+      if (resume) {
+        if (!resumeMatchesProject) {
+          recoveryMessage = "；所选项目与最近记录不匹配，已从推荐路径打开";
+        } else if (!resumeFileExists || activeFirstFile.id !== resume.fileId) {
+          recoveryMessage = "；最近目标已删除或失效，已回退到推荐路径";
+        } else {
+          const restoredExplanation = resume.explanationId
+            ? activeFirstFile.explanations.find(
+                (item) => item.id === resume.explanationId && item.status !== "deleted"
+              )
+            : undefined;
+          if (resume.explanationId && !restoredExplanation) {
+            recoveryMessage = "；最近目标已删除或失效，已回退到推荐路径";
+            const recommendedFileId = guide?.readingPath[0]?.fileId;
+            if (recommendedFileId && recommendedFileId !== activeFirstFile.id) {
+              activeFirstFile = await hydrateLoadedFile(
+                await loadFirstAvailableProjectFile(project, recommendedFileId)
+              );
+              if (!operationGateRef.current.isCurrent(operation)) return;
+            }
+          } else {
+            recoveryMessage = "；已重新授权并恢复最近阅读位置";
+            if (restoredExplanation) restoredExplanationId = restoredExplanation.id;
+            const lineCount = Math.max(1, activeFirstFile.code.split(/\r?\n/).length);
+            const start = Math.min(Math.max(1, resume.selectionStartLine ?? 1), lineCount);
+            const end = Math.min(Math.max(start, resume.selectionEndLine ?? start), lineCount);
+            restoredSelection = { startLine: start, endLine: end };
+          }
+        }
+      }
       setFiles(
         placeholders.map((file) => (file.id === activeFirstFile.id ? activeFirstFile : file))
       );
       setActiveLoadedFile(activeFirstFile);
+      if (restoredExplanationId) setSelectedExplanationId(restoredExplanationId);
+      if (restoredSelection) setSelectedCodeSelection(restoredSelection);
+      replaceActiveWorkspaceProject(activeFirstFile.projectId);
       if (guide && activeFirstFile.projectId) {
         await refreshPersistedProjectGuide(activeFirstFile.projectId, () =>
           operationGateRef.current.isCurrent(operation)
@@ -554,13 +825,31 @@ export function useWorkspaceFiles() {
         if (!operationGateRef.current.isCurrent(operation)) return;
       }
       setWorkspaceStatus(
-        `${project.files.length} 个文件，${previewableFiles.length} 个可预览：${project.rootPath}${projectOpenPlan.scanNote}${guideError ? `；阅读路径生成失败：${guideError}` : ""}`
+        `${project.files.length} 个文件，${previewableFiles.length} 个可预览：${project.rootPath}${projectOpenPlan.scanNote}${guideError ? `；阅读路径生成失败：${guideError}` : ""}${recoveryMessage}`
       );
     } catch (error) {
       if (operationGateRef.current.isCurrent(operation)) reportWorkspaceError(error);
     } finally {
       if (operationGateRef.current.isCurrent(operation)) setIsWorkspaceBusy(false);
     }
+  }
+
+  async function openProject() {
+    await openProjectWithResume();
+  }
+
+  async function continueRecentProject() {
+    const initializationPromise = resumeInitializationPromiseRef.current;
+    if (!initializationPromise) {
+      reportWorkspaceError(new Error("Recent-position initialization did not start."));
+      return;
+    }
+    const initialization: ResumeInitializationResult = await initializationPromise;
+    if (initialization.status === "error") {
+      reportWorkspaceError(initialization.error, "无法读取最近阅读位置：");
+      return;
+    }
+    await openProjectWithResume(readerResumeStateRef.current ?? initialization.state);
   }
 
   const copyErrorDetail = useCallback(async () => {
@@ -579,6 +868,7 @@ export function useWorkspaceFiles() {
 
   return {
     ...selection,
+    continueRecentProject,
     copyErrorDetail,
     databasePath,
     displayedProjectGuide,
@@ -587,12 +877,15 @@ export function useWorkspaceFiles() {
     guideFocusToken,
     isWorkspaceBusy,
     loadingFileId,
+    navigateToExplanation,
     openFile,
     openProject,
     openSampleProject,
     persistenceStatus,
     projectNodes,
     readingStates,
+    recentProjectName,
+    resumeInitializationStatus,
     refreshLoadedFile,
     refreshPersistedProjectGuide,
     selectFile,
@@ -653,3 +946,51 @@ export function shouldApplyInitialWorkspaceHydration(
 }
 
 export { resolveWorkspaceName };
+
+export function resolveNavigationExplanation(file: CodeFile, target: WorkspaceNavigationTarget) {
+  const explanations = buildSelectableExplanations(file);
+  if (target.explanationId) {
+    return explanations.find(
+      (item) => item.id === target.explanationId && item.status !== "deleted"
+    );
+  }
+  return explanations
+    .filter(
+      (item) =>
+        target.startLine !== undefined &&
+        item.startLine !== undefined &&
+        item.startLine <= target.startLine &&
+        (item.endLine ?? item.startLine) >= target.startLine &&
+        item.status !== "deleted"
+    )
+    .sort(
+      (left, right) =>
+        (left.endLine ?? left.startLine ?? 0) -
+        (left.startLine ?? 0) -
+        ((right.endLine ?? right.startLine ?? 0) - (right.startLine ?? 0))
+    )[0];
+}
+
+function readRecentProjectName(): string {
+  if (typeof window === "undefined") return "";
+  try {
+    return window.localStorage.getItem(RECENT_PROJECT_NAME_KEY) ?? "";
+  } catch {
+    return "";
+  }
+}
+
+function rememberRecentProjectName(rootPath: string, setRecentProjectName: (name: string) => void) {
+  const name = recentProjectNameFromRoot(rootPath);
+  if (!name) return;
+  setRecentProjectName(name);
+  try {
+    window.localStorage.setItem(RECENT_PROJECT_NAME_KEY, name);
+  } catch {
+    // The in-memory label still provides the current-session recovery entry.
+  }
+}
+
+export function recentProjectNameFromRoot(rootPath: string): string {
+  return rootPath.split(/[\\/]/).filter(Boolean).at(-1)?.trim() ?? "";
+}

@@ -1,6 +1,6 @@
 #![cfg_attr(test, allow(dead_code))]
 
-use rusqlite::{params, Connection};
+use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::path::{Component, Path};
@@ -58,6 +58,15 @@ pub struct ReadingPathStepPayload {
     role: String,
     reason: String,
     reading_state: String,
+    cognition_state: CognitionStatePayload,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CognitionStatePayload {
+    visit_state: String,
+    mastery_state: String,
+    review_state: String,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize)]
@@ -70,6 +79,7 @@ pub struct ReadingProgressPayload {
     questioned: usize,
     suspicious: usize,
     needs_reexplain: usize,
+    mastery_percent: usize,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -329,6 +339,11 @@ fn build_reading_path(
             role: item.role.clone(),
             reason: reading_reason(&item.role),
             reading_state: "unread".to_string(),
+            cognition_state: CognitionStatePayload {
+                visit_state: "unread".to_string(),
+                mastery_state: "unconfirmed".to_string(),
+                review_state: "current".to_string(),
+            },
         })
         .collect()
 }
@@ -388,6 +403,11 @@ fn load_project_guide_from_connection(
                 role: row.get(4)?,
                 reason: row.get(5)?,
                 reading_state: "unread".to_string(),
+                cognition_state: CognitionStatePayload {
+                    visit_state: "unread".to_string(),
+                    mastery_state: "unconfirmed".to_string(),
+                    review_state: "current".to_string(),
+                },
             })
         })
         .map_err(database_error)?
@@ -399,16 +419,28 @@ fn load_project_guide_from_connection(
         ..ReadingProgressPayload::default()
     };
     for step in &mut reading_path {
-        step.reading_state = aggregate_file_reading_state(conn, project_id, &step.file_id)?;
-        match step.reading_state.as_str() {
-            "read" => progress.read += 1,
-            "understood" => progress.understood += 1,
-            "questioned" => progress.questioned += 1,
-            "suspicious" => progress.suspicious += 1,
-            "needs_reexplain" => progress.needs_reexplain += 1,
-            _ => progress.unread += 1,
+        step.cognition_state = aggregate_file_cognition_state(conn, project_id, &step.file_id)?;
+        step.reading_state = legacy_marker_state_for_file(conn, project_id, &step.file_id)?
+            .unwrap_or_else(|| cognition_projection(&step.cognition_state).to_string());
+        if step.cognition_state.mastery_state == "understood" {
+            progress.understood += 1;
+        }
+        if step.cognition_state.review_state == "needs_review" {
+            progress.needs_reexplain += 1;
+        }
+        if step.cognition_state.visit_state == "unread" {
+            progress.unread += 1;
+        } else {
+            progress.read += 1;
         }
     }
+    progress.mastery_percent = mastery_percent(
+        reading_path
+            .iter()
+            .filter(|step| step.cognition_state.mastery_state == "understood")
+            .count(),
+        progress.total,
+    );
 
     Ok(Some(ProjectGuidePayload {
         project_id: project_id.to_string(),
@@ -420,14 +452,45 @@ fn load_project_guide_from_connection(
     }))
 }
 
-fn aggregate_file_reading_state(
+fn legacy_marker_state_for_file(
     conn: &Connection,
     project_id: &str,
     file_id: &str,
-) -> Result<String, String> {
+) -> Result<Option<String>, String> {
+    conn.query_row(
+        "SELECT a.kind FROM user_annotations a
+         INNER JOIN explanation_nodes e
+           ON e.id = a.explanation_id AND e.project_id = a.project_id
+         WHERE a.project_id = ?1 AND e.file_id = ?2 AND e.status != 'deleted'
+           AND a.id LIKE 'annotation:legacy-state:%' AND a.kind IN ('question', 'risk')
+         ORDER BY CASE a.kind WHEN 'risk' THEN 0 ELSE 1 END LIMIT 1",
+        params![project_id, file_id],
+        |row| row.get::<_, String>(0),
+    )
+    .optional()
+    .map(|marker| {
+        marker.map(|kind| match kind.as_str() {
+            "risk" => "suspicious".to_string(),
+            _ => "questioned".to_string(),
+        })
+    })
+    .map_err(database_error)
+}
+
+fn mastery_percent(understood: usize, total: usize) -> usize {
+    (understood * 100 + total / 2)
+        .checked_div(total)
+        .unwrap_or(0)
+}
+
+fn aggregate_file_cognition_state(
+    conn: &Connection,
+    project_id: &str,
+    file_id: &str,
+) -> Result<CognitionStatePayload, String> {
     let mut statement = conn
         .prepare(
-            "SELECT s.state
+            "SELECT s.visit_state, s.mastery_state, s.review_state
              FROM user_reading_states s
              INNER JOIN explanation_nodes e
                ON e.id = s.explanation_id AND e.project_id = s.project_id
@@ -435,38 +498,56 @@ fn aggregate_file_reading_state(
         )
         .map_err(database_error)?;
     let states = statement
-        .query_map(params![project_id, file_id], |row| row.get::<_, String>(0))
+        .query_map(params![project_id, file_id], |row| {
+            Ok(CognitionStatePayload {
+                visit_state: row.get(0)?,
+                mastery_state: row.get(1)?,
+                review_state: row.get(2)?,
+            })
+        })
         .map_err(database_error)?
         .collect::<Result<Vec<_>, _>>()
         .map_err(database_error)?;
-    Ok(aggregate_states(&states).to_string())
+    Ok(aggregate_cognition_states(&states))
 }
 
-fn aggregate_states(states: &[String]) -> &'static str {
-    if states.iter().any(|state| state == "suspicious") {
-        return "suspicious";
-    }
-    if states.iter().any(|state| state == "questioned") {
-        return "questioned";
-    }
-    if states.iter().any(|state| state == "needs_reexplain") {
-        return "needs_reexplain";
-    }
-    let meaningful: Vec<_> = states
-        .iter()
-        .filter(|state| state.as_str() != "unread")
-        .collect();
-    if meaningful.is_empty() {
-        return "unread";
-    }
-    if meaningful.len() == states.len()
-        && meaningful
+fn aggregate_cognition_states(states: &[CognitionStatePayload]) -> CognitionStatePayload {
+    CognitionStatePayload {
+        visit_state: if states.iter().any(|state| state.visit_state == "read") {
+            "read".to_string()
+        } else {
+            "unread".to_string()
+        },
+        mastery_state: if !states.is_empty()
+            && states
+                .iter()
+                .all(|state| state.mastery_state == "understood")
+        {
+            "understood".to_string()
+        } else {
+            "unconfirmed".to_string()
+        },
+        review_state: if states
             .iter()
-            .all(|state| state.as_str() == "understood")
-    {
-        return "understood";
+            .any(|state| state.review_state == "needs_review")
+        {
+            "needs_review".to_string()
+        } else {
+            "current".to_string()
+        },
     }
-    "read"
+}
+
+fn cognition_projection(state: &CognitionStatePayload) -> &'static str {
+    if state.review_state == "needs_review" {
+        "needs_reexplain"
+    } else if state.mastery_state == "understood" {
+        "understood"
+    } else if state.visit_state == "read" {
+        "read"
+    } else {
+        "unread"
+    }
 }
 
 fn classify_role(file: &ProjectGuideFileInput) -> &'static str {
@@ -694,6 +775,13 @@ mod tests {
     use std::path::PathBuf;
 
     #[test]
+    fn mastery_percent_matches_javascript_math_round() {
+        assert_eq!(mastery_percent(2, 3), 67);
+        assert_eq!(mastery_percent(1, 3), 33);
+        assert_eq!(mastery_percent(0, 0), 0);
+    }
+
+    #[test]
     fn classifies_files_and_builds_a_stable_first_mile_path() {
         let mut files = vec![
             file("config", "package.json", "json", true, false),
@@ -729,6 +817,54 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec!["entry", "config", "business", "data", "test", "style"]
         );
+    }
+
+    #[test]
+    fn builds_useful_paths_for_the_three_r4_project_shapes() {
+        let projects = [
+            vec![
+                file("small-entry", "app.ts", "typescript", true, true),
+                file(
+                    "small-business",
+                    "login-controller.ts",
+                    "typescript",
+                    true,
+                    true,
+                ),
+                file("small-data", "user-store.ts", "typescript", true, true),
+            ],
+            vec![
+                file("front-doc", "README.md", "markdown", true, false),
+                file("front-entry", "src/main.js", "javascript", true, true),
+                file("front-api", "src/api.js", "javascript", true, true),
+                file("front-store", "src/store.js", "javascript", true, true),
+                file("front-view", "src/view.js", "javascript", true, true),
+            ],
+            vec![
+                file("full-doc", "README.md", "markdown", true, false),
+                file("full-front", "frontend/main.js", "javascript", true, true),
+                file("full-entry", "backend/main.py", "python", true, true),
+                file("full-service", "backend/service.py", "python", true, true),
+                file("full-data", "backend/repository.py", "python", true, true),
+                file("full-schema", "data/schema.sql", "sql", true, true),
+                file("full-test", "tests/test_service.py", "python", true, true),
+            ],
+        ];
+
+        for mut files in projects {
+            let map = build_project_map(&mut files);
+            let path = build_reading_path(&map, &files);
+            assert!(!path.is_empty());
+            assert!(path.len() <= MAX_READING_PATH_STEPS);
+            assert!(path.iter().any(|step| step.role == "entry"));
+            assert!(path.iter().any(|step| step.role == "business"));
+            if files
+                .iter()
+                .any(|item| item.relative_path.ends_with(".sql"))
+            {
+                assert!(path.iter().any(|step| step.role == "data"));
+            }
+        }
     }
 
     #[test]
@@ -786,8 +922,8 @@ mod tests {
         .expect("explanation inserts");
         conn.execute(
             "INSERT INTO user_reading_states
-             (id, project_id, explanation_id, state, note, updated_at)
-             VALUES ('reading-entry', ?1, 'exp-entry', 'understood', NULL, '2')",
+             (id, project_id, explanation_id, state, visit_state, mastery_state, review_state, revision, note, updated_at)
+             VALUES ('reading-entry', ?1, 'exp-entry', 'understood', 'read', 'understood', 'current', 1, NULL, '2')",
             params![first.project_id],
         )
         .expect("reading state inserts");
@@ -798,7 +934,173 @@ mod tests {
         assert_eq!(restored.generated_at, first.generated_at);
         assert_eq!(restored.progress.understood, 1);
         assert_eq!(restored.progress.unread, 1);
+        assert_eq!(restored.progress.mastery_percent, 50);
         assert_eq!(restored.reading_path[0].reading_state, "understood");
+        assert_eq!(
+            restored.reading_path[0].cognition_state.mastery_state,
+            "understood"
+        );
+
+        drop(conn);
+        let _ = std::fs::remove_file(database_path);
+    }
+
+    #[test]
+    fn persisted_v5_cognition_is_the_single_source_for_path_progress() {
+        let database_path = temp_database_path("guide-v5-cognition");
+        let guide = generate_project_guide_at_path(
+            &database_path,
+            GenerateProjectGuideRequest {
+                root_path: "/project/demo".to_string(),
+                files: vec![
+                    file("entry", "src/app.ts", "typescript", true, true),
+                    file("business", "src/domain.ts", "typescript", true, true),
+                ],
+            },
+        )
+        .expect("guide generates");
+        let conn = persistence_service::open_database(&database_path).expect("database opens");
+        for (id, file_id) in [
+            ("exp-entry", "entry"),
+            ("exp-business", "business"),
+            ("exp-business-peer", "business"),
+            ("exp-outside", "outside"),
+        ] {
+            conn.execute(
+                "INSERT INTO explanation_nodes
+                 (id, project_id, file_id, snapshot_id, explanation_type, status, schema_version, prompt_version, created_at, updated_at)
+                 VALUES (?1, ?2, ?3, 'snapshot', 'file', 'valid', 'test', 'test', '1', '1')",
+                params![id, guide.project_id, file_id],
+            )
+            .expect("explanation inserts");
+        }
+        for (id, explanation_id, visit, mastery, review) in [
+            (
+                "state-entry",
+                "exp-entry",
+                "read",
+                "understood",
+                "needs_review",
+            ),
+            (
+                "state-business",
+                "exp-business",
+                "read",
+                "unconfirmed",
+                "needs_review",
+            ),
+            (
+                "state-business-peer",
+                "exp-business-peer",
+                "read",
+                "understood",
+                "current",
+            ),
+            (
+                "state-outside",
+                "exp-outside",
+                "read",
+                "understood",
+                "current",
+            ),
+        ] {
+            conn.execute(
+                "INSERT INTO user_reading_states
+                 (id, project_id, explanation_id, state, visit_state, mastery_state, review_state, revision, note, updated_at)
+                 VALUES (?1, ?2, ?3, 'unread', ?4, ?5, ?6, 7, NULL, '2')",
+                params![id, guide.project_id, explanation_id, visit, mastery, review],
+            )
+            .expect("v5 cognition inserts");
+        }
+
+        conn.execute(
+            "INSERT INTO files (id, project_id, path, language, content_hash, last_analyzed_hash, status, updated_at)
+             VALUES ('entry', ?1, 'src/app.ts', 'typescript', 'hash:entry', 'hash:entry', 'valid', '2')",
+            params![guide.project_id],
+        )
+        .expect("entry file persists for regeneration");
+        conn.execute(
+            "INSERT INTO code_snapshots
+             (id, project_id, file_id, content_hash, line_count, source_content, line_fingerprints, snapshot_reason, created_at)
+             VALUES ('snapshot:entry', ?1, 'entry', 'hash:entry', 1, 'export {}', '[]', 'fixture', '2')",
+            params![guide.project_id],
+        )
+        .expect("entry snapshot persists for regeneration");
+        conn.execute(
+            "INSERT INTO user_annotations (id, project_id, explanation_id, kind, body, created_at, updated_at)
+             VALUES ('annotation:legacy-state:entry', ?1, 'exp-entry', 'question', '', '2', '2')",
+            params![guide.project_id],
+        )
+        .expect("legacy marker persists");
+        conn.execute(
+            "INSERT INTO user_annotations (id, project_id, explanation_id, kind, body, created_at, updated_at)
+             VALUES ('annotation:new-risk', ?1, 'exp-business', 'risk', 'new annotation', '2', '2')",
+            params![guide.project_id],
+        )
+        .expect("new annotation persists");
+        drop(conn);
+        let regenerated = persistence_service::save_generated_explanation(
+            &database_path,
+            persistence_service::GeneratedExplanationInput {
+                project_id: Some(guide.project_id.clone()),
+                project_root: Some("/project/demo".to_string()),
+                file_id: "entry".to_string(),
+                file_path: "src/app.ts".to_string(),
+                language: "typescript".to_string(),
+                file_hash: "hash:entry".to_string(),
+                snapshot_id: "snapshot:entry".to_string(),
+                line_count: 1,
+                explanation_id: "exp-entry".to_string(),
+                code_node_id: None,
+                target_type: "file".to_string(),
+                target_name: Some("app.ts".to_string()),
+                symbol_id: None,
+                start_line: 1,
+                end_line: 1,
+                code_hash: "hash:entry".to_string(),
+                anchor_text: "export {}".to_string(),
+                code_level_meaning: "generated".to_string(),
+                local_composition_meaning: "generated".to_string(),
+                project_role_meaning: "generated".to_string(),
+                prior_knowledge: None,
+                risk_notes: Vec::new(),
+                learning_note: None,
+                review_suggestion: None,
+                trust_label: "clear".to_string(),
+                trust_reason: "fixture".to_string(),
+                depends_on_lines: Vec::new(),
+                affects_lines: Vec::new(),
+                display_mode: "plain".to_string(),
+                prompt_version: "fixture".to_string(),
+                model_info: "fixture".to_string(),
+                context_id: "fixture".to_string(),
+                context_sources: "[]".to_string(),
+            },
+        )
+        .expect("regeneration uses the current snapshot");
+        assert_eq!(regenerated.mastery_state, "understood");
+        assert_eq!(regenerated.review_state, "needs_review");
+
+        let conn = persistence_service::open_database(&database_path).expect("database reopens");
+
+        let restored = load_project_guide_from_connection(&conn, &guide.project_id)
+            .expect("guide loads")
+            .expect("guide exists");
+        assert_eq!(restored.progress.total, 2);
+        assert_eq!(restored.progress.mastery_percent, 50);
+        assert_eq!(restored.progress.understood, 1);
+        assert_eq!(restored.progress.needs_reexplain, 2);
+        assert_eq!(restored.progress.read, 2);
+        assert_eq!(
+            restored.reading_path[0].cognition_state.mastery_state,
+            "understood"
+        );
+        assert_eq!(restored.reading_path[0].reading_state, "questioned");
+        assert_eq!(
+            restored.reading_path[1].cognition_state.review_state,
+            "needs_review"
+        );
+        assert_eq!(restored.reading_path[1].reading_state, "needs_reexplain");
 
         drop(conn);
         let _ = std::fs::remove_file(database_path);

@@ -4,6 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import type {
   CodeFile,
+  CognitionState,
   Explanation,
   ExplanationFeedbackType,
   ReadingState
@@ -77,7 +78,11 @@ describe("ExplanationPanel workspace interactions", () => {
 
     await user.click(screen.getByRole("button", { name: "已理解" }));
 
-    expect(onReadingStateChange).toHaveBeenCalledWith("understood");
+    expect(onReadingStateChange).toHaveBeenCalledWith({
+      visitState: "read",
+      masteryState: "understood",
+      reviewState: "current"
+    });
   });
 
   it("renders the capability state when no explanation is available", () => {
@@ -94,7 +99,7 @@ describe("ExplanationPanel workspace interactions", () => {
 interface PanelOverrides {
   onFeedback?: (feedbackType: ExplanationFeedbackType) => void;
   onGenerate?: () => void;
-  onReadingStateChange?: (state: ReadingState) => void;
+  onReadingStateChange?: (state: ReadingState | CognitionState) => void;
   explanation?: Explanation | undefined;
   generationStatus?: "idle" | "generating" | "error";
   contextStatus?: "unavailable" | "loading" | "ready" | "error";
@@ -110,12 +115,24 @@ function renderPanel(overrides: PanelOverrides = {}) {
 
   render(
     <ExplanationPanel
+      allFiles={[file]}
+      canGoBack={false}
+      displayMode="plain"
       file={file}
       contextStatus={overrides.contextStatus ?? "ready"}
       explanation={entry}
       generationStatus={overrides.generationStatus ?? "idle"}
+      projectName="test-project"
+      readerBusy={false}
+      onAddAnnotation={vi.fn(() => Promise.resolve(true))}
+      onChangeDisplayMode={vi.fn(() => Promise.resolve(true))}
+      onEditAnnotation={vi.fn(() => Promise.resolve(true))}
       onFeedback={overrides.onFeedback ?? vi.fn()}
       onGenerate={overrides.onGenerate ?? vi.fn()}
+      onGoBack={vi.fn(() => Promise.resolve())}
+      onNavigateRelated={vi.fn(() => Promise.resolve(true))}
+      onNavigateReview={vi.fn(() => Promise.resolve())}
+      onRemoveAnnotation={vi.fn(() => Promise.resolve(true))}
       onSelectAffected={vi.fn()}
       onReadingStateChange={overrides.onReadingStateChange ?? vi.fn()}
     />

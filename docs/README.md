@@ -12,10 +12,19 @@ Public entry points:
   compatibility overview.
 - `release/public-release-notes.zh-CN.md`: public GitHub Release-page contract.
 
+Current accepted product reset records:
+
+- `architecture/2026-08-09-product-reset-decision.md`: accepted decision restoring
+  the AI code-cognition product core while retaining the production contract.
+- `plans/2026-08-09-product-reset-plan.md`: phased implementation, validation,
+  compatibility, rollback, and release-gate plan for that decision.
+- `plans/2026-08-12-product-reset-r4-evidence.md`: current R4 project samples,
+  measurement boundaries, and the still-required maintainer usability gate.
+
 ## Directory map
 
-- `architecture/`: approved product, architecture, and production-readiness
-  designs.
+- `architecture/`: accepted product, architecture, and production-readiness
+  decisions. Each document declares its own status.
 - `plans/`: implementation plans derived from approved designs.
 - `release/`: repeatable packaging, verification, and publishing procedures.
 - `history/app-mvp/`: superseded standalone-app MVP documents.
