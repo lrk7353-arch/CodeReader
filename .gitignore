@@ -38,6 +38,8 @@ desktop.ini
 
 # local cache and temp files
 .cache/
+__pycache__/
+*.py[cod]
 .vite/
 .superpowers/
 .temp/

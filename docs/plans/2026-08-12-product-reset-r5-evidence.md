@@ -2,7 +2,7 @@
 
 **状态：候选执行中，未 `PASS`，未公开发布。** R4 已由维护者验收通过；本记录只描述 R5 的实际证据与阻塞，不把脚本存在、源码检查或单平台结果外推为四平台发布完成。
 
-**候选版本准备：** 远端 `v1.0.0-rc.2` 已存在且不可复用，本轮版本源统一提升为 `1.0.0-rc.3`。后续十包、package smoke、native journey、SHA256SUMS、SPDX、attestations 与签名状态必须全部绑定 rc.3 的最终新 commit/tag；本文件下方基于 `39bf17e` 和 rc.2 的早期本地构建只保留为过程证据，不能移作 rc.3 发布证据。
+**候选版本准备：** `v1.0.0-rc.3` 已形成 draft，并完成十包与四平台 package smoke，但未完成完整 native journey；该 tag、制品和 smoke 只保留为 rc.3 历史事实，不复用于后续候选。本轮版本源统一提升为 `1.0.0-rc.4`。十包、四份 package smoke、四份 native journey、`SHA256SUMS`、SPDX SBOM、attestations 与签名状态必须全部绑定 rc.4 的同一最终新 commit/tag。
 
 ## 1. 固定工作包
 
@@ -18,6 +18,8 @@
 当前执行环境是 WSL2 Linux x64。它可以真实执行 Linux x64 源码质量门禁和 Linux x64 打包；安装型 package smoke 还依赖 `rpm`、`docker`、`xvfb-run` 与受控的系统包安装。它不能替代 Linux ARM64、Windows x64、Windows ARM64，也不能生成 Authenticode 通过证据。
 
 2026-08-12 在仓库外 detached `39bf17ef8318fe186c690d86065a8b54785e2923` 干净 worktree 执行 `npm ci` 后运行 `npm run verify:linux`。Rust `check`、`clippy`、124 项测试通过；前端与脚本 47 个文件、329 项测试通过；lint、format 和 production build 通过。该记录仍需根智能体复跑最终门禁。
+
+2026-08-13 的 native journey 候选首次 lint 运行失败；修复后完整 `verify:linux` 复跑为前端与脚本 50 个文件、355 项测试以及 Rust 124 项测试全部通过，lint、format、build、check 与 clippy 全绿。Linux 与 Windows harness 静态候选分别经 Sol `high` 监督 `PASS`；这只证明候选实现满足证据契约，不代表四个平台已实际运行。
 
 `npm ci` 的完整开发依赖审计报告 4 个 high 项；`npm audit --omit=dev --audit-level=high` 随后确认 production dependency graph 为 0 项漏洞。该结论只说明 npm 运行时依赖，不替代 RustSec、CodeQL 或完整供应链检查。
 
@@ -59,3 +61,5 @@ Linux x64 重型打包实际进入 Tauri release build：production 前端和 x8
 5. 若公开范围要求 Windows 已签名，则还缺真实证书和 Authenticode 验证；在此之前只能如实标注未签名候选边界，不能宣称已签名。
 
 上述缺口需要原生 runner/硬件、发布 tag、GitHub 证明权限或维护者决定。仓库内可安全完成的协议、拒绝伪证据门禁和文档先行完成；缺失外部证据时准确停在候选状态。
+
+R4 的 small、frontend、fullstack 三项目维护者人工可用性已通过。当前仅 rc.4 的四平台 OS 级 native journey 与最终发布证据未完成：必须从 rc.4 不可变 tag 重建十包、四份 package smoke、四份 native journey、`SHA256SUMS`、SPDX SBOM 和 artifact attestations；rc.3 draft 的证据不得计入。

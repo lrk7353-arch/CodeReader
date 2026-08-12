@@ -4,7 +4,7 @@
 
 CodeReader is a local-first desktop tool for building a reviewable understanding of a codebase. It starts from a project map and reading path, keeps real code beside layered explanations, and preserves user-confirmed understanding, personal questions, and change-review work.
 
-> Current channel: `1.0.0-rc.3` release candidate. Release candidates are intended for full production validation before the stable `1.0.0` publication.
+> Current channel: `1.0.0-rc.4` release candidate. Release candidates are intended for full production validation before the stable `1.0.0` publication.
 
 ## Product scope
 
@@ -106,7 +106,7 @@ Uninstall is not a data-erasure tool. Preserve local reading data and verified m
 | Continue reading asks for the project again | Renderer access is not permanent. Reauthorize the same directory through the native picker; a mismatch or deleted target falls back safely instead of opening an unrelated location. |
 | A target says it needs review | The code changed. Re-read the affected explanation and confirm it again; unaffected targets should retain their state. |
 
-Current representative project fixtures make the workflow repeatable, but the one-minute explanation and five-minute comprehension goals are validation targets, not published SLAs. Native maintainer usability acceptance and deferred keyboard, focus, long-content, reduced-motion, zoom, and contrast evidence remain required before claiming the product reset complete.
+The maintainer has passed the R4 usability journey on the small, frontend, and full-stack projects. The one-minute explanation and five-minute comprehension goals remain validation targets, not published SLAs. Only the rc.4 four-platform OS-level native journey and final release evidence remain incomplete; their absence keeps R5 from passing.
 
 The [Chinese guide](README.zh-CN.md) provides the same workflow in Simplified Chinese, including recovery guidance for supported 0.10.x and 0.11.x upgrades.
 
