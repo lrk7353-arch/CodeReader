@@ -8,7 +8,7 @@
     [string]$Fixture011,
     [string]$Fixture011Current,
     [string]$Output,
-    [ValidateSet(0, 1, 2)][int]$RequiredPathSelfTest = -1
+    [switch]$RequiredPathSelfTest
 )
 
 $ErrorActionPreference = "Stop"
@@ -26,17 +26,19 @@ function Assert-True([bool]$Condition, [string]$Message) {
     if (-not $Condition) { throw $Message }
 }
 
-if ($RequiredPathSelfTest -ge 0) {
+if ($RequiredPathSelfTest) {
     $existing = [IO.Path]::GetTempFileName()
     try {
-        $probePaths = switch ($RequiredPathSelfTest) {
-            0 { @($existing) }
-            1 { @($existing, "$existing.missing") }
-            2 { @("$existing.missing-one", "$existing.missing-two") }
+        foreach ($expectedMissing in @(0, 1, 2)) {
+            $probePaths = switch ($expectedMissing) {
+                0 { @($existing) }
+                1 { @($existing, "$existing.missing") }
+                2 { @("$existing.missing-one", "$existing.missing-two") }
+            }
+            $missing = @($probePaths | Where-Object { -not (Test-Path -LiteralPath $_) })
+            if ($missing.Count -ne $expectedMissing) { throw "Required path count self-test failed." }
+            [ordered]@{ expected = $expectedMissing; actual = $missing.Count } | ConvertTo-Json -Compress
         }
-        $missing = @($probePaths | Where-Object { -not (Test-Path -LiteralPath $_) })
-        if ($missing.Count -ne $RequiredPathSelfTest) { throw "Required path count self-test failed." }
-        Write-Host "Required path count self-test passed: $($missing.Count)."
         exit 0
     } finally {
         Remove-Item -LiteralPath $existing -Force -ErrorAction SilentlyContinue
