@@ -12,7 +12,11 @@ describe("Windows native product journey driver", () => {
     expect(script).toContain("$Observed[$Name] = $true");
     expect(script).not.toMatch(/\$Observed\[['"][^'"]+['"]\]\s*=\s*\$true/);
     expect(script.indexOf("$missing =")).toBeLessThan(script.indexOf("status = 'pass'"));
-    expect(script).not.toMatch(/status\s*=\s*'pass'[\s\S]*throw /);
+    const evidenceWrite = script.slice(
+      script.indexOf("$evidence = [ordered]@{"),
+      script.indexOf("} catch {", script.indexOf("$evidence = [ordered]@{"))
+    );
+    expect(evidenceWrite).not.toContain("throw ");
   });
 
   it("consumes immutable SQLite fixtures and verifies preserved migration content", () => {
@@ -66,6 +70,41 @@ describe("Windows native product journey driver", () => {
     20000
   );
 
+  windowsIt(
+    "discovers exactly one CodeReader registry entry without assuming every object has DisplayName",
+    () => {
+      const result = spawnSync(
+        "powershell.exe",
+        [
+          "-NoProfile",
+          "-ExecutionPolicy",
+          "Bypass",
+          "-File",
+          "scripts/native-journey-windows.ps1",
+          "-RegistryDiscoverySelfTest"
+        ],
+        { encoding: "utf8", timeout: 15000 }
+      );
+      expect(result.error).toBeUndefined();
+      expect(result.status).toBe(0);
+      expect(
+        result.stdout
+          .trim()
+          .split(/\r?\n/)
+          .map((line) => JSON.parse(line))
+      ).toEqual([
+        { expected: "unique", actual: "unique" },
+        { expected: "not-found", actual: "not-found" },
+        { expected: "ambiguous", actual: "ambiguous" },
+        { expected: "installed-cleaned", actual: "installed-cleaned" },
+        { expected: "already-clean", actual: "already-clean" },
+        { expected: "ambiguous-failed", actual: "ambiguous-failed" },
+        { expected: "primary-preserved", actual: "primary-preserved" }
+      ]);
+    },
+    20000
+  );
+
   it("drives real OS UI, picker, model, restart and installer probes", () => {
     expect(script).toContain("UIAutomationClient");
     expect(script).toContain("Authorize-NativePicker");
@@ -75,6 +114,16 @@ describe("Windows native product journey driver", () => {
     expect(script).toContain("native-journey-model-stub.mjs");
     expect(script).toContain("CloseMainWindow");
     expect(script).toContain("msiexec.exe");
+    expect(script).toContain("$_.PSObject.Properties['DisplayName']");
+    expect(script).toContain("phase=installer-discovery category=not-found exit=1");
+    expect(script).toContain("phase=installer-discovery category=ambiguous exit=1");
+    expect(script).toContain("phase=installer-discovery category=invalid-entry exit=1");
+    expect(script).toContain("phase=installer-discovery category=registry-error exit=1");
+    expect(script).toContain("function Get-UninstallEntryForCleanup");
+    expect(script).toContain("function Invoke-InstallerCleanup");
+    expect(script).toContain("preserving primary phase failure");
+    expect(script).not.toContain("Get-ItemProperty 'HKCU:");
+    expect(script).not.toContain("Where-Object DisplayName");
     expect(script).toContain("SystemParametersInfo");
     expect(script).toContain("controlled-project");
     expect(script).not.toContain("GetFullPath($Project)");
