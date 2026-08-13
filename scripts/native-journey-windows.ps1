@@ -10,6 +10,7 @@
     [string]$Fixture011Current,
     [string]$Output,
     [switch]$RequiredPathSelfTest,
+    [switch]$DatabasePathSelfTest,
     [switch]$RegistryDiscoverySelfTest
 )
 
@@ -318,7 +319,11 @@ function Set-ElementValue($Element, [string]$Value) {
 }
 
 function Start-App([string]$Executable) {
-    $process = Start-Process -FilePath $Executable -PassThru
+    $process = Start-Process -FilePath $Executable -PassThru -Environment @{
+        APPDATA = $env:APPDATA
+        LOCALAPPDATA = $env:LOCALAPPDATA
+        WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS = $env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS
+    }
     $deadline = [DateTimeOffset]::UtcNow.AddSeconds(30)
     do {
         Start-Sleep -Milliseconds 300
@@ -329,6 +334,41 @@ function Start-App([string]$Executable) {
     [pscustomobject]@{
         Process = $process
         Root = [System.Windows.Automation.AutomationElement]::FromHandle($process.MainWindowHandle)
+    }
+}
+
+function Wait-CodeReaderDatabase([string[]]$Candidates, [int]$TimeoutSeconds = 30) {
+    $deadline = [DateTimeOffset]::UtcNow.AddSeconds($TimeoutSeconds)
+    do {
+        $matches = @($Candidates | Where-Object { Test-Path -LiteralPath $_ })
+        if ($matches.Count -eq 1) { return $matches[0] }
+        if ($matches.Count -gt 1) { throw 'Native journey phase=migration category=ambiguous-database exit=1.' }
+        Start-Sleep -Milliseconds 250
+    } while ([DateTimeOffset]::UtcNow -lt $deadline)
+    throw 'Native journey phase=migration category=database-not-created exit=1.'
+}
+
+if ($DatabasePathSelfTest) {
+    $root = Join-Path ([IO.Path]::GetTempPath()) ([Guid]::NewGuid().ToString('N'))
+    $one = Join-Path $root 'one.sqlite'
+    $two = Join-Path $root 'two.sqlite'
+    try {
+        New-Item -ItemType Directory -Force -Path $root | Out-Null
+        try { Wait-CodeReaderDatabase @($one, $two) 0 | Out-Null } catch {
+            Assert-True ($_.Exception.Message -eq 'Native journey phase=migration category=database-not-created exit=1.') 'Database wait zero-result contract failed.'
+            [ordered]@{ expected = 'not-found'; actual = 'not-found' } | ConvertTo-Json -Compress
+        }
+        New-Item -ItemType File -Force -Path $one | Out-Null
+        Assert-True ((Wait-CodeReaderDatabase @($one, $two) 0) -eq $one) 'Database wait unique-result contract failed.'
+        [ordered]@{ expected = 'unique'; actual = 'unique' } | ConvertTo-Json -Compress
+        New-Item -ItemType File -Force -Path $two | Out-Null
+        try { Wait-CodeReaderDatabase @($one, $two) 0 | Out-Null } catch {
+            Assert-True ($_.Exception.Message -eq 'Native journey phase=migration category=ambiguous-database exit=1.') 'Database wait many-result contract failed.'
+            [ordered]@{ expected = 'ambiguous'; actual = 'ambiguous' } | ConvertTo-Json -Compress
+        }
+        exit 0
+    } finally {
+        Remove-Item -Recurse -Force -LiteralPath $root -ErrorAction SilentlyContinue
     }
 }
 
@@ -371,17 +411,18 @@ function Copy-HistoricalDatabase([string]$Database, [string]$Fixture) {
 }
 
 function Test-Migration([string]$Executable, [int]$Version, [string]$Fixture) {
-    Remove-Item -Recurse -Force -ErrorAction SilentlyContinue $CurrentData, $LegacyData
-    New-Item -ItemType Directory -Force -Path $LegacyData | Out-Null
-    $legacy = Join-Path $LegacyData 'codereader.sqlite'
-    Copy-HistoricalDatabase $legacy $Fixture
+    Remove-Item -Recurse -Force -ErrorAction SilentlyContinue $CurrentDataCandidates, $LegacyDataCandidates
+    foreach ($legacyRoot in $LegacyDataCandidates) {
+        New-Item -ItemType Directory -Force -Path $legacyRoot | Out-Null
+        Copy-HistoricalDatabase (Join-Path $legacyRoot 'codereader.sqlite') $Fixture
+    }
+    $legacy = Join-Path $LegacyDataCandidates[0] 'codereader.sqlite'
     Assert-True ((Invoke-PythonSql $legacy 'PRAGMA user_version;') -eq [string]$Version) "Historical fixture has the wrong schema version."
     $app = Start-App $Executable
     try {
-        $current = Join-Path $CurrentData 'codereader.sqlite'
-        $deadline = [DateTimeOffset]::UtcNow.AddSeconds(30)
-        while (-not (Test-Path -LiteralPath $current) -and [DateTimeOffset]::UtcNow -lt $deadline) { Start-Sleep -Milliseconds 250 }
-        Assert-True (Test-Path -LiteralPath $current) "Migrated database was not created."
+        $current = Wait-CodeReaderDatabase $CurrentDatabaseCandidates
+        $script:CurrentData = [IO.Path]::GetDirectoryName($current)
+        $script:LegacyData = Join-Path ([IO.Path]::GetDirectoryName($script:CurrentData)) 'com.codereader.app'
         Assert-True ((Invoke-PythonSql $current 'PRAGMA user_version;') -eq '6') "Database did not migrate to v6."
         Assert-True ((Invoke-PythonSql $current "SELECT count(*) FROM projects WHERE id='project:fixture';") -eq '1') "Fixture project was lost."
         Assert-True ((Invoke-PythonSql $current "SELECT count(*) FROM explanation_nodes WHERE id='exp:fixture';") -eq '1') "Fixture explanation was lost."
@@ -401,7 +442,7 @@ function Test-Migration([string]$Executable, [int]$Version, [string]$Fixture) {
 }
 
 function Test-MigrationFailureRecovery([string]$Executable, [string]$Fixture) {
-    Remove-Item -Recurse -Force -ErrorAction SilentlyContinue $CurrentData, $LegacyData
+    Remove-Item -Recurse -Force -ErrorAction SilentlyContinue $CurrentDataCandidates, $LegacyDataCandidates
     New-Item -ItemType Directory -Force -Path $CurrentData | Out-Null
     $database = Join-Path $CurrentData 'codereader.sqlite'
     Copy-HistoricalDatabase $database $Fixture
@@ -612,11 +653,17 @@ $MsiProductCode = Get-MsiProperty $Package 'ProductCode'
 $MsiProductVersion = Get-MsiProperty $Package 'ProductVersion'
 Assert-MsiProductIdentity $MsiProductCode $MsiProductVersion
 
+$KnownRoamingData = [Environment]::GetFolderPath([Environment+SpecialFolder]::ApplicationData)
+Assert-True ([IO.Path]::IsPathRooted($KnownRoamingData)) 'Native journey phase=migration category=data-root-unavailable exit=1.'
 $profile = Join-Path $env:RUNNER_TEMP 'codereader-native-journey'
 $env:APPDATA = Join-Path $profile 'Roaming'
 $env:LOCALAPPDATA = Join-Path $profile 'Local'
-$CurrentData = Join-Path $env:APPDATA 'com.codereader.desktop'
-$LegacyData = Join-Path $env:APPDATA 'com.codereader.app'
+$AllowedDataRoots = @($KnownRoamingData)
+$CurrentDataCandidates = @($AllowedDataRoots | ForEach-Object { Join-Path $_ 'com.codereader.desktop' })
+$LegacyDataCandidates = @($AllowedDataRoots | ForEach-Object { Join-Path $_ 'com.codereader.app' })
+$CurrentDatabaseCandidates = @($CurrentDataCandidates | ForEach-Object { Join-Path $_ 'codereader.sqlite' })
+$CurrentData = $CurrentDataCandidates[0]
+$LegacyData = $LegacyDataCandidates[0]
 New-Item -ItemType Directory -Force -Path $env:APPDATA, $env:LOCALAPPDATA | Out-Null
 $WebViewProbe = Join-Path $profile 'webview-probe.mjs'
 @'
