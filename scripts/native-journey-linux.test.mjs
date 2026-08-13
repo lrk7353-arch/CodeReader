@@ -237,13 +237,16 @@ describe("Linux native journey evidence", () => {
             CODEREADER_JOURNEY_FAILURE_SELFTEST_PHASE: "fixture-0.10",
             CODEREADER_JOURNEY_FAILURE_SELFTEST_CATEGORY: category
           },
-          encoding: "utf8"
+          encoding: "utf8",
+          timeout: 10000
         }
       );
+      expect(result.error).toBeUndefined();
       expect(result.status).toBe(7);
       expect(readFailureEnvelope(failure)).toEqual({ phase: "fixture-0.10", category, exit: 7 });
       expect(`${result.stdout}${result.stderr}`).not.toContain("unused");
-    }
+    },
+    15000
   );
 
   it.each([
