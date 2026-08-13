@@ -2,7 +2,7 @@
   "v1": {
     "sourceCommit": "f7e7b454e4b17c0380d2efec962ef103863e9c83",
     "migrations": "migrate_to_v1",
-    "extractedSha256": "a6d519490a34e11f3109810f6d3349be64e04b75e8a794c2aff45c2ae22f817e",
+    "extractedSha256": "16858e0cb47572ea8d545baa1a1c0cdace4db9282f88146d399ebb124b83a9b6",
     "requiredTables": [
       "projects",
       "files",
@@ -14,7 +14,7 @@
   "v2": {
     "sourceCommit": "9b3a690664f1a040feb501e16d3ce831fdd2d6e6",
     "migrations": "migrate_to_v1,migrate_to_v2",
-    "extractedSha256": "b2a080795c7fd2438577b4bdb2ff348cfb41def2cbe75832c452ecfe1d82163c",
+    "extractedSha256": "8bc5bfc843f654f9b84313eff9aa2f6ac3c2d8e29c60273657cd995fb0648da8",
     "requiredTables": [
       "projects",
       "files",
@@ -28,7 +28,7 @@
     "sourceCommit": "6000e348308a9933cd39da096eed2c2594383bb6",
     "baseVersion": "v2",
     "migrations": "migrate_to_v3",
-    "extractedSha256": "9af0b4df7fca88cefec67d2a889c8d3d14f2946539c61caee4996fe18af1bdb5",
+    "extractedSha256": "a3921c76e024e2e1e80336346541d1a9a53024c317099e10fc26d91808301676",
     "requiredTables": [
       "projects",
       "files",
