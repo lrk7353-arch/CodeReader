@@ -61,6 +61,18 @@ function removeNthFullHistoryCheckout(workflow, targetIndex) {
   });
 }
 
+function publishUsesCurrentMainVerifier(workflow) {
+  return (
+    !workflow.includes("ref: ${{ env.HARNESS_SHA }}") &&
+    workflow.includes("ref: ${{ github.sha }}") &&
+    workflow.includes("fetch-depth: 0") &&
+    workflow.includes('test "$(git rev-parse HEAD)" = "${{ github.sha }}"') &&
+    workflow.includes('git merge-base --is-ancestor "$HARNESS_SHA" HEAD') &&
+    workflow.includes("node scripts/release-evidence.mjs verify-journeys") &&
+    workflow.includes('--harness-sha "$HARNESS_SHA"')
+  );
+}
+
 describe("production workflows", () => {
   it("compiles the supported native platform matrix", () => {
     for (const runner of ["ubuntu-22.04", "ubuntu-22.04-arm", "windows-2022", "windows-11-arm"]) {
@@ -132,14 +144,25 @@ describe("production workflows", () => {
       .join("\n");
     expect(runBlocks).not.toContain("${{ inputs.tag }}");
     expect(publish).toContain("RELEASE_TAG: ${{ inputs.tag }}");
+    expect(publish).toContain("HARNESS_SHA: ${{ inputs.harness_sha }}");
+    expect(publish).toContain('[[ "$HARNESS_SHA" =~ ^[0-9a-f]{40}$ ]]');
     expect(publish).toContain('[[ ! "$RELEASE_TAG" =~ ^v1\\.[0-9]+\\.[0-9]+(-rc\\.[0-9]+)?$ ]]');
     expect(publish).toContain("gh release download");
-    expect(publish).toContain("git describe --tags --exact-match HEAD");
+    expect(publish).toContain("git -C candidate-source describe --tags --exact-match HEAD");
     expect(publish).toContain("gh release view");
     expect(publish).toContain("--json isDraft");
     expect(publish).toContain("--pattern 'native-journey-*.json'");
     expect(publish).toContain("release-evidence.mjs verify-journeys");
     expect(publish).toContain('sha "${{ steps.target.outputs.sha }}"');
+    expect(publish).toContain('--harness-sha "$HARNESS_SHA"');
+    expect(publish).not.toContain("ref: ${{ env.HARNESS_SHA }}");
+    expect(publish).toContain("ref: ${{ github.sha }}");
+    expect(publish).toContain("fetch-depth: 0");
+    expect(publish).toContain("ref: refs/tags/${{ env.RELEASE_TAG }}");
+    expect(publish).toContain("path: candidate-source");
+    expect(publish).toContain('test "$(git rev-parse HEAD)" = "${{ github.sha }}"');
+    expect(publish).toContain('git merge-base --is-ancestor "$HARNESS_SHA" HEAD');
+    expect(publish).toContain("git -C candidate-source describe --tags --exact-match HEAD");
     expect(publish).toContain("name: verified-native-journeys\n");
     expect(publish).not.toContain("name: verified-native-journeys-${{ inputs.tag }}");
     expect(publish).toContain("publish:\n    runs-on:");
@@ -156,6 +179,22 @@ describe("production workflows", () => {
     );
     expect(release).toContain("draft: true");
     expect(release).not.toContain("--draft=false");
+    expect(publishUsesCurrentMainVerifier(publish)).toBe(true);
+    for (const required of [
+      "ref: ${{ github.sha }}",
+      "fetch-depth: 0",
+      'test "$(git rev-parse HEAD)" = "${{ github.sha }}"',
+      'git merge-base --is-ancestor "$HARNESS_SHA" HEAD',
+      "node scripts/release-evidence.mjs verify-journeys",
+      '--harness-sha "$HARNESS_SHA"'
+    ]) {
+      expect(publishUsesCurrentMainVerifier(publish.replace(required, "removed"))).toBe(false);
+    }
+    expect(
+      publishUsesCurrentMainVerifier(
+        publish.replace("ref: ${{ github.sha }}", "ref: ${{ env.HARNESS_SHA }}")
+      )
+    ).toBe(false);
   });
 
   it("uses immutable tag checkouts, locked dependencies, and least privilege", () => {
