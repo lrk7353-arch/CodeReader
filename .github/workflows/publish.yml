@@ -7,6 +7,10 @@ on:
         description: Existing v1.x draft release tag
         required: true
         type: string
+      harness_sha:
+        description: Audited native journey harness commit SHA
+        required: true
+        type: string
 
 permissions:
   contents: read
@@ -24,6 +28,7 @@ jobs:
       contents: write
     env:
       RELEASE_TAG: ${{ inputs.tag }}
+      HARNESS_SHA: ${{ inputs.harness_sha }}
     steps:
       - name: Validate the requested release tag before using it
         run: |
@@ -31,17 +36,25 @@ jobs:
             echo "Invalid v1 release tag." >&2
             exit 1
           fi
+          [[ "$HARNESS_SHA" =~ ^[0-9a-f]{40}$ ]]
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
         with:
           ref: refs/tags/${{ env.RELEASE_TAG }}
+          path: candidate-source
       - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
         with:
           node-version: 22
       - name: Resolve and confirm the immutable target tag
         id: target
         run: |
-          test "$(git describe --tags --exact-match HEAD)" = "$RELEASE_TAG"
-          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          test "$(git rev-parse HEAD)" = "${{ github.sha }}"
+          git merge-base --is-ancestor "$HARNESS_SHA" HEAD
+          test "$(git -C candidate-source describe --tags --exact-match HEAD)" = "$RELEASE_TAG"
+          echo "sha=$(git -C candidate-source rev-parse HEAD)" >> "$GITHUB_OUTPUT"
       - name: Revalidate the exact current draft after maintainer approval
         env:
           GH_TOKEN: ${{ github.token }}
@@ -61,7 +74,8 @@ jobs:
           node scripts/release-evidence.mjs verify-journeys \
             --input verified-native-journeys \
             --tag "$RELEASE_TAG" \
-            --sha "${{ steps.target.outputs.sha }}"
+            --sha "${{ steps.target.outputs.sha }}" \
+            --harness-sha "$HARNESS_SHA"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: verified-native-journeys
