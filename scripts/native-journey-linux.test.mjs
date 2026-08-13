@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { readFileSync } from "node:fs";
-import { buildJourneyFromPhases } from "./native-journey-linux.mjs";
+import { spawnSync } from "node:child_process";
+import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { buildJourneyFromPhases, readFailureEnvelope } from "./native-journey-linux.mjs";
 
 const NAMES = [
   "native-picker-open-project",
@@ -174,6 +177,170 @@ describe("Linux native journey evidence", () => {
     ).toThrow(/independent passing probe/);
   });
 
+  it.each([
+    "fixture-0.10",
+    "fixture-0.11-current",
+    "fixture-0.11-early",
+    "migration-recovery",
+    "ui-session",
+    "ui-first-run",
+    "ui-restart-restore",
+    "phase-merge"
+  ])("accepts only the fixed failure envelope for %s", (phase) => {
+    const root = mkdtempSync(join(tmpdir(), "codereader-failure-envelope-"));
+    const path = join(root, "failure.json");
+    writeFileSync(path, JSON.stringify({ phase, category: "command-failed", exit: 7 }));
+    expect(readFailureEnvelope(path)).toEqual({ phase, category: "command-failed", exit: 7 });
+  });
+
+  it.each([
+    { phase: "ui-session", category: "command-failed", exit: 1, log: "/home/private" },
+    { phase: "../../prompt", category: "command-failed", exit: 1 },
+    { phase: "ui-session", category: "stderr:/secret", exit: 1 },
+    { phase: "ui-session", category: "command-failed", exit: "1" }
+  ])("rejects an invalid or malicious failure envelope without echoing it", (payload) => {
+    const root = mkdtempSync(join(tmpdir(), "codereader-failure-envelope-invalid-"));
+    const path = join(root, "failure.json");
+    writeFileSync(path, JSON.stringify(payload));
+    const failure = readFailureEnvelope(path);
+    expect(failure).toEqual({ phase: "native-session", category: "internal-error", exit: -1 });
+    expect(JSON.stringify(failure)).not.toContain("private");
+    expect(JSON.stringify(failure)).not.toContain("prompt");
+    expect(JSON.stringify(failure)).not.toContain("secret");
+  });
+
+  it.each([
+    ["ui-first-run", 17, 19],
+    ["ui-restart-restore", 18, 20],
+    ["phase-merge", 21, 22]
+  ])(
+    "preserves inner %s failure instead of overwriting it in the outer trap",
+    (phase, exit, outerExit) => {
+      const root = mkdtempSync(join(tmpdir(), "codereader-shell-envelope-inner-"));
+      const failure = join(root, "failure.json");
+      const result = spawnSync(
+        "bash",
+        ["scripts/native-journey-linux-session.sh", "unused", "unused", "unused", "unused"],
+        {
+          env: {
+            ...process.env,
+            XDG_DATA_HOME: root,
+            CODEREADER_JOURNEY_FAILURE_FILE: failure,
+            CODEREADER_JOURNEY_FAILURE_SELFTEST_PHASE: phase,
+            CODEREADER_JOURNEY_FAILURE_SELFTEST_EXIT: String(exit),
+            CODEREADER_JOURNEY_FAILURE_SELFTEST_OUTER_EXIT: String(outerExit)
+          },
+          encoding: "utf8"
+        }
+      );
+      expect(result.status).toBe(exit);
+      expect(readFailureEnvelope(failure)).toEqual({ phase, category: "command-failed", exit });
+      expect(`${result.stdout}${result.stderr}`).not.toContain("unused");
+    }
+  );
+
+  it("records the fixed outer fixture phase with its original exit code", () => {
+    const root = mkdtempSync(join(tmpdir(), "codereader-shell-envelope-outer-"));
+    const failure = join(root, "failure.json");
+    const result = spawnSync(
+      "bash",
+      ["scripts/native-journey-linux-session.sh", "unused", "unused", "unused", "unused"],
+      {
+        env: {
+          ...process.env,
+          XDG_DATA_HOME: root,
+          CODEREADER_JOURNEY_FAILURE_FILE: failure,
+          CODEREADER_JOURNEY_FAILURE_SELFTEST_PHASE: "fixture-0.11-current",
+          CODEREADER_JOURNEY_FAILURE_SELFTEST_EXIT: "23"
+        },
+        encoding: "utf8"
+      }
+    );
+    expect(result.status).toBe(23);
+    expect(readFailureEnvelope(failure)).toEqual({
+      phase: "fixture-0.11-current",
+      category: "command-failed",
+      exit: 23
+    });
+  });
+
+  it("replaces an invalid inner envelope without echoing its malicious content", () => {
+    const root = mkdtempSync(join(tmpdir(), "codereader-shell-envelope-malicious-"));
+    const failure = join(root, "failure.json");
+    const result = spawnSync(
+      "bash",
+      ["scripts/native-journey-linux-session.sh", "unused", "unused", "unused", "unused"],
+      {
+        env: {
+          ...process.env,
+          XDG_DATA_HOME: root,
+          CODEREADER_JOURNEY_FAILURE_FILE: failure,
+          CODEREADER_JOURNEY_FAILURE_SELFTEST_PHASE: "malicious"
+        },
+        encoding: "utf8"
+      }
+    );
+    expect(result.status).toBe(8);
+    expect(readFailureEnvelope(failure)).toEqual({
+      phase: "ui-session",
+      category: "command-failed",
+      exit: 8
+    });
+    expect(`${result.stdout}${result.stderr}`).not.toContain("private");
+    expect(`${result.stdout}${result.stderr}`).not.toContain("secret");
+  });
+
+  it("removes the controlled envelope on the successful shell path", () => {
+    const root = mkdtempSync(join(tmpdir(), "codereader-shell-envelope-success-"));
+    const failure = join(root, "failure.json");
+    writeFileSync(failure, "stale");
+    const result = spawnSync(
+      "bash",
+      ["scripts/native-journey-linux-session.sh", "unused", "unused", "unused", "unused"],
+      {
+        env: {
+          ...process.env,
+          XDG_DATA_HOME: root,
+          CODEREADER_JOURNEY_FAILURE_FILE: failure,
+          CODEREADER_JOURNEY_FAILURE_SELFTEST_PHASE: "success"
+        },
+        encoding: "utf8"
+      }
+    );
+    expect(result.status).toBe(0);
+    expect(existsSync(failure)).toBe(false);
+  });
+
+  it.each([
+    ["timeout-nonzero", 37, true],
+    ["timeout-accepted", 0, false]
+  ])("runs a real timeout child for %s without folding its status", (phase, status, hasFailure) => {
+    const root = mkdtempSync(join(tmpdir(), "codereader-shell-timeout-"));
+    const failure = join(root, "failure.json");
+    const result = spawnSync(
+      "bash",
+      ["scripts/native-journey-linux-session.sh", "unused", "unused", "unused", "unused"],
+      {
+        env: {
+          ...process.env,
+          XDG_DATA_HOME: root,
+          CODEREADER_JOURNEY_FAILURE_FILE: failure,
+          CODEREADER_JOURNEY_FAILURE_SELFTEST_PHASE: phase
+        },
+        encoding: "utf8"
+      }
+    );
+    expect(result.status).toBe(status);
+    expect(existsSync(failure)).toBe(hasFailure);
+    if (hasFailure) {
+      expect(readFailureEnvelope(failure)).toEqual({
+        phase: "fixture-0.10",
+        category: "command-failed",
+        exit: 37
+      });
+    }
+  });
+
   it("keeps native probes, migration recovery, reinstall restore and asset binding mandatory", () => {
     const runner = readFileSync("scripts/native-journey-linux.mjs", "utf8");
     const session = readFileSync("scripts/native-journey-linux-session.sh", "utf8");
@@ -181,6 +348,14 @@ describe("Linux native journey evidence", () => {
     const workflow = nativeWorkflow;
     expect(session).not.toContain("passed = {name:");
     expect(session).toContain("PRAGMA integrity_check");
+    expect(session).toContain("CODEREADER_JOURNEY_FAILURE_FILE");
+    expect(session).toContain("native-journey-linux-failure.sh");
+    expect(session).toContain("install_native_journey_failure_trap");
+    expect(session).toContain("current_phase=");
+    const failureHelper = readFileSync("scripts/native-journey-linux-failure.sh", "utf8");
+    expect(failureHelper).toContain("trap 'code=$?;");
+    expect(failureHelper).not.toContain('"$BASH_COMMAND"');
+    expect(session).not.toContain('"$BASH_COMMAND"');
     expect(session).toContain("failure_hash");
     expect(session).toContain("recovery_backup");
     expect(session).toContain('python3 "$driver" --verify-restore "$wrong_project" "$project"');
@@ -217,7 +392,8 @@ describe("Linux native journey evidence", () => {
     );
     expect(spawnCommands).toEqual(['"sqlite3"', '"dbus-run-session"', '"gsettings"', '"bash"']);
     expect(runner).not.toContain("shell: true");
-    expect(runner).toContain('subprocessFailure("native-session", session)');
+    expect(runner).toContain("readFailureEnvelope(failureFile)");
+    expect(runner).toContain('category: "internal-error"');
     expect(runner).toContain("phase=${phase} category=${category} exit=${exitCode}");
     expect(runner).toContain('{ env, stdio: "ignore", shell: false }');
     expect(runner).not.toContain('stdio: "inherit"');

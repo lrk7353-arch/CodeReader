@@ -31,6 +31,8 @@ run `31667108294` 中 Windows x64/ARM64 已越过此前 RequiredPaths 问题，�
 
 run `31668180422` 的 Windows 后续尝试到达当前 MSI 的安装项解析，但注册表记录不保证同时提供 `InstallLocation` 与 `DisplayIcon`，旧 harness 因此固定报告 `installer-discovery/invalid-entry`；该 run 没有形成可接受 Windows journey 证据。修复后从受控 MSI `Property` 表读取 ProductCode/ProductVersion，并以 ProductCode、`DisplayVersion=1.0.0`、Publisher 和 DisplayName 联合选择当前包记录；旁系同名残留不参与匹配，多个当前匹配仍拒绝。可执行位置可由当前 MSI 的 Windows Installer 产品信息补充，身份和诊断只输出固定类别与计数语义，不输出注册表值或路径。
 
+同一 run 的 Linux x64/ARM64 仍只暴露固定 `native-session/nonzero-exit`，不足以判断真实内部阶段，因此不推测业务原因或宣称修复。后续 session 在 runner profile 外的受控临时文件写入严格 failure envelope；phase 和 category 均为固定枚举，exit 仅允许进程退出码，不包含命令、路径、stderr、源码、prompt、response 或自由文本。Node runner 验证完整 schema 后才输出该三元组，缺失、篡改或含额外字段统一降级为 `native-session/internal-error/-1`；成功时删除且不生成发布证据。
+
 双检出修复后的 run `31662115050` 在四平台安装前构造 v0.11 current 迁移样本时停止：Linux 与 Windows ARM64 都命中该阶段；从 v3 历史提交抽取的“新建库完整基线”已包含 prompt 模板列，流程又执行同提交的 v3 增量 ALTER，SQLite 按严格规则报告 duplicate column。Windows ARM64 同时出现 Chocolatey 下载 SQLite 的 504，旧 step 未可靠传播原生命令失败，后续才因找不到 `sqlite3` 暴露问题。因此该 run 没有生成平台 journey 或可接受证据。修复后 v3 使用权威 v2 完整 schema 作为基线，并且只追加 v3 的 `migrate_to_v3` 一次；SQLite 的重复列错误仍保持为失败，不被忽略或降级。Windows 工具安装也必须检查 Chocolatey 退出码、`Get-Command sqlite3` 和实际版本探针，任一失败立即阻断。
 
 run `31664403176` 已进入原生旅程，但没有形成可接受的四平台证据。Windows 暴露 PowerShell 管道在单个缺失路径时返回标量、直接访问 `.Count` 不可靠的问题；修复后所有过滤结果强制包装为数组，并以 0、1、多个缺失项验证严格模式。现有仓库与本地环境没有该 run 的完整 GitHub job 日志，不能可靠判定 Linux 失败的内部阶段；下一次运行会只向控制台报告脱敏 phase、固定错误类别和子进程退出码，原始子进程输出不会进入公开日志或证据。该增强仅改善安全诊断，不把未知失败写成已修复或通过。

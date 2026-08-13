@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 
 const REQUIRED = [
@@ -14,6 +14,17 @@ const REQUIRED = [
   "long-content",
   "zoom-200-contrast"
 ];
+const FAILURE_PHASES = new Set([
+  "fixture-0.10",
+  "fixture-0.11-current",
+  "fixture-0.11-early",
+  "migration-recovery",
+  "ui-session",
+  "ui-first-run",
+  "ui-restart-restore",
+  "phase-merge"
+]);
+const FAILURE_CATEGORIES = new Set(["command-failed"]);
 const REINSTALL_PROBE = `
 import subprocess, sys, time
 executable, driver, wrong_project, project = sys.argv[1:]
@@ -41,6 +52,29 @@ function subprocessFailure(phase, result) {
   const category = result.error ? "spawn-error" : result.signal ? "signal" : "nonzero-exit";
   const exitCode = Number.isInteger(result.status) ? result.status : -1;
   fail(`Native journey phase=${phase} category=${category} exit=${exitCode}.`);
+}
+
+export function readFailureEnvelope(path) {
+  const fallback = { phase: "native-session", category: "internal-error", exit: -1 };
+  try {
+    const evidence = JSON.parse(readFileSync(path, "utf8"));
+    if (
+      !evidence ||
+      Array.isArray(evidence) ||
+      JSON.stringify(Object.keys(evidence).sort()) !==
+        JSON.stringify(["category", "exit", "phase"]) ||
+      !FAILURE_PHASES.has(evidence.phase) ||
+      !FAILURE_CATEGORIES.has(evidence.category) ||
+      !Number.isInteger(evidence.exit) ||
+      evidence.exit < 1 ||
+      evidence.exit > 255
+    ) {
+      return fallback;
+    }
+    return evidence;
+  } catch {
+    return fallback;
+  }
 }
 
 function args(argv) {
@@ -184,12 +218,21 @@ export function runLinuxJourney(argv = process.argv.slice(2)) {
   env.CODEREADER_JOURNEY_WRONG_PROJECT = resolve(
     value["wrong-project"] ?? fail("Missing --wrong-project")
   );
+  const failureFile = resolve(dirname(appData), "native-journey-failure.json");
+  if (existsSync(failureFile)) unlinkSync(failureFile);
+  env.CODEREADER_JOURNEY_FAILURE_FILE = failureFile;
   const session = spawnSync(
     "bash",
     ["scripts/native-journey-linux-session.sh", executable, project, driver, stub],
     { env, stdio: "ignore", shell: false }
   );
-  if (session.status !== 0) subprocessFailure("native-session", session);
+  if (session.status !== 0) {
+    const failure = readFailureEnvelope(failureFile);
+    fail(
+      `Native journey phase=${failure.phase} category=${failure.category} exit=${failure.exit}.`
+    );
+  }
+  if (existsSync(failureFile)) unlinkSync(failureFile);
 
   // Every phase is emitted by its own probe. Merely reaching the end of the
   // session cannot manufacture a passing record.
