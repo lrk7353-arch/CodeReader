@@ -39,26 +39,31 @@ describe("Windows native product journey driver", () => {
   windowsIt(
     "counts zero, one and many missing required paths under strict PowerShell mode",
     () => {
-      for (const count of [0, 1, 2]) {
-        const result = spawnSync(
-          "powershell.exe",
-          [
-            "-NoProfile",
-            "-ExecutionPolicy",
-            "Bypass",
-            "-File",
-            "scripts/native-journey-windows.ps1",
-            "-RequiredPathSelfTest",
-            String(count)
-          ],
-          { encoding: "utf8", timeout: 4000 }
-        );
-        expect(result.error).toBeUndefined();
-        expect(result.status).toBe(0);
-        expect(result.stdout).toContain(`Required path count self-test passed: ${count}.`);
-      }
+      const result = spawnSync(
+        "powershell.exe",
+        [
+          "-NoProfile",
+          "-ExecutionPolicy",
+          "Bypass",
+          "-File",
+          "scripts/native-journey-windows.ps1",
+          "-RequiredPathSelfTest"
+        ],
+        { encoding: "utf8", timeout: 15000 }
+      );
+      expect(result.error).toBeUndefined();
+      expect(result.status).toBe(0);
+      const observations = result.stdout
+        .trim()
+        .split(/\r?\n/)
+        .map((line) => JSON.parse(line));
+      expect(observations).toEqual([
+        { expected: 0, actual: 0 },
+        { expected: 1, actual: 1 },
+        { expected: 2, actual: 2 }
+      ]);
     },
-    15000
+    20000
   );
 
   it("drives real OS UI, picker, model, restart and installer probes", () => {
