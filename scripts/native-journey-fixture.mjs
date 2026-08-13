@@ -18,9 +18,11 @@ export function createLegacyFixture({ schema, data, output, version }) {
   return path;
 }
 
-export function extractHistoricalSchema({ source, output, migrations }) {
+export function extractHistoricalSchema({ source, output, migrations, base }) {
   const rust = readFileSync(resolve(source), "utf8");
-  let sql = "-- Extracted from an immutable historical CodeReader schema source.\n";
+  let sql = base
+    ? `${readFileSync(resolve(base), "utf8")}\n-- Incremental immutable historical migration.\n`
+    : "-- Extracted from an immutable historical CodeReader schema source.\n";
   for (const name of String(migrations).split(",")) {
     const start = rust.indexOf(`fn ${name}(`);
     const end = rust.indexOf("\nfn ", start + 4);
