@@ -17,6 +17,80 @@ const NAMES = [
 const phases = Object.fromEntries(NAMES.map((name) => [name, { status: "pass", probe: name }]));
 const nativeArch = process.arch === "arm64" ? "arm64" : "x64";
 const nonNativeArch = nativeArch === "arm64" ? "x64" : "arm64";
+const nativeWorkflow = readFileSync(".github/workflows/native-journey.yml", "utf8");
+
+function workflowJob(workflow, name) {
+  const marker = `\n  ${name}:\n`;
+  const start = workflow.indexOf(marker);
+  if (start < 0) return "";
+  const remainder = workflow.slice(start + marker.length);
+  const end = remainder.search(/\n {2}[a-zA-Z0-9_-]+:\n/);
+  return remainder.slice(0, end < 0 ? undefined : end);
+}
+
+function hasProtectedCandidateHandoff(workflow) {
+  const prepare = workflowJob(workflow, "prepare-candidate");
+  const journey = workflowJob(workflow, "journey");
+  const attach = workflowJob(workflow, "attest-and-attach");
+  const finalAttach = attach.slice(attach.indexOf("- name: Attach evidence to the matching draft"));
+  const jobNames = [...workflow.matchAll(/^ {2}([a-zA-Z0-9_-]+):$/gm)].map((match) => match[1]);
+  const writeJobs = jobNames.filter((name) =>
+    workflowJob(workflow, name).includes("contents: write")
+  );
+  return (
+    prepare.includes("environment: production-release") &&
+    prepare.includes("contents: write") &&
+    prepare.includes("git describe --tags --exact-match HEAD") &&
+    prepare.includes('gh release view "$RELEASE_TAG"') &&
+    prepare.includes("--json tagName") &&
+    prepare.includes("--json isDraft") &&
+    prepare.includes("-name 'CodeReader_*' | wc -l)\" = 10") &&
+    prepare.includes("-name 'native-smoke-*.json' | wc -l)\" = 4") &&
+    prepare.includes('-name SHA256SUMS | wc -l)" = 1') &&
+    prepare.includes("sha256sum -c SHA256SUMS") &&
+    prepare.includes("release-evidence.mjs verify") &&
+    prepare.includes("native-candidate-snapshot.mjs create") &&
+    prepare.includes("name: verified-candidate-release-assets") &&
+    journey.includes("needs: prepare-candidate") &&
+    journey.includes("name: verified-candidate-release-assets") &&
+    journey.includes("release-evidence.mjs verify") &&
+    journey.includes("native-smoke-${{ matrix.platform }}-${{ matrix.arch }}.json") &&
+    journey.includes('SHA256SUMS)" = "$package_hash"') &&
+    journey.includes('test -n "$package"') &&
+    journey.includes('cp "$package" journey-package/') &&
+    journey.includes("./journey-package/*.deb") &&
+    journey.includes("journey-package/*.msi") &&
+    !journey.includes("gh release download") &&
+    !journey.includes("gh release view") &&
+    !journey.includes("contents: write") &&
+    JSON.stringify(writeJobs) === JSON.stringify(["prepare-candidate", "attest-and-attach"]) &&
+    attach.includes("needs: journey") &&
+    attach.includes("environment: production-release") &&
+    attach.includes("contents: write") &&
+    attach.includes("name: verified-candidate-release-assets") &&
+    attach.includes("release-evidence.mjs verify --input release-binding") &&
+    attach.includes("native-candidate-snapshot.mjs verify") &&
+    attach.includes("prepared-candidate/candidate-manifest.json") &&
+    attach.includes(
+      'test "$(gh release view "$RELEASE_TAG" --json isDraft --jq .isDraft)" = true'
+    ) &&
+    finalAttach.includes("final-release-binding") &&
+    finalAttach.includes("release-evidence.mjs verify") &&
+    finalAttach.includes("native-candidate-snapshot.mjs verify") &&
+    finalAttach.includes(
+      "--input final-release-binding --manifest prepared-candidate/candidate-manifest.json \\"
+    ) &&
+    finalAttach.includes("release-evidence.mjs verify-journeys") &&
+    finalAttach.indexOf("gh release download") <
+      finalAttach.indexOf("release-evidence.mjs verify") &&
+    finalAttach.indexOf("release-evidence.mjs verify") <
+      finalAttach.indexOf("native-candidate-snapshot.mjs verify") &&
+    finalAttach.indexOf("native-candidate-snapshot.mjs verify") <
+      finalAttach.indexOf("release-evidence.mjs verify-journeys") &&
+    finalAttach.indexOf("release-evidence.mjs verify-journeys") <
+      finalAttach.indexOf("gh release upload")
+  );
+}
 
 describe("Linux native journey evidence", () => {
   it("binds an all-pass record to the native target without portable-path leaks", () => {
@@ -62,7 +136,7 @@ describe("Linux native journey evidence", () => {
     const runner = readFileSync("scripts/native-journey-linux.mjs", "utf8");
     const session = readFileSync("scripts/native-journey-linux-session.sh", "utf8");
     const ui = readFileSync("scripts/native-journey-ui-linux.py", "utf8");
-    const workflow = readFileSync(".github/workflows/native-journey.yml", "utf8");
+    const workflow = nativeWorkflow;
     expect(session).not.toContain("passed = {name:");
     expect(session).toContain("PRAGMA integrity_check");
     expect(session).toContain("failure_hash");
@@ -104,5 +178,33 @@ describe("Linux native journey evidence", () => {
     expect(runner).toContain('"dbus-run-session"');
     expect(runner).toContain("subprocess.run(");
     expect(runner).toContain('["python3", driver, "--verify-restore", wrong_project, project]');
+  });
+
+  it("hands a verified draft to read-only journey jobs through an immutable artifact", () => {
+    expect(hasProtectedCandidateHandoff(nativeWorkflow)).toBe(true);
+    for (const required of [
+      "environment: production-release",
+      "contents: write",
+      "git describe --tags --exact-match HEAD",
+      "--json tagName",
+      "--json isDraft",
+      "-name 'CodeReader_*' | wc -l)\" = 10",
+      "-name 'native-smoke-*.json' | wc -l)\" = 4",
+      '-name SHA256SUMS | wc -l)" = 1',
+      "sha256sum -c SHA256SUMS",
+      "needs: prepare-candidate",
+      "name: verified-candidate-release-assets",
+      "native-candidate-snapshot.mjs create",
+      "native-smoke-${{ matrix.platform }}-${{ matrix.arch }}.json",
+      'SHA256SUMS)" = "$package_hash"',
+      'test -n "$package"',
+      "release-evidence.mjs verify --input release-binding",
+      "--input final-release-binding --manifest prepared-candidate/candidate-manifest.json \\"
+    ]) {
+      expect(
+        hasProtectedCandidateHandoff(nativeWorkflow.replace(required, "removed")),
+        `removing ${required} must break the protected handoff`
+      ).toBe(false);
+    }
   });
 });
