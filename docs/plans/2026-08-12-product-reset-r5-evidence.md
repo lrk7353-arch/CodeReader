@@ -27,6 +27,8 @@ rc.6 的首次 Native Product Journey run `31659436776` 在任何平台安装前
 
 run `31665833835` 进一步证明上述边界仍不完整：四个平台实际调用 rc.6 tag 内的旧 journey driver；Windows x64/ARM64 在旅程开始时命中旧 RequiredPaths `.Count` 缺陷，Linux x64/ARM64 由旧 driver 返回泛化 session failure，因此没有可接受的平台证据。后续执行采用双身份：包、候选 tag/SHA、示例和历史 seed data 继续来自不可变 rc.6；driver、UI helper、fixture extractor、manifest 与 evidence verifier 来自触发 workflow 的受审 commit。四份严格 JSON 同时记录相同的 candidate `commitSha` 和 `harnessCommitSha`，attach 以当前 workflow HEAD 复核 harness 身份后才允许上传。harness SHA 只说明测量工具版本，不改变或替代产品候选身份。
 
+run `31667108294` 中 Windows x64/ARM64 已越过此前 RequiredPaths 问题，但在安装项发现阶段读取了混合注册表对象；部分对象没有 `DisplayName`，严格模式使简写 `Where-Object DisplayName` 直接失败。该 run 仍没有 Windows 可接受 journey 证据。修复后只在对象确有 `DisplayName` 属性时比较，并严格要求恰好一个 CodeReader 安装项；零个和多个都以固定 `installer-discovery` phase/category/exit 失败，不输出注册表对象、路径或自由错误内容。Linux 两架构在同一 run 仍停于脱敏 `native-session/nonzero-exit`，没有可接受 journey 证据。
+
 双检出修复后的 run `31662115050` 在四平台安装前构造 v0.11 current 迁移样本时停止：Linux 与 Windows ARM64 都命中该阶段；从 v3 历史提交抽取的“新建库完整基线”已包含 prompt 模板列，流程又执行同提交的 v3 增量 ALTER，SQLite 按严格规则报告 duplicate column。Windows ARM64 同时出现 Chocolatey 下载 SQLite 的 504，旧 step 未可靠传播原生命令失败，后续才因找不到 `sqlite3` 暴露问题。因此该 run 没有生成平台 journey 或可接受证据。修复后 v3 使用权威 v2 完整 schema 作为基线，并且只追加 v3 的 `migrate_to_v3` 一次；SQLite 的重复列错误仍保持为失败，不被忽略或降级。Windows 工具安装也必须检查 Chocolatey 退出码、`Get-Command sqlite3` 和实际版本探针，任一失败立即阻断。
 
 run `31664403176` 已进入原生旅程，但没有形成可接受的四平台证据。Windows 暴露 PowerShell 管道在单个缺失路径时返回标量、直接访问 `.Count` 不可靠的问题；修复后所有过滤结果强制包装为数组，并以 0、1、多个缺失项验证严格模式。现有仓库与本地环境没有该 run 的完整 GitHub job 日志，不能可靠判定 Linux 失败的内部阶段；下一次运行会只向控制台报告脱敏 phase、固定错误类别和子进程退出码，原始子进程输出不会进入公开日志或证据。该增强仅改善安全诊断，不把未知失败写成已修复或通过。
