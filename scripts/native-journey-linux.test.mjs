@@ -194,6 +194,59 @@ describe("Linux native journey evidence", () => {
   });
 
   it.each([
+    "launch-failed",
+    "timeout",
+    "database-not-created",
+    "schema-invalid",
+    "data-missing",
+    "backup-missing"
+  ])("accepts the fixed fixture failure category %s without free text", (category) => {
+    const root = mkdtempSync(join(tmpdir(), "codereader-fixture-category-"));
+    const path = join(root, "failure.json");
+    writeFileSync(path, JSON.stringify({ phase: "fixture-0.10", category, exit: 1 }));
+    expect(readFailureEnvelope(path)).toEqual({ phase: "fixture-0.10", category, exit: 1 });
+  });
+
+  it("rejects a fixture-only category on a UI phase", () => {
+    const root = mkdtempSync(join(tmpdir(), "codereader-cross-phase-category-"));
+    const path = join(root, "failure.json");
+    writeFileSync(
+      path,
+      JSON.stringify({ phase: "ui-session", category: "database-not-created", exit: 1 })
+    );
+    expect(readFailureEnvelope(path)).toEqual({
+      phase: "native-session",
+      category: "internal-error",
+      exit: -1
+    });
+  });
+
+  it.each(["launch-failed", "timeout", "database-not-created", "schema-invalid", "data-missing"])(
+    "propagates the controlled fixture failure category %s through the real shell envelope",
+    (category) => {
+      const root = mkdtempSync(join(tmpdir(), "codereader-fixture-shell-category-"));
+      const failure = join(root, "failure.json");
+      const result = spawnSync(
+        "bash",
+        ["scripts/native-journey-linux-session.sh", "unused", "unused", "unused", "unused"],
+        {
+          env: {
+            ...process.env,
+            XDG_DATA_HOME: root,
+            CODEREADER_JOURNEY_FAILURE_FILE: failure,
+            CODEREADER_JOURNEY_FAILURE_SELFTEST_PHASE: "fixture-0.10",
+            CODEREADER_JOURNEY_FAILURE_SELFTEST_CATEGORY: category
+          },
+          encoding: "utf8"
+        }
+      );
+      expect(result.status).toBe(7);
+      expect(readFailureEnvelope(failure)).toEqual({ phase: "fixture-0.10", category, exit: 7 });
+      expect(`${result.stdout}${result.stderr}`).not.toContain("unused");
+    }
+  );
+
+  it.each([
     { phase: "ui-session", category: "command-failed", exit: 1, log: "/home/private" },
     { phase: "../../prompt", category: "command-failed", exit: 1 },
     { phase: "ui-session", category: "stderr:/secret", exit: 1 },
@@ -335,10 +388,35 @@ describe("Linux native journey evidence", () => {
     if (hasFailure) {
       expect(readFailureEnvelope(failure)).toEqual({
         phase: "fixture-0.10",
-        category: "command-failed",
+        category: "launch-failed",
         exit: 37
       });
     }
+  });
+
+  it("reports a real no-match backup glob as backup-missing", () => {
+    const root = mkdtempSync(join(tmpdir(), "codereader-shell-backup-missing-"));
+    const failure = join(root, "failure.json");
+    const result = spawnSync(
+      "bash",
+      ["scripts/native-journey-linux-session.sh", "unused", "unused", "unused", "unused"],
+      {
+        env: {
+          ...process.env,
+          XDG_DATA_HOME: root,
+          CODEREADER_JOURNEY_FAILURE_FILE: failure,
+          CODEREADER_JOURNEY_FAILURE_SELFTEST_PHASE: "backup-probe"
+        },
+        encoding: "utf8"
+      }
+    );
+    expect(result.status).toBe(1);
+    expect(readFailureEnvelope(failure)).toEqual({
+      phase: "fixture-0.10",
+      category: "backup-missing",
+      exit: 1
+    });
+    expect(`${result.stdout}${result.stderr}`).not.toContain(root);
   });
 
   it("keeps native probes, migration recovery, reinstall restore and asset binding mandatory", () => {
@@ -354,11 +432,21 @@ describe("Linux native journey evidence", () => {
     expect(session).toContain("set -Eeuo pipefail");
     expect(session).toContain("bash -Eeuo pipefail -c");
     expect(session).not.toContain("set +e");
+    expect(session).toContain('if matches="$(compgen -G "$pattern")"');
     expect(session).toContain("current_phase=");
     const failureHelper = readFileSync("scripts/native-journey-linux-failure.sh", "utf8");
     expect(failureHelper).toContain("trap 'code=$?;");
     expect(failureHelper).not.toContain('"$BASH_COMMAND"');
     expect(session).not.toContain('"$BASH_COMMAND"');
+    for (const category of [
+      "launch-failed",
+      "timeout",
+      "database-not-created",
+      "schema-invalid",
+      "data-missing"
+    ]) {
+      expect(session).toContain(category);
+    }
     expect(session).toContain("failure_hash");
     expect(session).toContain("recovery_backup");
     expect(session).toContain('python3 "$driver" --verify-restore "$wrong_project" "$project"');
