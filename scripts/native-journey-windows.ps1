@@ -9,7 +9,8 @@
     [string]$Fixture011,
     [string]$Fixture011Current,
     [string]$Output,
-    [switch]$RequiredPathSelfTest
+    [switch]$RequiredPathSelfTest,
+    [switch]$RegistryDiscoverySelfTest
 )
 
 $ErrorActionPreference = "Stop"
@@ -57,20 +58,133 @@ function Invoke-Process([string]$FilePath, [string[]]$Arguments, [int[]]$Allowed
     if ($process.ExitCode -notin $Allowed) { throw "$FilePath failed with exit code $($process.ExitCode)." }
 }
 
+function Select-CodeReaderUninstallEntry($Entries, [switch]$AllowNotFound) {
+    $matches = @($Entries | Where-Object {
+        $null -ne $_ -and
+        $null -ne $_.PSObject.Properties['DisplayName'] -and
+        [string]$_.DisplayName -ceq 'CodeReader'
+    })
+    if ($matches.Count -eq 0) {
+        if ($AllowNotFound) { return $null }
+        throw 'Native journey phase=installer-discovery category=not-found exit=1.'
+    }
+    if ($matches.Count -ne 1) {
+        throw 'Native journey phase=installer-discovery category=ambiguous exit=1.'
+    }
+    $matches[0]
+}
+
+function Invoke-InstallerCleanup($PrimaryFailure, [scriptblock]$Probe, [scriptblock]$Uninstall) {
+    try {
+        $cleanupEntry = & $Probe
+        if ($null -ne $cleanupEntry) { & $Uninstall }
+    } catch {
+        if ($null -eq $PrimaryFailure) { throw }
+        Write-Warning 'Native journey cleanup failed category=cleanup-error; preserving primary phase failure.'
+    }
+    if ($null -ne $PrimaryFailure) { throw $PrimaryFailure }
+}
+
+if ($RegistryDiscoverySelfTest) {
+    $missingProperty = [pscustomobject]@{ Publisher = 'test' }
+    $unrelated = [pscustomobject]@{ DisplayName = 'Other' }
+    $codeReader = [pscustomobject]@{ DisplayName = 'CodeReader'; InstallLocation = 'controlled' }
+    $scenarios = @(
+        [ordered]@{ expected = 'unique'; entries = @($missingProperty, $unrelated, $codeReader) },
+        [ordered]@{ expected = 'not-found'; entries = @($missingProperty, $unrelated) },
+        [ordered]@{ expected = 'ambiguous'; entries = @($missingProperty, $codeReader, ([pscustomobject]@{ DisplayName = 'CodeReader' })) }
+    )
+    foreach ($scenario in $scenarios) {
+        $actual = 'unique'
+        try {
+            Select-CodeReaderUninstallEntry $scenario.entries | Out-Null
+        } catch {
+            if ($_.Exception.Message -match 'category=([a-z-]+)') { $actual = $Matches[1] } else { throw }
+        }
+        if ($actual -ne $scenario.expected) { throw 'Registry discovery self-test failed.' }
+        [ordered]@{ expected = $scenario.expected; actual = $actual } | ConvertTo-Json -Compress
+    }
+    $cleanupScenarios = @(
+        [ordered]@{ expected = 'installed-cleaned'; primary = $null; probe = { $codeReader }; uninstall = { 'installed-cleaned' } },
+        [ordered]@{ expected = 'already-clean'; primary = $null; probe = { $null }; uninstall = { throw 'unexpected' } },
+        [ordered]@{ expected = 'ambiguous-failed'; primary = $null; probe = { throw 'Native journey phase=installer-discovery category=ambiguous exit=1.' }; uninstall = { throw 'unexpected' } },
+        [ordered]@{ expected = 'primary-preserved'; primary = [System.Management.Automation.ErrorRecord]::new([Exception]::new('Native journey phase=product category=failed exit=9.'), 'primary', [System.Management.Automation.ErrorCategory]::OperationStopped, $null); probe = { throw 'Native journey phase=installer-discovery category=registry-error exit=1.' }; uninstall = { throw 'unexpected' } }
+    )
+    foreach ($scenario in $cleanupScenarios) {
+        $actual = if ($scenario.expected -eq 'already-clean') { 'already-clean' } else { 'installed-cleaned' }
+        try {
+            $result = Invoke-InstallerCleanup $scenario.primary $scenario.probe $scenario.uninstall 3>$null
+            if ($null -ne $result) { $actual = [string]$result }
+        } catch {
+            if ($_.Exception.Message -match 'category=ambiguous') { $actual = 'ambiguous-failed' }
+            elseif ($_.Exception.Message -match 'phase=product category=failed') { $actual = 'primary-preserved' }
+            else { throw }
+        }
+        if ($actual -ne $scenario.expected) { throw 'Cleanup semantics self-test failed.' }
+        [ordered]@{ expected = $scenario.expected; actual = $actual } | ConvertTo-Json -Compress
+    }
+    exit 0
+}
+
 function Get-UninstallEntry {
-    Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*', 'HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*' -ErrorAction SilentlyContinue |
-        Where-Object DisplayName -eq 'CodeReader' | Select-Object -First 1
+    try {
+        $entries = @()
+        foreach ($root in @('HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall', 'HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall')) {
+            try {
+                $children = @(Get-ChildItem -LiteralPath $root -ErrorAction Stop)
+            } catch [System.Management.Automation.ItemNotFoundException] {
+                continue
+            }
+            foreach ($child in $children) {
+                $entries += Get-ItemProperty -LiteralPath $child.PSPath -ErrorAction Stop
+            }
+        }
+        Select-CodeReaderUninstallEntry $entries
+    } catch {
+        if ($_.Exception.Message -match '^Native journey phase=installer-discovery category=(?:not-found|ambiguous) exit=1\.$') { throw }
+        throw 'Native journey phase=installer-discovery category=registry-error exit=1.'
+    }
+}
+
+function Get-UninstallEntryForCleanup {
+    try {
+        $entries = @()
+        foreach ($root in @('HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall', 'HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall')) {
+            try {
+                $children = @(Get-ChildItem -LiteralPath $root -ErrorAction Stop)
+            } catch [System.Management.Automation.ItemNotFoundException] {
+                continue
+            }
+            foreach ($child in $children) {
+                $entries += Get-ItemProperty -LiteralPath $child.PSPath -ErrorAction Stop
+            }
+        }
+        Select-CodeReaderUninstallEntry $entries -AllowNotFound
+    } catch {
+        if ($_.Exception.Message -match '^Native journey phase=installer-discovery category=ambiguous exit=1\.$') { throw }
+        throw 'Native journey phase=installer-discovery category=registry-error exit=1.'
+    }
 }
 
 function Resolve-Executable {
-    $entry = Get-UninstallEntry
-    Assert-True ($null -ne $entry) "Installed CodeReader was not registered."
-    $root = ([string]$entry.InstallLocation).Trim('"')
-    $displayIcon = ([string]$entry.DisplayIcon).Split(',')[0].Trim('"')
-    $candidate = @((Join-Path $root 'CodeReader.exe'), (Join-Path $root 'codereader.exe'), $displayIcon) |
-        Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
-    Assert-True ($null -ne $candidate) "Installed CodeReader executable is missing."
-    $candidate
+    try {
+        $entry = Get-UninstallEntry
+        if ($null -eq $entry.PSObject.Properties['InstallLocation'] -or
+            $null -eq $entry.PSObject.Properties['DisplayIcon']) {
+            throw 'invalid-entry'
+        }
+        $root = ([string]$entry.InstallLocation).Trim('"')
+        $displayIcon = ([string]$entry.DisplayIcon).Split(',')[0].Trim('"')
+        $candidate = @((Join-Path $root 'CodeReader.exe'), (Join-Path $root 'codereader.exe'), $displayIcon) |
+            Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
+        if ($null -eq $candidate) { throw 'invalid-entry' }
+        $candidate
+    } catch {
+        if ($_.Exception.Message -match '^Native journey phase=installer-discovery category=(?:not-found|ambiguous) exit=1\.$') {
+            throw
+        }
+        throw 'Native journey phase=installer-discovery category=invalid-entry exit=1.'
+    }
 }
 
 function Find-Element($Root, [string]$Name, $ControlType = $null, [int]$Timeout = 30) {
@@ -510,9 +624,10 @@ export function validateJourneyInput(value: string): string {
 }
 '@ | Set-Content -LiteralPath (Join-Path $ControlledProject 'entry.ts') -Encoding UTF8
 
-Invoke-Process msiexec.exe @('/i', "`"$Package`"", '/qn', '/norestart') @(0, 3010)
-$executable = Resolve-Executable
+$primaryFailure = $null
 try {
+    Invoke-Process msiexec.exe @('/i', "`"$Package`"", '/qn', '/norestart') @(0, 3010)
+    $executable = Resolve-Executable
     Complete-Check 'legacy-0.10-upgrade' (Test-Migration $executable 1 $Fixture010)
     Complete-Check 'legacy-0.11-upgrade' (Test-Migration $executable 2 $Fixture011)
     Test-MigrationFailureRecovery $executable $Fixture011Current | Out-Null
@@ -573,6 +688,14 @@ try {
     $outputPath = [IO.Path]::GetFullPath($Output)
     New-Item -ItemType Directory -Force -Path ([IO.Path]::GetDirectoryName($outputPath)) | Out-Null
     $evidence | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $outputPath -Encoding UTF8
+} catch {
+    $primaryFailure = $_
 } finally {
-    if (Get-UninstallEntry) { Invoke-Process msiexec.exe @('/x', "`"$Package`"", '/qn', '/norestart') @(0, 3010) }
+    Invoke-InstallerCleanup $primaryFailure { Get-UninstallEntryForCleanup } {
+        try {
+            Invoke-Process msiexec.exe @('/x', "`"$Package`"", '/qn', '/norestart') @(0, 3010)
+        } catch {
+            throw 'Native journey phase=installer-cleanup category=uninstall-error exit=1.'
+        }
+    }
 }
