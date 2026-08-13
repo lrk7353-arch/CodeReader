@@ -3,13 +3,28 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 import { describe, expect, it } from "vitest";
-import { createLegacyFixture, extractHistoricalSchema } from "./native-journey-fixture.mjs";
+import {
+  createLegacyFixture,
+  extractHistoricalSchema,
+  extractSeedData
+} from "./native-journey-fixture.mjs";
 import { createHash } from "node:crypto";
 
 const sqliteAvailable = spawnSync("sqlite3", ["--version"]).status === 0;
 const sqliteIt = sqliteAvailable ? it : it.skip;
 
 describe("native journey legacy fixture", () => {
+  it("accepts only audited seed statements and rejects DDL instead of ignoring it", () => {
+    const seed = extractSeedData(
+      "INSERT INTO projects(id) VALUES ('fixture'); UPDATE projects SET id='current';"
+    );
+    expect(seed).toContain("INSERT INTO projects");
+    expect(seed).toContain("UPDATE projects");
+    expect(() => extractSeedData("CREATE TABLE hidden(id TEXT);")).toThrow(/non-data SQL/);
+    expect(() => extractSeedData('ALTER TABLE "projects" ADD COLUMN "hidden" TEXT;')).toThrow(
+      /non-data SQL/
+    );
+  });
   sqliteIt("builds a deterministic versioned database [requires sqlite3]", () => {
     const root = mkdtempSync(join(tmpdir(), "journey-fixture-"));
     const schema = join(root, "schema.sql");
@@ -50,6 +65,20 @@ describe("native journey legacy fixture", () => {
     );
     extractHistoricalSchema({ source, output, migrations: "migrate_to_v3" });
     expect(readFileSync(output, "utf8")).toContain('ALTER TABLE "prompts" ADD COLUMN "body" TEXT;');
+  });
+
+  it("does not duplicate ensure_column operations already present in a CREATE TABLE", () => {
+    const root = mkdtempSync(join(tmpdir(), "journey-existing-column-"));
+    const source = join(root, "schema.rs");
+    const output = join(root, "schema.sql");
+    writeFileSync(
+      source,
+      'fn migrate_to_v1(conn: &Connection) { conn.execute_batch("CREATE TABLE prompts(id TEXT, body TEXT);"); ensure_column(conn, "prompts", "body", "TEXT")?; ensure_column(conn, "prompts", "extra", "TEXT")?; }\n'
+    );
+    extractHistoricalSchema({ source, output, migrations: "migrate_to_v1" });
+    const schema = readFileSync(output, "utf8");
+    expect(schema).not.toContain('ADD COLUMN "body"');
+    expect(schema).toContain('ADD COLUMN "extra"');
   });
 
   it("reproduces the repository-pinned hashes from the real historical sources", () => {
@@ -143,7 +172,7 @@ describe("native journey legacy fixture", () => {
   sqliteIt(
     "matches the workflow boundary: main tooling with immutable candidate data [requires sqlite3]",
     () => {
-      const candidateTag = "v1.0.0-rc.6";
+      const candidateFixtureCommit = "7a4a37a6cb0b960c825b37addca104139bca1628";
       const manifest = JSON.parse(
         readFileSync("src-tauri/tests/fixtures/persistence/historical-schema-manifest.json", "utf8")
       );
@@ -192,7 +221,7 @@ describe("native journey legacy fixture", () => {
       ] of fixtures) {
         const candidateData = spawnSync(
           "git",
-          ["show", `${candidateTag}:src-tauri/tests/fixtures/persistence/${dataName}`],
+          ["show", `${candidateFixtureCommit}:src-tauri/tests/fixtures/persistence/${dataName}`],
           { encoding: "utf8" }
         );
         expect(candidateData.status).toBe(0);
