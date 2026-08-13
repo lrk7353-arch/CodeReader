@@ -64,11 +64,30 @@ function hasProtectedCandidateHandoff(workflow) {
     journey.includes("name: verified-candidate-release-assets") &&
     journey.includes("release-evidence.mjs verify") &&
     journey.includes("git -C candidate-source rev-parse HEAD") &&
+    journey.includes('$ErrorActionPreference = "Stop"') &&
+    journey.includes('if ($LASTEXITCODE -ne 0) { throw "Chocolatey failed') &&
+    journey.includes("Get-Command sqlite3 -ErrorAction Stop") &&
+    journey.includes("& $sqlite.Source --version") &&
     journey.includes("cd candidate-source") &&
     journey.includes("node scripts/native-journey-linux.mjs") &&
     journey.includes('Push-Location "$workspace/candidate-source"') &&
     journey.includes("./scripts/native-journey-windows.ps1") &&
     journey.includes('$output = "$workspace/native-journey-') &&
+    journey.includes("node scripts/native-journey-fixture.mjs") &&
+    !journey.includes("candidate-source/scripts/native-journey-fixture.mjs") &&
+    journey.includes("src-tauri/tests/fixtures/persistence/historical-schema-manifest.json") &&
+    !journey.includes(
+      "candidate-source/src-tauri/tests/fixtures/persistence/historical-schema-manifest.json"
+    ) &&
+    journey.includes("--data candidate-source/src-tauri/tests/fixtures/persistence/v0_10.sql") &&
+    journey.includes(
+      "--data candidate-source/src-tauri/tests/fixtures/persistence/v0_11_early.sql"
+    ) &&
+    journey.includes(
+      "--data candidate-source/src-tauri/tests/fixtures/persistence/v0_11_current.sql"
+    ) &&
+    journey.includes("--base journey-fixtures/v2-schema.sql") &&
+    journey.includes("--migrations migrate_to_v3") &&
     journey.includes("native-smoke-${{ matrix.platform }}-${{ matrix.arch }}.json") &&
     journey.includes('SHA256SUMS)" = "$package_hash"') &&
     journey.includes('test -n "$package"') &&
@@ -214,11 +233,21 @@ describe("Linux native journey evidence", () => {
       "needs: prepare-candidate",
       "name: verified-candidate-release-assets",
       "native-candidate-snapshot.mjs create",
+      'if ($LASTEXITCODE -ne 0) { throw "Chocolatey failed',
+      "Get-Command sqlite3 -ErrorAction Stop",
+      "& $sqlite.Source --version",
       "cd candidate-source",
       "node scripts/native-journey-linux.mjs",
       'Push-Location "$workspace/candidate-source"',
       "./scripts/native-journey-windows.ps1",
       '$output = "$workspace/native-journey-',
+      "node scripts/native-journey-fixture.mjs",
+      "src-tauri/tests/fixtures/persistence/historical-schema-manifest.json",
+      "--data candidate-source/src-tauri/tests/fixtures/persistence/v0_10.sql",
+      "--data candidate-source/src-tauri/tests/fixtures/persistence/v0_11_early.sql",
+      "--data candidate-source/src-tauri/tests/fixtures/persistence/v0_11_current.sql",
+      "--base journey-fixtures/v2-schema.sql",
+      "--migrations migrate_to_v3",
       "native-smoke-${{ matrix.platform }}-${{ matrix.arch }}.json",
       'SHA256SUMS)" = "$package_hash"',
       'test -n "$package"',
