@@ -25,6 +25,8 @@ rc.6 的首次 Native Product Journey run `31659436776` 在任何平台安装前
 
 修复权限交接后的 run `31661162165` 仍在任何平台安装前停止：workflow 从 rc.6 tag 检出后调用了只存在于较新 workflow revision 的候选快照工具，Node 返回 `MODULE_NOT_FOUND`，因此同样没有生成平台 journey 或可接受证据。后续执行将门禁工具固定检出到触发该 workflow 的不可变提交，并把 rc.6 候选源码独立检出到 `candidate-source`；tag/HEAD 身份只从候选目录解析，产品 journey 驱动只使用 tag 版本，新增的快照和证据门禁只使用 workflow 提交版本。不得移动或重用 rc.6 tag 来掩盖这次失败。
 
+双检出修复后的 run `31662115050` 在四平台安装前构造 v0.11 current 迁移样本时停止：Linux 与 Windows ARM64 都命中该阶段；从 v3 历史提交抽取的“新建库完整基线”已包含 prompt 模板列，流程又执行同提交的 v3 增量 ALTER，SQLite 按严格规则报告 duplicate column。Windows ARM64 同时出现 Chocolatey 下载 SQLite 的 504，旧 step 未可靠传播原生命令失败，后续才因找不到 `sqlite3` 暴露问题。因此该 run 没有生成平台 journey 或可接受证据。修复后 v3 使用权威 v2 完整 schema 作为基线，并且只追加 v3 的 `migrate_to_v3` 一次；SQLite 的重复列错误仍保持为失败，不被忽略或降级。Windows 工具安装也必须检查 Chocolatey 退出码、`Get-Command sqlite3` 和实际版本探针，任一失败立即阻断。
+
 `npm ci` 的完整开发依赖审计报告 4 个 high 项；`npm audit --omit=dev --audit-level=high` 随后确认 production dependency graph 为 0 项漏洞。该结论只说明 npm 运行时依赖，不替代 RustSec、CodeQL 或完整供应链检查。
 
 Linux x64 重型打包实际进入 Tauri release build：production 前端和 x86-64 release binary 均成功；二进制被 `file` 识别为 x86-64 ELF，SHA-256 为 `931ad9b510f5d9548c27253e6217562ab48966097978a48b22255dd0cb1d0356`。随后 bundle 工具下载 AppRun、linuxdeploy 及其插件时长时间无输出，按有界等待中止。没有生成 `artifacts/linux-x64` 或 bundle 目录，因此没有 AppImage、deb、rpm，不能执行或通过 Linux x64 package smoke。该网络阻塞未重试。
