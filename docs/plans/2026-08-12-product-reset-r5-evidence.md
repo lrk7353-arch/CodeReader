@@ -2,7 +2,7 @@
 
 **状态：候选执行中，未 `PASS`，未公开发布。** R4 已由维护者验收通过；本记录只描述 R5 的实际证据与阻塞，不把脚本存在、源码检查或单平台结果外推为四平台发布完成。
 
-**候选版本准备：** `v1.0.0-rc.3` 已形成 draft，并完成十包与四平台 package smoke，但未完成完整 native journey；该 tag、制品和 smoke 只保留为 rc.3 历史事实，不复用于后续候选。本轮版本源统一提升为 `1.0.0-rc.4`。十包、四份 package smoke、四份 native journey、`SHA256SUMS`、SPDX SBOM、attestations 与签名状态必须全部绑定 rc.4 的同一最终新 commit/tag。
+**候选版本准备：** `v1.0.0-rc.3` 已形成 draft，并完成十包与四平台 package smoke，但未完成完整 native journey；该 tag、制品和 smoke 只保留为 rc.3 历史事实。`v1.0.0-rc.4` 的 Production Release run `31654257774` 在 validate 阶段因浅检出缺少固定历史 schema 对象而失败，未启动四平台构建、未生成安装包或发布证据；该 tag、失败运行和日志仅保留用于审计，不复用于后续候选。本轮版本源统一提升为 `1.0.0-rc.5`。十包、四份 package smoke、四份 native journey、`SHA256SUMS`、SPDX SBOM、attestations 与签名状态必须全部绑定 rc.5 的同一最终新 commit/tag，并从零生成。
 
 ## 1. 固定工作包
 
@@ -62,4 +62,4 @@ Linux x64 重型打包实际进入 Tauri release build：production 前端和 x8
 
 上述缺口需要原生 runner/硬件、发布 tag、GitHub 证明权限或维护者决定。仓库内可安全完成的协议、拒绝伪证据门禁和文档先行完成；缺失外部证据时准确停在候选状态。
 
-R4 的 small、frontend、fullstack 三项目维护者人工可用性已通过。当前仅 rc.4 的四平台 OS 级 native journey 与最终发布证据未完成：必须从 rc.4 不可变 tag 重建十包、四份 package smoke、四份 native journey、`SHA256SUMS`、SPDX SBOM 和 artifact attestations；rc.3 draft 的证据不得计入。
+R4 的 small、frontend、fullstack 三项目维护者人工可用性已通过。当前仅 rc.5 的四平台 OS 级 native journey 与最终发布证据未完成：必须从 rc.5 不可变 tag 从零生成十包、四份 package smoke、四份 native journey、`SHA256SUMS`、SPDX SBOM 和 artifact attestations；rc.3 draft 与 rc.4 失败运行的任何结果均不得计入。
