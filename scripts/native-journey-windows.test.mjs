@@ -96,10 +96,16 @@ describe("Windows native product journey driver", () => {
         { expected: "unique", actual: "unique" },
         { expected: "not-found", actual: "not-found" },
         { expected: "ambiguous", actual: "ambiguous" },
+        { expected: "not-found", actual: "not-found" },
         { expected: "installed-cleaned", actual: "installed-cleaned" },
         { expected: "already-clean", actual: "already-clean" },
         { expected: "ambiguous-failed", actual: "ambiguous-failed" },
-        { expected: "primary-preserved", actual: "primary-preserved" }
+        { expected: "primary-preserved", actual: "primary-preserved" },
+        { expected: "invalid-entry", actual: "invalid-entry" },
+        { expected: "valid-package", actual: "valid-package" },
+        { expected: "invalid-package", actual: "invalid-package" },
+        { expected: "invalid-package", actual: "invalid-package" },
+        { expected: "invalid-package", actual: "invalid-package" }
       ]);
     },
     20000
@@ -114,7 +120,19 @@ describe("Windows native product journey driver", () => {
     expect(script).toContain("native-journey-model-stub.mjs");
     expect(script).toContain("CloseMainWindow");
     expect(script).toContain("msiexec.exe");
-    expect(script).toContain("$_.PSObject.Properties['DisplayName']");
+    expect(script).toContain("$Object.PSObject.Properties[$Name]");
+    expect(script).toContain("function Get-MsiProperty");
+    expect(script).toContain("function Assert-MsiProductIdentity");
+    expect(script).toContain(
+      "[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}"
+    );
+    expect(script).toContain("function Get-ExecutableCandidates");
+    expect(script).toContain("WindowsInstaller.Installer");
+    expect(script).toContain("Get-MsiProperty $Package 'ProductCode'");
+    expect(script).toContain("Get-MsiProperty $Package 'ProductVersion'");
+    expect(script).toContain("(Get-SafeProperty $_ 'PSChildName') -ieq $ProductCode");
+    expect(script).toContain("(Get-SafeProperty $_ 'DisplayVersion') -ceq $DisplayVersion");
+    expect(script).toContain("(Get-SafeProperty $_ 'Publisher') -ceq 'CodeReader Project'");
     expect(script).toContain("phase=installer-discovery category=not-found exit=1");
     expect(script).toContain("phase=installer-discovery category=ambiguous exit=1");
     expect(script).toContain("phase=installer-discovery category=invalid-entry exit=1");
