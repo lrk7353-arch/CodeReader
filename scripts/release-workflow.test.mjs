@@ -7,6 +7,60 @@ const publish = readFileSync(".github/workflows/publish.yml", "utf8");
 const security = readFileSync(".github/workflows/security.yml", "utf8");
 const tauri = readFileSync("src-tauri/tauri.conf.json", "utf8");
 
+const releaseJobCommands = {
+  validate: "run: npm run verify:linux",
+  build: "node scripts/tauri.mjs build",
+  "verify-native-smoke": "node scripts/release-evidence.mjs verify",
+  assemble: "node scripts/release-assets.mjs assemble"
+};
+
+function extractWorkflowJob(workflow, jobName) {
+  const marker = `\n  ${jobName}:\n`;
+  const start = workflow.indexOf(marker);
+  if (start < 0) return "";
+  const bodyStart = start + marker.length;
+  const remainder = workflow.slice(bodyStart);
+  const nextJob = remainder.search(/\n {2}[a-zA-Z0-9_-]+:\n/);
+  return remainder.slice(0, nextJob < 0 ? undefined : nextJob);
+}
+
+function extractCheckoutBlocks(job) {
+  const lines = job.split("\n");
+  const blocks = [];
+  for (let index = 0; index < lines.length; index += 1) {
+    if (!/^ {6}- uses: actions\/checkout@/.test(lines[index])) continue;
+    let end = index + 1;
+    while (end < lines.length && !/^ {6}- (?:uses:|name:|run:)/.test(lines[end])) end += 1;
+    blocks.push(lines.slice(index, end).join("\n"));
+  }
+  return blocks;
+}
+
+function releaseWorkflowHasCompleteHistory(workflow) {
+  const checkoutBlocks = [];
+  for (const [jobName, command] of Object.entries(releaseJobCommands)) {
+    const job = extractWorkflowJob(workflow, jobName);
+    if (!job.includes(command)) return false;
+    const jobCheckouts = extractCheckoutBlocks(job);
+    if (jobCheckouts.length === 0) return false;
+    checkoutBlocks.push(...jobCheckouts);
+  }
+  const checkoutCount = [...workflow.matchAll(/uses: actions\/checkout@/g)].length;
+  return (
+    checkoutBlocks.length === checkoutCount &&
+    checkoutBlocks.every((block) => /\n\s+fetch-depth: 0(?:\n|$)/.test(block))
+  );
+}
+
+function removeNthFullHistoryCheckout(workflow, targetIndex) {
+  let index = 0;
+  return workflow.replace(/^\s+fetch-depth: 0\r?\n/gm, (line) => {
+    const shouldRemove = index === targetIndex;
+    index += 1;
+    return shouldRemove ? "" : line;
+  });
+}
+
 describe("production workflows", () => {
   it("compiles the supported native platform matrix", () => {
     for (const runner of ["ubuntu-22.04", "ubuntu-22.04-arm", "windows-2022", "windows-11-arm"]) {
@@ -29,6 +83,17 @@ describe("production workflows", () => {
     expect(fullHistoryCount).toBe(checkoutCount);
     expect(quality).toContain("run: npm test");
     expect(quality).toContain("run: npm run verify:linux");
+  });
+
+  it("checks out complete history for every release validation and packaging job", () => {
+    expect(releaseWorkflowHasCompleteHistory(release)).toBe(true);
+    const checkoutCount = [...release.matchAll(/uses: actions\/checkout@/g)].length;
+    expect(checkoutCount).toBe(Object.keys(releaseJobCommands).length);
+    for (let index = 0; index < checkoutCount; index += 1) {
+      expect(releaseWorkflowHasCompleteHistory(removeNthFullHistoryCheckout(release, index))).toBe(
+        false
+      );
+    }
   });
 
   it("builds ten package formats and pauses before a draft release", () => {
