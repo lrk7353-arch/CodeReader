@@ -15,7 +15,50 @@ env:
   RELEASE_TAG: ${{ inputs.tag }}
 
 jobs:
+  prepare-candidate:
+    runs-on: ubuntu-22.04
+    environment: production-release
+    permissions:
+      contents: write
+    steps:
+      - name: Validate release tag before interpolation
+        shell: bash
+        run: |
+          [[ "$RELEASE_TAG" =~ ^v1\.[0-9]+\.[0-9]+(-rc\.[0-9]+)?$ ]]
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        with:
+          ref: refs/tags/${{ env.RELEASE_TAG }}
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+        with:
+          node-version: 22
+      - name: Verify exact draft and prepare immutable candidate assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          test "$(git describe --tags --exact-match HEAD)" = "$RELEASE_TAG"
+          test "$(gh release view "$RELEASE_TAG" --json tagName --jq .tagName)" = "$RELEASE_TAG"
+          test "$(gh release view "$RELEASE_TAG" --json isDraft --jq .isDraft)" = true
+          mkdir candidate-release-assets
+          gh release download "$RELEASE_TAG" --dir candidate-release-assets --pattern 'CodeReader_*'
+          gh release download "$RELEASE_TAG" --dir candidate-release-assets --pattern SHA256SUMS
+          gh release download "$RELEASE_TAG" --dir candidate-release-assets --pattern 'native-smoke-*.json'
+          test "$(find candidate-release-assets -maxdepth 1 -type f -name 'CodeReader_*' | wc -l)" = 10
+          test "$(find candidate-release-assets -maxdepth 1 -type f -name 'native-smoke-*.json' | wc -l)" = 4
+          test "$(find candidate-release-assets -maxdepth 1 -type f -name SHA256SUMS | wc -l)" = 1
+          (cd candidate-release-assets && sha256sum -c SHA256SUMS)
+          node scripts/release-evidence.mjs verify --input candidate-release-assets --tag "$RELEASE_TAG" --sha "$(git rev-parse HEAD)"
+          node scripts/native-candidate-snapshot.mjs create \
+            --input candidate-release-assets --tag "$RELEASE_TAG" --sha "$(git rev-parse HEAD)" \
+            --output candidate-release-assets/candidate-manifest.json
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: verified-candidate-release-assets
+          path: candidate-release-assets
+          if-no-files-found: error
+          retention-days: 1
+
   journey:
+    needs: prepare-candidate
     name: Journey ${{ matrix.platform }} ${{ matrix.arch }}
     strategy:
       fail-fast: false
@@ -48,33 +91,34 @@ jobs:
         run: |
           test "$(git describe --tags --exact-match HEAD)" = "$RELEASE_TAG"
           echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
-      - name: Validate draft and download target package
+      - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
+        with:
+          name: verified-candidate-release-assets
+          path: journey-assets
+      - name: Select and reverify target package from prepared candidate
         shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
         run: |
-          test "$(gh release view "$RELEASE_TAG" --json tagName --jq .tagName)" = "$RELEASE_TAG"
-          test "$(gh release view "$RELEASE_TAG" --json isDraft --jq .isDraft)" = true
-          mkdir -p journey-assets
-          gh release download "$RELEASE_TAG" --dir journey-assets \
-            --pattern "CodeReader_*_${{ matrix.platform }}_${{ matrix.arch }}.${{ matrix.asset }}"
-          test "$(find journey-assets -maxdepth 1 -type f -name 'CodeReader_*' | wc -l)" = 1
-          gh release download "$RELEASE_TAG" --dir journey-assets --pattern SHA256SUMS
-          gh release download "$RELEASE_TAG" --dir journey-assets \
-            --pattern "native-smoke-${{ matrix.platform }}-${{ matrix.arch }}.json"
-          package="$(find journey-assets -maxdepth 1 -type f -name 'CodeReader_*')"
+          test "$(find journey-assets -maxdepth 1 -type f -name 'CodeReader_*' | wc -l)" = 10
+          test "$(find journey-assets -maxdepth 1 -type f -name 'native-smoke-*.json' | wc -l)" = 4
+          (cd journey-assets && sha256sum -c SHA256SUMS)
+          node scripts/release-evidence.mjs verify --input journey-assets --tag "$RELEASE_TAG" --sha '${{ steps.target.outputs.sha }}'
+          package="$(find journey-assets -maxdepth 1 -type f -name 'CodeReader_*_${{ matrix.platform }}_${{ matrix.arch }}.${{ matrix.asset }}')"
+          test -n "$package"
+          test "$(printf '%s\n' "$package" | wc -l)" = 1
           package_name="$(basename "$package")"
           package_hash="$(sha256sum "$package" | cut -d' ' -f1)"
           test "$(awk -v name="$package_name" '$2 == name {print $1}' journey-assets/SHA256SUMS)" = "$package_hash"
           node -e 'const fs=require("fs"),e=JSON.parse(fs.readFileSync(process.argv[1])),n=process.argv[2],h=process.argv[3];if(e.releaseTag!==process.env.RELEASE_TAG||e.commitSha!==process.argv[4]||e.packages.filter(p=>p.name===n&&p.sha256===h).length!==1)process.exit(1)' \
             "journey-assets/native-smoke-${{ matrix.platform }}-${{ matrix.arch }}.json" \
             "$package_name" "$package_hash" '${{ steps.target.outputs.sha }}'
+          mkdir journey-package
+          cp "$package" journey-package/
       - name: Install Linux journey dependencies and package
         if: matrix.platform == 'linux'
         run: |
           sudo apt-get update
           sudo apt-get install -y at-spi2-core dbus-x11 python3-pyatspi python3-pil sqlite3 xvfb xdotool imagemagick libwebkit2gtk-4.1-0
-          sudo apt-get install -y ./journey-assets/*.deb
+          sudo apt-get install -y ./journey-package/*.deb
       - name: Build sanitized historical migration fixtures
         shell: bash
         run: |
@@ -138,7 +182,7 @@ jobs:
           sudo apt-get remove -y codereader
           test ! -e /usr/bin/codereader
           test -f "$profile/data/com.codereader.desktop/codereader.sqlite"
-          sudo apt-get install -y ./journey-assets/*.deb
+          sudo apt-get install -y ./journey-package/*.deb
           test -x /usr/bin/codereader
           touch "$profile/uninstall-probe-pass"
           node scripts/native-journey-linux.mjs \
@@ -152,7 +196,7 @@ jobs:
         run: |
           ./scripts/native-journey-windows.ps1 `
             -Architecture '${{ matrix.arch }}' -ReleaseTag $env:RELEASE_TAG `
-            -CommitSha '${{ steps.target.outputs.sha }}' -Package (Resolve-Path 'journey-assets/*.msi') `
+            -CommitSha '${{ steps.target.outputs.sha }}' -Package (Resolve-Path 'journey-package/*.msi') `
             -Project (Resolve-Path 'examples/fullstack') `
             -Fixture010 (Resolve-Path 'journey-fixtures/v0_10.sqlite') `
             -Fixture011 (Resolve-Path 'journey-fixtures/v0_11.sqlite') `
@@ -185,6 +229,10 @@ jobs:
           pattern: native-journey-*
           path: verified-native-journeys
           merge-multiple: true
+      - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
+        with:
+          name: verified-candidate-release-assets
+          path: prepared-candidate
       - name: Redownload and reverify the release package evidence
         env:
           GH_TOKEN: ${{ github.token }}
@@ -195,6 +243,9 @@ jobs:
           gh release download "$RELEASE_TAG" --dir release-binding --pattern 'native-smoke-*.json'
           (cd release-binding && sha256sum -c SHA256SUMS)
           node scripts/release-evidence.mjs verify --input release-binding --tag "$RELEASE_TAG" --sha "$(git rev-parse HEAD)"
+          node scripts/native-candidate-snapshot.mjs verify \
+            --input release-binding --manifest prepared-candidate/candidate-manifest.json \
+            --tag "$RELEASE_TAG" --sha "$(git rev-parse HEAD)"
       - name: Strictly verify all four journeys
         env:
           GH_TOKEN: ${{ github.token }}
@@ -215,5 +266,15 @@ jobs:
           test "$(git describe --tags --exact-match HEAD)" = "$RELEASE_TAG"
           test "$(gh release view "$RELEASE_TAG" --json tagName --jq .tagName)" = "$RELEASE_TAG"
           test "$(gh release view "$RELEASE_TAG" --json isDraft --jq .isDraft)" = true
+          mkdir final-release-binding
+          gh release download "$RELEASE_TAG" --dir final-release-binding --pattern 'CodeReader_*'
+          gh release download "$RELEASE_TAG" --dir final-release-binding --pattern SHA256SUMS
+          gh release download "$RELEASE_TAG" --dir final-release-binding --pattern 'native-smoke-*.json'
+          (cd final-release-binding && sha256sum -c SHA256SUMS)
+          node scripts/release-evidence.mjs verify \
+            --input final-release-binding --tag "$RELEASE_TAG" --sha "$(git rev-parse HEAD)"
+          node scripts/native-candidate-snapshot.mjs verify \
+            --input final-release-binding --manifest prepared-candidate/candidate-manifest.json \
+            --tag "$RELEASE_TAG" --sha "$(git rev-parse HEAD)"
           node scripts/release-evidence.mjs verify-journeys --input verified-native-journeys --tag "$RELEASE_TAG" --sha "$(git rev-parse HEAD)"
           gh release upload "$RELEASE_TAG" verified-native-journeys/native-journey-*.json --clobber
