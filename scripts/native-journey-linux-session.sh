@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-set -euo pipefail
+set -Eeuo pipefail
 
 executable="$1"
 project="$2"
@@ -14,14 +14,19 @@ install_native_journey_failure_trap
 rm -f "$failure_file"
 
 run_timed_app() {
-  set +e
   if test -n "${CODEREADER_JOURNEY_TIMEOUT_SELFTEST_EXIT:-}"; then
-    timeout 20s bash -c "exit ${CODEREADER_JOURNEY_TIMEOUT_SELFTEST_EXIT}"
+    if timeout 20s bash -c "exit ${CODEREADER_JOURNEY_TIMEOUT_SELFTEST_EXIT}"; then
+      local code=0
+    else
+      local code=$?
+    fi
   else
-    timeout 20s dbus-run-session -- xvfb-run -a "$executable" >/tmp/codereader-migrate.log 2>&1
+    if timeout 20s dbus-run-session -- xvfb-run -a "$executable" >/tmp/codereader-migrate.log 2>&1; then
+      local code=0
+    else
+      local code=$?
+    fi
   fi
-  local code=$?
-  set -e
   if test "$code" -ne 0 && test "$code" -ne 124; then return "$code"; fi
 }
 
@@ -33,7 +38,7 @@ if test -n "${CODEREADER_JOURNEY_FAILURE_SELFTEST_PHASE:-}"; then
       ;;
     ui-first-run|ui-restart-restore|phase-merge)
       current_phase="ui-session"
-      bash -euo pipefail -c '
+      bash -Eeuo pipefail -c '
         source "$1"; failure_file="$2"; current_phase="$3"; install_native_journey_failure_trap
         (exit "$4")
       ' bash "$failure_helper" "$failure_file" "$CODEREADER_JOURNEY_FAILURE_SELFTEST_PHASE" "${CODEREADER_JOURNEY_FAILURE_SELFTEST_EXIT:-7}"
@@ -153,7 +158,7 @@ merge_phase legacy-0.11-upgrade "early/current migrations plus failed-migration 
 rm -rf "${XDG_DATA_HOME}/com.codereader.desktop" "${XDG_DATA_HOME}/com.codereader.app"
 
 current_phase="ui-session"
-dbus-run-session -- xvfb-run -a -s '-screen 0 1280x720x24' bash -euo pipefail -c '
+dbus-run-session -- xvfb-run -a -s '-screen 0 1280x720x24' bash -Eeuo pipefail -c '
   executable="$1"; project="$2"; driver="$3"; stub="$4"; phase_file="$5"; wrong_project="$6"; failure_file="$7"; failure_helper="$8"
   current_phase="ui-first-run"
   source "$failure_helper"

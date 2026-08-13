@@ -351,6 +351,9 @@ describe("Linux native journey evidence", () => {
     expect(session).toContain("CODEREADER_JOURNEY_FAILURE_FILE");
     expect(session).toContain("native-journey-linux-failure.sh");
     expect(session).toContain("install_native_journey_failure_trap");
+    expect(session).toContain("set -Eeuo pipefail");
+    expect(session).toContain("bash -Eeuo pipefail -c");
+    expect(session).not.toContain("set +e");
     expect(session).toContain("current_phase=");
     const failureHelper = readFileSync("scripts/native-journey-linux-failure.sh", "utf8");
     expect(failureHelper).toContain("trap 'code=$?;");

@@ -31,6 +31,17 @@ describe("Windows native product journey driver", () => {
     expect(script).toContain("prompt_versions WHERE version='legacy-canary'");
     expect(script).toContain("$backup.FullName 'PRAGMA integrity_check;'");
     expect(script).toContain("Test-MigrationFailureRecovery");
+    expect(script).toContain("function Wait-CodeReaderDatabase");
+    expect(script).toContain("$CurrentDatabaseCandidates");
+    expect(script).toContain(
+      "$KnownRoamingData = [Environment]::GetFolderPath([Environment+SpecialFolder]::ApplicationData)"
+    );
+    expect(script).toContain("$AllowedDataRoots = @($KnownRoamingData)");
+    expect(script).toContain("[IO.Path]::IsPathRooted($KnownRoamingData)");
+    expect(script).not.toContain("Get-ChildItem -Recurse");
+    expect(script).toContain("phase=migration category=database-not-created exit=1");
+    expect(script).toContain("phase=migration category=ambiguous-database exit=1");
+    expect(script).not.toContain("Migrated database was not created.");
     expect(script).toContain(
       "$missingRequiredPaths = @($requiredPaths | Where-Object { -not (Test-Path -LiteralPath $_) })"
     );
@@ -65,6 +76,37 @@ describe("Windows native product journey driver", () => {
         { expected: 0, actual: 0 },
         { expected: 1, actual: 1 },
         { expected: 2, actual: 2 }
+      ]);
+    },
+    20000
+  );
+
+  windowsIt(
+    "waits for exactly one controlled database without scanning or leaking candidates",
+    () => {
+      const result = spawnSync(
+        "powershell.exe",
+        [
+          "-NoProfile",
+          "-ExecutionPolicy",
+          "Bypass",
+          "-File",
+          "scripts/native-journey-windows.ps1",
+          "-DatabasePathSelfTest"
+        ],
+        { encoding: "utf8", timeout: 15000 }
+      );
+      expect(result.error).toBeUndefined();
+      expect(result.status).toBe(0);
+      expect(
+        result.stdout
+          .trim()
+          .split(/\r?\n/)
+          .map((line) => JSON.parse(line))
+      ).toEqual([
+        { expected: "not-found", actual: "not-found" },
+        { expected: "unique", actual: "unique" },
+        { expected: "ambiguous", actual: "ambiguous" }
       ]);
     },
     20000
@@ -119,6 +161,7 @@ describe("Windows native product journey driver", () => {
     expect(script).toContain("所选项目与最近记录不匹配");
     expect(script).toContain("native-journey-model-stub.mjs");
     expect(script).toContain("CloseMainWindow");
+    expect(script).toContain("Start-Process -FilePath $Executable -PassThru -Environment");
     expect(script).toContain("msiexec.exe");
     expect(script).toContain("$Object.PSObject.Properties[$Name]");
     expect(script).toContain("function Get-MsiProperty");
