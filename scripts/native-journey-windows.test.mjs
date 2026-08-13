@@ -1,7 +1,9 @@
 import { readFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
 import { describe, expect, it } from "vitest";
 
 const script = readFileSync("scripts/native-journey-windows.ps1", "utf8");
+const windowsIt = process.platform === "win32" ? it : it.skip;
 
 describe("Windows native product journey driver", () => {
   it("requires independent successful probes before strict evidence is emitted", () => {
@@ -25,6 +27,33 @@ describe("Windows native product journey driver", () => {
     expect(script).toContain("prompt_versions WHERE version='legacy-canary'");
     expect(script).toContain("$backup.FullName 'PRAGMA integrity_check;'");
     expect(script).toContain("Test-MigrationFailureRecovery");
+    expect(script).toContain(
+      "$missingRequiredPaths = @($requiredPaths | Where-Object { -not (Test-Path -LiteralPath $_) })"
+    );
+    expect(script).toContain("$missingRequiredPaths.Count -eq 0");
+    expect(script).not.toContain(
+      "Assert-True (($requiredPaths | Where-Object { -not (Test-Path -LiteralPath $_) }).Count"
+    );
+  });
+
+  windowsIt("counts zero, one and many missing required paths under strict PowerShell mode", () => {
+    for (const count of [0, 1, 2]) {
+      const result = spawnSync(
+        "powershell.exe",
+        [
+          "-NoProfile",
+          "-ExecutionPolicy",
+          "Bypass",
+          "-File",
+          "scripts/native-journey-windows.ps1",
+          "-RequiredPathSelfTest",
+          String(count)
+        ],
+        { encoding: "utf8" }
+      );
+      expect(result.status).toBe(0);
+      expect(result.stdout).toContain(`Required path count self-test passed: ${count}.`);
+    }
   });
 
   it("drives real OS UI, picker, model, restart and installer probes", () => {
