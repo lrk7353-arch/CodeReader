@@ -23,6 +23,8 @@
 
 rc.6 的首次 Native Product Journey run `31659436776` 在任何平台安装前停止：只读矩阵任务无法通过 GitHub API 读取 draft Release，返回 `release not found`，因此没有生成任何平台 journey 结果。该失败不代表包或平台验证结果，日志只保留用于审计。后续流程由受 `production-release` 保护且仅该阶段具 `contents: write` 的 prepare job 严格核对 exact tag、HEAD、draft、十包、`SHA256SUMS` 和四份 package smoke，再以不可变 workflow artifact 交给只读四平台矩阵；最终 attach job 仍须在受保护写权限中重新下载并验证当前 draft，禁止复用本次失败作为任何通过证据。
 
+修复权限交接后的 run `31661162165` 仍在任何平台安装前停止：workflow 从 rc.6 tag 检出后调用了只存在于较新 workflow revision 的候选快照工具，Node 返回 `MODULE_NOT_FOUND`，因此同样没有生成平台 journey 或可接受证据。后续执行将门禁工具固定检出到触发该 workflow 的不可变提交，并把 rc.6 候选源码独立检出到 `candidate-source`；tag/HEAD 身份只从候选目录解析，产品 journey 驱动只使用 tag 版本，新增的快照和证据门禁只使用 workflow 提交版本。不得移动或重用 rc.6 tag 来掩盖这次失败。
+
 `npm ci` 的完整开发依赖审计报告 4 个 high 项；`npm audit --omit=dev --audit-level=high` 随后确认 production dependency graph 为 0 项漏洞。该结论只说明 npm 运行时依赖，不替代 RustSec、CodeQL 或完整供应链检查。
 
 Linux x64 重型打包实际进入 Tauri release build：production 前端和 x86-64 release binary 均成功；二进制被 `file` 识别为 x86-64 ELF，SHA-256 为 `931ad9b510f5d9548c27253e6217562ab48966097978a48b22255dd0cb1d0356`。随后 bundle 工具下载 AppRun、linuxdeploy 及其插件时长时间无输出，按有界等待中止。没有生成 `artifacts/linux-x64` 或 bundle 目录，因此没有 AppImage、deb、rpm，不能执行或通过 Linux x64 package smoke。该网络阻塞未重试。
