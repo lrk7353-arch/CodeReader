@@ -23,7 +23,9 @@
 
 rc.6 的首次 Native Product Journey run `31659436776` 在任何平台安装前停止：只读矩阵任务无法通过 GitHub API 读取 draft Release，返回 `release not found`，因此没有生成任何平台 journey 结果。该失败不代表包或平台验证结果，日志只保留用于审计。后续流程由受 `production-release` 保护且仅该阶段具 `contents: write` 的 prepare job 严格核对 exact tag、HEAD、draft、十包、`SHA256SUMS` 和四份 package smoke，再以不可变 workflow artifact 交给只读四平台矩阵；最终 attach job 仍须在受保护写权限中重新下载并验证当前 draft，禁止复用本次失败作为任何通过证据。
 
-修复权限交接后的 run `31661162165` 仍在任何平台安装前停止：workflow 从 rc.6 tag 检出后调用了只存在于较新 workflow revision 的候选快照工具，Node 返回 `MODULE_NOT_FOUND`，因此同样没有生成平台 journey 或可接受证据。后续执行将门禁工具固定检出到触发该 workflow 的不可变提交，并把 rc.6 候选源码独立检出到 `candidate-source`；tag/HEAD 身份只从候选目录解析，产品 journey 驱动只使用 tag 版本，新增的快照和证据门禁只使用 workflow 提交版本。不得移动或重用 rc.6 tag 来掩盖这次失败。
+修复权限交接后的 run `31661162165` 仍在任何平台安装前停止：workflow 从 rc.6 tag 检出后调用了只存在于较新 workflow revision 的候选快照工具，Node 返回 `MODULE_NOT_FOUND`，因此同样没有生成平台 journey 或可接受证据。该次修复先将新增快照和证据门禁固定到触发 workflow 的不可变提交，并把 rc.6 候选源码独立检出到 `candidate-source`；后续 run 又证明 journey driver 也必须属于当前受审 harness，完整边界见下一条。tag/HEAD 身份始终只从候选目录解析，不得移动或重用 rc.6 tag 来掩盖失败。
+
+run `31665833835` 进一步证明上述边界仍不完整：四个平台实际调用 rc.6 tag 内的旧 journey driver；Windows x64/ARM64 在旅程开始时命中旧 RequiredPaths `.Count` 缺陷，Linux x64/ARM64 由旧 driver 返回泛化 session failure，因此没有可接受的平台证据。后续执行采用双身份：包、候选 tag/SHA、示例和历史 seed data 继续来自不可变 rc.6；driver、UI helper、fixture extractor、manifest 与 evidence verifier 来自触发 workflow 的受审 commit。四份严格 JSON 同时记录相同的 candidate `commitSha` 和 `harnessCommitSha`，attach 以当前 workflow HEAD 复核 harness 身份后才允许上传。harness SHA 只说明测量工具版本，不改变或替代产品候选身份。
 
 双检出修复后的 run `31662115050` 在四平台安装前构造 v0.11 current 迁移样本时停止：Linux 与 Windows ARM64 都命中该阶段；从 v3 历史提交抽取的“新建库完整基线”已包含 prompt 模板列，流程又执行同提交的 v3 增量 ALTER，SQLite 按严格规则报告 duplicate column。Windows ARM64 同时出现 Chocolatey 下载 SQLite 的 504，旧 step 未可靠传播原生命令失败，后续才因找不到 `sqlite3` 暴露问题。因此该 run 没有生成平台 journey 或可接受证据。修复后 v3 使用权威 v2 完整 schema 作为基线，并且只追加 v3 的 `migrate_to_v3` 一次；SQLite 的重复列错误仍保持为失败，不被忽略或降级。Windows 工具安装也必须检查 Chocolatey 退出码、`Get-Command sqlite3` 和实际版本探针，任一失败立即阻断。
 
@@ -35,12 +37,12 @@ Linux x64 重型打包实际进入 Tauri release build：production 前端和 x8
 
 ## 3. 发布能力盘点
 
-| 目标 | 构建包 | 原生 runner | package smoke | 完整产品旅程 | 当前结果 |
-| --- | --- | --- | --- | --- | --- |
-| Windows x64 | NSIS、MSI | `windows-2022` | 安装、可见窗口、卸载、哈希 | picker、项目、解释、恢复、旧版升级、无障碍 | rc.5 两包构建通过，smoke 清理竞态失败；rc.6 未执行 |
-| Windows ARM64 | NSIS、MSI | `windows-11-arm` | 同上 | 同上 | rc.5 package smoke 通过；证据不复用，rc.6 未执行 |
-| Linux x64 | AppImage、deb、rpm | `ubuntu-22.04` | 元数据、安装、可见窗口、卸载、哈希 | 同上 | rc.5 package smoke 通过；证据不复用，rc.6 未执行 |
-| Linux ARM64 | AppImage、deb、rpm | `ubuntu-22.04-arm` | 同上 | 同上 | rc.5 package smoke 通过；证据不复用，rc.6 未执行 |
+| 目标          | 构建包             | 原生 runner        | package smoke                      | 完整产品旅程                               | 当前结果                                                                               |
+| ------------- | ------------------ | ------------------ | ---------------------------------- | ------------------------------------------ | -------------------------------------------------------------------------------------- |
+| Windows x64   | NSIS、MSI          | `windows-2022`     | 安装、可见窗口、卸载、哈希         | picker、项目、解释、恢复、旧版升级、无障碍 | rc.6 已多次尝试；最近一次由旧 harness 在 RequiredPaths 检查失败，无可接受 journey 证据 |
+| Windows ARM64 | NSIS、MSI          | `windows-11-arm`   | 同上                               | 同上                                       | rc.6 已多次尝试；最近一次由旧 harness 在 RequiredPaths 检查失败，无可接受 journey 证据 |
+| Linux x64     | AppImage、deb、rpm | `ubuntu-22.04`     | 元数据、安装、可见窗口、卸载、哈希 | 同上                                       | rc.6 已多次尝试；最近一次旧 harness 的 native session 失败，无可接受 journey 证据      |
+| Linux ARM64   | AppImage、deb、rpm | `ubuntu-22.04-arm` | 同上                               | 同上                                       | rc.6 已多次尝试；最近一次旧 harness 的 native session 失败，无可接受 journey 证据      |
 
 发布构建工作流只从不可变 `v1.*` tag 检出，使用锁定 Rust 图，四个原生 runner 生成包。汇总阶段只在四份 package smoke 验证后运行，并受 `production-release` 环境控制；最终 Release 只能是 draft。独立发布工作流的单一写权限任务先等待维护者批准 `production-release-publish` environment；批准后才严格校验 tag、重新确认对应 Release 仍是 draft、下载当时的恰好四份 `native-journey-*.json`，并以该 tag 的实际 SHA 重新执行 `verify-journeys`。同一任务只有在这次复验成功后才可把该 draft 改为公开，消除环境等待期间证据变化的时间窗口。默认不运行该工作流，也不得通过 UI 或本地脚本旁路。
 
