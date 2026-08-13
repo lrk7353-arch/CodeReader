@@ -18,7 +18,8 @@
 | 1.0.0-rc.2 | 原生授权文件访问、全文件树/安全预览、迁移恢复、跨架构发布链 | 已被后续候选替代；保留标签与记录用于审计。 |
 | 1.0.0-rc.3 | 项目优先入口、正交认知状态、分层解释、个人记录、复查队列 | 已形成 draft 并完成 package smoke；保留为历史事实，不向后复用证据。 |
 | 1.0.0-rc.4 | 四平台可重复原生产品旅程 harness 候选 | 发布运行在 validate 阶段失败，未生成安装包；保留 tag 和运行用于审计。 |
-| 1.0.0-rc.5 | 发布检出修复候选 | 当前候选；从零执行四平台构建、原生旅程与最终发布证据。 |
+| 1.0.0-rc.5 | 发布检出修复候选 | 三个平台 package smoke 通过；Windows x64 清理竞态失败，未汇总最终证据。 |
+| 1.0.0-rc.6 | Windows smoke 清理竞态修复候选 | 当前候选；从零执行四平台构建、原生旅程与最终发布证据。 |
 
 ## 0.10.x 到 0.11.x：阅读工作流建立
 
@@ -63,7 +64,13 @@ rc.4 的 Production Release run `31654257774` 在 validate 阶段因浅检出缺
 
 ## 1.0.0-rc.5：发布检出修复候选
 
-rc.5 修正发布验证所需的历史对象检出边界，并以新的不可变 commit/tag 从零执行。R4 的维护者人工可用性验收仍已通过；当前仅 rc.5 的四平台 OS 级 native journey 与最终发布证据未完成。rc.5 必须重新生成十包、四份 package smoke、四份 native journey、`SHA256SUMS`、SPDX SBOM 与 artifact attestations，不能继承 rc.4 的失败运行。
+rc.5 修正发布验证所需的历史对象检出边界，并以新的不可变 commit/tag 从零执行。它原计划重新生成十包、四份 package smoke、四份 native journey、`SHA256SUMS`、SPDX SBOM 与 artifact attestations，不继承 rc.4 的失败运行；实际执行结果如下。
+
+Production Release run `31656328041` 实际通过 validate、Linux x64、Linux ARM64 与 Windows ARM64 package smoke。Windows x64 的 NSIS/MSI 构建成功，但 smoke 清理阶段在进程自行退出后调用 `Stop-Process`，触发竞态并失败；verify 与 assemble 因依赖失败而跳过，未生成 draft 或最终证据。rc.5 的 tag、制品和单平台 smoke 仅作为审计事实保留，不向后续候选复用。
+
+## 1.0.0-rc.6：Windows smoke 清理竞态修复候选
+
+rc.6 修复 Windows package smoke 清理已退出进程时的竞态。它必须基于新的同一不可变 commit/tag 从零生成十包、四份 package smoke、四份 native journey、`SHA256SUMS`、SPDX SBOM 与 artifact attestations；不得继承 rc.5 的安装包或三个已通过平台的 smoke。R4 维护者人工可用性验收仍已通过；rc.6 四平台 OS 级 native journey 与最终发布证据完成前，R5 仍未 `PASS`。
 
 ## 升级与数据兼容性
 
