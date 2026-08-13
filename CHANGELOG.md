@@ -4,13 +4,21 @@
 
 ## [Unreleased]
 
+## [1.0.0-rc.6] - 2026-08-13
+
+### Windows package smoke cleanup fix candidate
+
+- `rc.5` Production Release run `31656328041` passed validation and the Linux x64, Linux ARM64, and Windows ARM64 package-smoke jobs. Windows x64 built both installers, but its smoke failed when cleanup raced an already-exited process; verification and assembly were skipped, so no draft or final evidence was produced.
+- The `rc.5` tag, artifacts, and individual smoke results remain audit facts only and are not reused by `rc.6`. All ten packages, four package smokes, four native journeys, checksums, SPDX SBOM, and attestations must be rebuilt from one immutable `rc.6` commit/tag.
+- R4 maintainer usability acceptance remains passed; only the `rc.6` four-platform OS-level native journey and final release evidence remain incomplete, so R5 is not `PASS`.
+
 ## [1.0.0-rc.5] - 2026-08-13
 
 ### 发布门禁修复候选
 
 - `rc.4` 的 Production Release run `31654257774` 在 validate 阶段因浅检出缺少固定历史 schema 对象而失败，未启动四平台构建、未生成安装包或发布证据。
 - `rc.4` 的 tag、失败运行和日志仅作为审计事实保留，不得复用为 `rc.5` 证据；`rc.5` 必须从新的同一 commit/tag 重新执行全部发布矩阵。
-- R4 维护者人工可用性验收仍已通过；当前仅 `rc.5` 四平台 OS 级 native journey 与最终发布证据未完成，R5 仍未 `PASS`。
+- Production Release run `31656328041` 通过 validate、Linux x64/ARM64 与 Windows ARM64 package smoke；Windows x64 安装包构建成功，但 smoke 清理与进程退出竞态导致失败。verify 与 assemble 跳过，未形成 draft 或最终证据；任何 rc.5 制品和单平台 smoke 均不得向后复用。
 
 ## [1.0.0-rc.4] - 2026-08-13
 
