@@ -9,12 +9,47 @@ param(
 
 $ErrorActionPreference = "Stop"
 
+function Assert-ExpectedExitCode {
+    param([string]$Label, [int]$ExitCode, [int[]]$Allowed = @(0))
+    if ($ExitCode -notin $Allowed) {
+        throw "$Label failed with exit code $ExitCode."
+    }
+}
+
 function Invoke-ExpectedExit {
     param([string]$Label, [string]$FilePath, [string[]]$ArgumentList, [int[]]$Allowed = @(0))
     Write-Host "==> $Label"
     $process = Start-Process -FilePath $FilePath -ArgumentList $ArgumentList -Wait -PassThru
-    if ($process.ExitCode -notin $Allowed) {
-        throw "$Label failed with exit code $($process.ExitCode)."
+    Assert-ExpectedExitCode $Label $process.ExitCode $Allowed
+}
+
+function Stop-CodeReaderProcess {
+    param(
+        $Process,
+        [scriptblock]$ForceStop = { param([int]$Id) Stop-Process -Id $Id -Force -ErrorAction Stop }
+    )
+
+    $Process.Refresh()
+    if ($Process.HasExited) { return }
+
+    $Process.CloseMainWindow() | Out-Null
+    if ($Process.WaitForExit(5000)) { return }
+
+    # The process can exit between a timed-out wait and forced termination.
+    $Process.Refresh()
+    if (-not $Process.HasExited) {
+        try {
+            & $ForceStop $Process.Id
+        } catch {
+            # Ignore only the benign race where the process disappeared before Stop-Process ran.
+            $Process.Refresh()
+            if (-not $Process.HasExited) { throw }
+        }
+    }
+
+    $Process.Refresh()
+    if (-not $Process.HasExited -and -not $Process.WaitForExit(5000)) {
+        throw "CodeReader remained running after forced termination."
     }
 }
 
@@ -74,10 +109,7 @@ function Test-CodeReaderWindow {
         } while ([DateTimeOffset]::UtcNow -lt $deadline)
         throw "CodeReader did not expose its main window within 30 seconds."
     } finally {
-        if (-not $process.HasExited) {
-            $process.CloseMainWindow() | Out-Null
-            if (-not $process.WaitForExit(5000)) { Stop-Process -Id $process.Id -Force }
-        }
+        Stop-CodeReaderProcess $process
     }
 }
 
@@ -96,6 +128,32 @@ if ($SelfTest) {
     $plain = Normalize-CodeReaderInstallLocation "C:\Program Files\CodeReader"
     if ($plain -ne "C:\Program Files\CodeReader") { throw "Plain InstallLocation normalization failed." }
     if (Normalize-CodeReaderInstallLocation '""') { throw "Empty InstallLocation must normalize to null." }
+
+    $exitedAfterWait = [pscustomobject]@{ Id = 101; HasExited = $false; StopCalls = 0 }
+    $exitedAfterWait | Add-Member ScriptMethod Refresh { }
+    $exitedAfterWait | Add-Member ScriptMethod CloseMainWindow { return $true }
+    $exitedAfterWait | Add-Member ScriptMethod WaitForExit {
+        param([int]$Milliseconds)
+        $this.HasExited = $true
+        return $false
+    }
+    Stop-CodeReaderProcess $exitedAfterWait { param([int]$Id) $exitedAfterWait.StopCalls += 1 }
+    if ($exitedAfterWait.StopCalls -ne 0) { throw "A process that exited after WaitForExit must not be killed." }
+
+    $stillRunning = [pscustomobject]@{ Id = 102; HasExited = $false; StopCalls = 0 }
+    $stillRunning | Add-Member ScriptMethod Refresh { }
+    $stillRunning | Add-Member ScriptMethod CloseMainWindow { return $true }
+    $stillRunning | Add-Member ScriptMethod WaitForExit { param([int]$Milliseconds) return $false }
+    Stop-CodeReaderProcess $stillRunning {
+        param([int]$Id)
+        $stillRunning.StopCalls += 1
+        $stillRunning.HasExited = $true
+    }
+    if ($stillRunning.StopCalls -ne 1) { throw "A process still running after WaitForExit must be killed once." }
+
+    $nonZeroRejected = $false
+    try { Assert-ExpectedExitCode "Self-test command" 7 @(0) } catch { $nonZeroRejected = $true }
+    if (-not $nonZeroRejected) { throw "A real non-zero exit code must remain a failure." }
     Write-Host "Windows package smoke helper self-test passed."
     exit 0
 }

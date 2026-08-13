@@ -2,7 +2,7 @@
 
 **状态：候选执行中，未 `PASS`，未公开发布。** R4 已由维护者验收通过；本记录只描述 R5 的实际证据与阻塞，不把脚本存在、源码检查或单平台结果外推为四平台发布完成。
 
-**候选版本准备：** `v1.0.0-rc.3` 已形成 draft，并完成十包与四平台 package smoke，但未完成完整 native journey；该 tag、制品和 smoke 只保留为 rc.3 历史事实。`v1.0.0-rc.4` 的 Production Release run `31654257774` 在 validate 阶段因浅检出缺少固定历史 schema 对象而失败，未启动四平台构建、未生成安装包或发布证据；该 tag、失败运行和日志仅保留用于审计，不复用于后续候选。本轮版本源统一提升为 `1.0.0-rc.5`。十包、四份 package smoke、四份 native journey、`SHA256SUMS`、SPDX SBOM、attestations 与签名状态必须全部绑定 rc.5 的同一最终新 commit/tag，并从零生成。
+**候选版本准备：** `v1.0.0-rc.3` 已形成 draft，并完成十包与四平台 package smoke，但未完成完整 native journey；该 tag、制品和 smoke 只保留为 rc.3 历史事实。`v1.0.0-rc.4` 的 Production Release run `31654257774` 在 validate 阶段失败，未生成安装包。`v1.0.0-rc.5` 的 run `31656328041` 通过 validate、Linux x64/ARM64 与 Windows ARM64 package smoke；Windows x64 安装包构建成功，但 smoke 清理已自行退出进程时触发竞态失败，verify 与 assemble 跳过，未形成 draft 或最终证据。上述 tag、制品、单平台 smoke、失败运行和日志仅保留用于审计，不复用于后续候选。本轮版本源统一提升为 `1.0.0-rc.6`。十包、四份 package smoke、四份 native journey、`SHA256SUMS`、SPDX SBOM、attestations 与签名状态必须全部绑定 rc.6 的同一最终新 commit/tag，并从零生成。
 
 ## 1. 固定工作包
 
@@ -29,10 +29,10 @@ Linux x64 重型打包实际进入 Tauri release build：production 前端和 x8
 
 | 目标 | 构建包 | 原生 runner | package smoke | 完整产品旅程 | 当前结果 |
 | --- | --- | --- | --- | --- | --- |
-| Windows x64 | NSIS、MSI | `windows-2022` | 安装、可见窗口、卸载、哈希 | picker、项目、解释、恢复、旧版升级、无障碍 | 未执行 |
-| Windows ARM64 | NSIS、MSI | `windows-11-arm` | 同上 | 同上 | 未执行 |
-| Linux x64 | AppImage、deb、rpm | `ubuntu-22.04` | 元数据、安装、可见窗口、卸载、哈希 | 同上 | 源码门禁与 release binary 通过；bundle 下载阻塞，无三包 |
-| Linux ARM64 | AppImage、deb、rpm | `ubuntu-22.04-arm` | 同上 | 同上 | 未执行 |
+| Windows x64 | NSIS、MSI | `windows-2022` | 安装、可见窗口、卸载、哈希 | picker、项目、解释、恢复、旧版升级、无障碍 | rc.5 两包构建通过，smoke 清理竞态失败；rc.6 未执行 |
+| Windows ARM64 | NSIS、MSI | `windows-11-arm` | 同上 | 同上 | rc.5 package smoke 通过；证据不复用，rc.6 未执行 |
+| Linux x64 | AppImage、deb、rpm | `ubuntu-22.04` | 元数据、安装、可见窗口、卸载、哈希 | 同上 | rc.5 package smoke 通过；证据不复用，rc.6 未执行 |
+| Linux ARM64 | AppImage、deb、rpm | `ubuntu-22.04-arm` | 同上 | 同上 | rc.5 package smoke 通过；证据不复用，rc.6 未执行 |
 
 发布构建工作流只从不可变 `v1.*` tag 检出，使用锁定 Rust 图，四个原生 runner 生成包。汇总阶段只在四份 package smoke 验证后运行，并受 `production-release` 环境控制；最终 Release 只能是 draft。独立发布工作流的单一写权限任务先等待维护者批准 `production-release-publish` environment；批准后才严格校验 tag、重新确认对应 Release 仍是 draft、下载当时的恰好四份 `native-journey-*.json`，并以该 tag 的实际 SHA 重新执行 `verify-journeys`。同一任务只有在这次复验成功后才可把该 draft 改为公开，消除环境等待期间证据变化的时间窗口。默认不运行该工作流，也不得通过 UI 或本地脚本旁路。
 
@@ -62,4 +62,4 @@ Linux x64 重型打包实际进入 Tauri release build：production 前端和 x8
 
 上述缺口需要原生 runner/硬件、发布 tag、GitHub 证明权限或维护者决定。仓库内可安全完成的协议、拒绝伪证据门禁和文档先行完成；缺失外部证据时准确停在候选状态。
 
-R4 的 small、frontend、fullstack 三项目维护者人工可用性已通过。当前仅 rc.5 的四平台 OS 级 native journey 与最终发布证据未完成：必须从 rc.5 不可变 tag 从零生成十包、四份 package smoke、四份 native journey、`SHA256SUMS`、SPDX SBOM 和 artifact attestations；rc.3 draft 与 rc.4 失败运行的任何结果均不得计入。
+R4 的 small、frontend、fullstack 三项目维护者人工可用性已通过。当前仅 rc.6 的四平台 OS 级 native journey 与最终发布证据未完成：必须从 rc.6 不可变 tag 从零生成十包、四份 package smoke、四份 native journey、`SHA256SUMS`、SPDX SBOM 和 artifact attestations；rc.3 draft、rc.4 失败运行以及 rc.5 的制品与单平台 smoke 均不得计入。

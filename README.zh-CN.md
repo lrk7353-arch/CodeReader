@@ -4,7 +4,7 @@
 
 CodeReader 是一款本地优先的桌面代码认知工具。它从项目地图和推荐阅读路径出发，让你在真实代码与分层解释之间往返，保存理解状态、个人问题与复查项。它也能阅读纯文本和 Markdown，但不是云端协作服务、通用聊天或自动修改代码的编辑器。
 
-> 当前通道：1.0.0-rc.5 候选版。候选版用于完成完整的生产环境验证；稳定版将使用 1.0.0 版本号发布。
+> 当前通道：1.0.0-rc.6 候选版。候选版用于完成完整的生产环境验证；稳定版将使用 1.0.0 版本号发布。
 
 ## 适用场景与边界
 
@@ -43,9 +43,9 @@ macOS 是下一版本目标，1.0 不提供 macOS 安装包，也不应使用其
 发布页的文件名固定包含版本、平台、架构和格式，例如：
 
 ~~~text
-CodeReader_1.0.0-rc.5_windows_x64_setup.exe
-CodeReader_1.0.0-rc.5_windows_x64.msi
-CodeReader_1.0.0-rc.5_linux_arm64.AppImage
+CodeReader_1.0.0-rc.6_windows_x64_setup.exe
+CodeReader_1.0.0-rc.6_windows_x64.msi
+CodeReader_1.0.0-rc.6_linux_arm64.AppImage
 ~~~
 
 | 使用环境 | 推荐选择 | 何时选择其他格式 |
@@ -75,7 +75,7 @@ CodeReader 当前没有 Authenticode 代码签名证书。除非某个 Release �
 MSI 面向受管设备、软件分发或管理员部署。下载匹配架构的 .msi 后，可在资源管理器中双击安装，也可以由组织的软件管理工具分发。命令行安装示例：
 
 ~~~powershell
-msiexec /i .\CodeReader_1.0.0-rc.5_windows_x64.msi
+msiexec /i .\CodeReader_1.0.0-rc.6_windows_x64.msi
 ~~~
 
 安装包本身可能请求系统权限；这取决于设备策略和安装方式。
@@ -85,7 +85,7 @@ msiexec /i .\CodeReader_1.0.0-rc.5_windows_x64.msi
 下载匹配架构的 .deb 后，在下载目录运行：
 
 ~~~bash
-sudo apt install ./CodeReader_1.0.0-rc.5_linux_x64.deb
+sudo apt install ./CodeReader_1.0.0-rc.6_linux_x64.deb
 ~~~
 
 包管理器会解析 WebKitGTK 和 GTK 依赖。安装后可从应用菜单启动 CodeReader。
@@ -95,7 +95,7 @@ sudo apt install ./CodeReader_1.0.0-rc.5_linux_x64.deb
 下载匹配架构的 .rpm 后运行：
 
 ~~~bash
-sudo dnf install ./CodeReader_1.0.0-rc.5_linux_x64.rpm
+sudo dnf install ./CodeReader_1.0.0-rc.6_linux_x64.rpm
 ~~~
 
 发行版会解析 WebKitGTK 和 GTK 依赖。使用其他 RPM 包管理器时，请使用该发行版推荐的本地 RPM 安装命令。
@@ -105,8 +105,8 @@ sudo dnf install ./CodeReader_1.0.0-rc.5_linux_x64.rpm
 AppImage 是便携文件，不会自动解决图形运行时依赖：
 
 ~~~bash
-chmod +x CodeReader_1.0.0-rc.5_linux_x64.AppImage
-./CodeReader_1.0.0-rc.5_linux_x64.AppImage
+chmod +x CodeReader_1.0.0-rc.6_linux_x64.AppImage
+./CodeReader_1.0.0-rc.6_linux_x64.AppImage
 ~~~
 
 宿主机仍需提供 WebKitGTK 4.1 与相应 GTK 运行时。若启动失败，请优先选择同一 Release 的 .deb 或 .rpm，或按发行版文档安装运行时。
@@ -131,16 +131,16 @@ chmod +x CodeReader_1.0.0-rc.5_linux_x64.AppImage
 Windows PowerShell 示例：
 
 ~~~powershell
-Get-FileHash .\CodeReader_1.0.0-rc.5_windows_x64_setup.exe -Algorithm SHA256
+Get-FileHash .\CodeReader_1.0.0-rc.6_windows_x64_setup.exe -Algorithm SHA256
 Get-Content .\SHA256SUMS
-gh attestation verify .\CodeReader_1.0.0-rc.5_windows_x64_setup.exe -R lrk7353-arch/CodeReader
+gh attestation verify .\CodeReader_1.0.0-rc.6_windows_x64_setup.exe -R lrk7353-arch/CodeReader
 ~~~
 
 Linux 示例：
 
 ~~~bash
 sha256sum -c SHA256SUMS
-gh attestation verify CodeReader_1.0.0-rc.5_linux_x64.deb -R lrk7353-arch/CodeReader
+gh attestation verify CodeReader_1.0.0-rc.6_linux_x64.deb -R lrk7353-arch/CodeReader
 ~~~
 
 命令输出的 SHA-256 必须与 <code>SHA256SUMS</code> 中同名文件完全一致。证明验证失败、Release 缺少要求的元数据，或文件名/架构不匹配时，请停止安装并在仓库提交 Issue。
@@ -185,9 +185,9 @@ gh attestation verify CodeReader_1.0.0-rc.5_linux_x64.deb -R lrk7353-arch/CodeRe
 - CodeReader 只检查官方 GitHub Release 的更新信息，不会自动下载或安装更新。
 - AI 解释会向你确认的模型服务发送有限上下文；不配置模型时，阅读功能仍可使用。
 - 维护者已经在 small、frontend、fullstack 三类项目上完成 R4 人工可用性验收并整体通过；“一分钟内获得解释”“五分钟理解结构”等仍是验证目标，不是公开 SLA。
-- rc.4 发布运行在 validate 阶段失败，未生成安装包，其 tag、失败运行和日志只保留用于审计，不复用于 rc.5。
-- 当前仅 rc.5 的 Windows/Linux x64/ARM64 OS 级原生旅程和最终发布证据尚未完成，因此 R5 仍未通过。
-- 真实 OS 键盘/焦点、原生重启重新授权、reduced-motion、长内容和完整缩放/对比度已进入 rc.5 四平台 native journey 自动化契约；只有四个原生 runner 实际通过后才能形成完成证据。
+- rc.5 发布运行通过 validate、Linux x64/ARM64 与 Windows ARM64 package smoke；Windows x64 安装包构建成功，但 smoke 在清理已自行退出的进程时触发竞态失败，verify 与 assemble 随后跳过，未形成 draft 或最终证据。rc.5 的制品和单平台 smoke 只保留为审计事实，不复用于 rc.6。
+- 当前仅 rc.6 的 Windows/Linux x64/ARM64 OS 级原生旅程和最终发布证据尚未完成，因此 R5 仍未通过。
+- 真实 OS 键盘/焦点、原生重启重新授权、reduced-motion、长内容和完整缩放/对比度已进入 rc.6 四平台 native journey 自动化契约；只有四个原生 runner 实际通过后才能形成完成证据。
 
 ## 获取帮助与参与
 

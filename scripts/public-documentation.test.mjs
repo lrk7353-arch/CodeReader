@@ -83,8 +83,8 @@ describe("public documentation", () => {
 
     expect(changelog).toContain("1.0.0-rc.3");
     expect(changelog).toContain("1.0.0-rc.2");
-    expect(readme).toContain("Current channel: `1.0.0-rc.5`");
-    expect(chineseReadme).toContain("1.0.0-rc.5 候选版");
+    expect(readme).toContain("Current channel: `1.0.0-rc.6`");
+    expect(chineseReadme).toContain("1.0.0-rc.6 候选版");
     expect(changelog).toContain("0.11.0-beta.4");
     expect(changelog).toContain("0.10.0");
     expect(changelog).toContain("0.1.0");
@@ -135,7 +135,7 @@ describe("public documentation", () => {
     expect(readme).toContain("validation targets, not published SLAs");
     expect(readme).toContain("maintainer has passed the R4 usability journey");
     expect(readme).toContain(
-      "Only the rc.5 four-platform OS-level native journey and final release evidence remain incomplete"
+      "Only the rc.6 four-platform OS-level native journey and final release evidence remain incomplete"
     );
     expect(chineseReadme).toContain("从项目地图和推荐阅读路径出发");
     expect(chineseReadme).toContain("不是公开 SLA");
@@ -147,9 +147,9 @@ describe("public documentation", () => {
     expect(changelog).toContain(
       "small、frontend、fullstack 三类项目的 R4 维护者人工可用性验收已通过"
     );
-    expect(changelog).toContain("当前仅 `rc.5` 四平台 OS 级 native journey 与最终发布证据未完成");
-    expect(changelog).toContain("run `31654257774`");
-    expect(changelog).toContain("未启动四平台构建、未生成安装包或发布证据");
+    expect(changelog).toContain("only the `rc.6` four-platform OS-level native journey");
+    expect(changelog).toContain("run `31656328041`");
+    expect(changelog).toContain("verification and assembly were skipped");
     expect(changelog).not.toContain("真实维护者可用性验收仍未完成");
     expect(history).not.toContain("未发布的产品复位候选");
     expect(history).toContain("R4 的三类真实项目人工使用验收已经完成并通过");
@@ -189,8 +189,9 @@ describe("public documentation", () => {
     expect(deferred).toContain("已转入 R5 原生旅程门禁");
     expect(deferred).toContain("当前状态：R5 原生执行待完成");
     expect(evidence).toContain("R4 的 small、frontend、fullstack 三项目维护者人工可用性已通过");
-    expect(evidence).toContain("Production Release run `31654257774`");
-    expect(evidence).toContain("当前仅 rc.5 的四平台 OS 级 native journey 与最终发布证据未完成");
+    expect(evidence).toContain("run `31656328041`");
+    expect(evidence).toContain("当前仅 rc.6 的四平台 OS 级 native journey 与最终发布证据未完成");
+    expect(evidence).toContain("rc.5 的制品与单平台 smoke 均不得计入");
     expect(deferred).not.toContain("仍有待补充原生人工证据");
 
     for (const [owner, markdown] of [
