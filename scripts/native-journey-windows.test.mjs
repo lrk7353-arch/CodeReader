@@ -36,25 +36,30 @@ describe("Windows native product journey driver", () => {
     );
   });
 
-  windowsIt("counts zero, one and many missing required paths under strict PowerShell mode", () => {
-    for (const count of [0, 1, 2]) {
-      const result = spawnSync(
-        "powershell.exe",
-        [
-          "-NoProfile",
-          "-ExecutionPolicy",
-          "Bypass",
-          "-File",
-          "scripts/native-journey-windows.ps1",
-          "-RequiredPathSelfTest",
-          String(count)
-        ],
-        { encoding: "utf8" }
-      );
-      expect(result.status).toBe(0);
-      expect(result.stdout).toContain(`Required path count self-test passed: ${count}.`);
-    }
-  });
+  windowsIt(
+    "counts zero, one and many missing required paths under strict PowerShell mode",
+    () => {
+      for (const count of [0, 1, 2]) {
+        const result = spawnSync(
+          "powershell.exe",
+          [
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-File",
+            "scripts/native-journey-windows.ps1",
+            "-RequiredPathSelfTest",
+            String(count)
+          ],
+          { encoding: "utf8", timeout: 4000 }
+        );
+        expect(result.error).toBeUndefined();
+        expect(result.status).toBe(0);
+        expect(result.stdout).toContain(`Required path count self-test passed: ${count}.`);
+      }
+    },
+    15000
+  );
 
   it("drives real OS UI, picker, model, restart and installer probes", () => {
     expect(script).toContain("UIAutomationClient");
