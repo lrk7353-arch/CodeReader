@@ -27,14 +27,19 @@ run_timed_app() {
       local code=$?
     fi
   fi
-  if test "$code" -ne 0 && test "$code" -ne 124; then return "$code"; fi
+  app_exit="$code"
+  if test "$code" -ne 0 && test "$code" -ne 124; then fail_native_journey launch-failed "$code"; fi
 }
 
 if test -n "${CODEREADER_JOURNEY_FAILURE_SELFTEST_PHASE:-}"; then
   case "$CODEREADER_JOURNEY_FAILURE_SELFTEST_PHASE" in
     fixture-0.10|fixture-0.11-current|fixture-0.11-early|migration-recovery)
       current_phase="$CODEREADER_JOURNEY_FAILURE_SELFTEST_PHASE"
-      (exit "${CODEREADER_JOURNEY_FAILURE_SELFTEST_EXIT:-7}")
+      if test -n "${CODEREADER_JOURNEY_FAILURE_SELFTEST_CATEGORY:-}"; then
+        fail_native_journey "$CODEREADER_JOURNEY_FAILURE_SELFTEST_CATEGORY" "${CODEREADER_JOURNEY_FAILURE_SELFTEST_EXIT:-7}"
+      else
+        (exit "${CODEREADER_JOURNEY_FAILURE_SELFTEST_EXIT:-7}")
+      fi
       ;;
     ui-first-run|ui-restart-restore|phase-merge)
       current_phase="ui-session"
@@ -58,6 +63,8 @@ if test -n "${CODEREADER_JOURNEY_FAILURE_SELFTEST_PHASE:-}"; then
       rm -f "$failure_file"
       trap - ERR
       exit 0
+      ;;
+    backup-probe)
       ;;
     *)
       printf '{"phase":"../../private","category":"stderr:/secret","exit":"bad"}\n' > "$failure_file"
@@ -84,6 +91,23 @@ with open(path, "w", encoding="utf-8") as output:
 PY
 }
 
+capture_backup() {
+  local pattern="$1" matches code
+  if matches="$(compgen -G "$pattern")"; then
+    backup="${matches%%$'\n'*}"
+    if test -z "$backup"; then fail_native_journey backup-missing 1; fi
+  else
+    code=$?
+    if test "$code" -eq 1; then fail_native_journey backup-missing 1; fi
+    fail_native_journey command-failed "$code"
+  fi
+}
+
+if test "${CODEREADER_JOURNEY_FAILURE_SELFTEST_PHASE:-}" = backup-probe; then
+  current_phase="fixture-0.10"
+  capture_backup "${XDG_DATA_HOME}/missing-backup-*"
+fi
+
 probe_fixture() {
   local fixture="$1" label="$2" prompt="$3" phase_name="$4"
   rm -rf "${XDG_DATA_HOME}/com.codereader.desktop" "${XDG_DATA_HOME}/com.codereader.app"
@@ -94,23 +118,26 @@ probe_fixture() {
   original_version="$(sqlite3 "$fixture" 'PRAGMA user_version;')"
   run_timed_app
   local current="${XDG_DATA_HOME}/com.codereader.desktop/codereader.sqlite"
-  test "$(sqlite3 "$current" 'PRAGMA user_version;')" = 6
-  test "$(sqlite3 "$current" 'PRAGMA integrity_check;')" = ok
+  if test ! -f "$current"; then
+    if test "$app_exit" -eq 124; then fail_native_journey timeout 124; fi
+    fail_native_journey database-not-created 1
+  fi
+  test "$(sqlite3 "$current" 'PRAGMA user_version;')" = 6 || fail_native_journey schema-invalid 1
+  test "$(sqlite3 "$current" 'PRAGMA integrity_check;')" = ok || fail_native_journey schema-invalid 1
   for query in \
     "SELECT count(*) FROM projects WHERE id='project:fixture';" \
     "SELECT count(*) FROM explanation_nodes WHERE id='exp:fixture';" \
     "SELECT count(*) FROM user_reading_states WHERE id='reading:fixture';" \
     "SELECT count(*) FROM model_provider_settings WHERE id='default';"; do
-    test "$(sqlite3 "$current" "$query")" = 1
+    test "$(sqlite3 "$current" "$query")" = 1 || fail_native_journey data-missing 1
   done
   if test -n "$prompt"; then
-    test "$(sqlite3 "$current" "SELECT count(*) FROM prompt_versions WHERE version='$prompt';")" = 1
+    test "$(sqlite3 "$current" "SELECT count(*) FROM prompt_versions WHERE version='$prompt';")" = 1 || fail_native_journey data-missing 1
   fi
   local backup
-  backup="$(compgen -G "${XDG_DATA_HOME}/com.codereader.app/codereader.sqlite.backup-*" | head -1)"
-  test -n "$backup"
-  test "$(sqlite3 "$backup" 'PRAGMA user_version;')" = "$original_version"
-  test "$(sha256sum "$backup" | cut -d' ' -f1)" = "$original_hash"
+  capture_backup "${XDG_DATA_HOME}/com.codereader.app/codereader.sqlite.backup-*"
+  test "$(sqlite3 "$backup" 'PRAGMA user_version;')" = "$original_version" || fail_native_journey schema-invalid 1
+  test "$(sha256sum "$backup" | cut -d' ' -f1)" = "$original_hash" || fail_native_journey data-missing 1
   if test -n "$phase_name"; then merge_phase "$phase_name" "schema/content/integrity plus exact original backup verified"; fi
 }
 

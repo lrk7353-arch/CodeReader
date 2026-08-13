@@ -24,7 +24,21 @@ const FAILURE_PHASES = new Set([
   "ui-restart-restore",
   "phase-merge"
 ]);
-const FAILURE_CATEGORIES = new Set(["command-failed"]);
+const FAILURE_CATEGORIES = new Set([
+  "command-failed",
+  "launch-failed",
+  "timeout",
+  "database-not-created",
+  "schema-invalid",
+  "data-missing",
+  "backup-missing"
+]);
+const FIXTURE_FAILURE_PHASES = new Set([
+  "fixture-0.10",
+  "fixture-0.11-current",
+  "fixture-0.11-early",
+  "migration-recovery"
+]);
 const REINSTALL_PROBE = `
 import subprocess, sys, time
 executable, driver, wrong_project, project = sys.argv[1:]
@@ -65,6 +79,7 @@ export function readFailureEnvelope(path) {
         JSON.stringify(["category", "exit", "phase"]) ||
       !FAILURE_PHASES.has(evidence.phase) ||
       !FAILURE_CATEGORIES.has(evidence.category) ||
+      (evidence.category !== "command-failed" && !FIXTURE_FAILURE_PHASES.has(evidence.phase)) ||
       !Number.isInteger(evidence.exit) ||
       evidence.exit < 1 ||
       evidence.exit > 255

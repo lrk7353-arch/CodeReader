@@ -32,6 +32,14 @@ describe("Windows native product journey driver", () => {
     expect(script).toContain("$backup.FullName 'PRAGMA integrity_check;'");
     expect(script).toContain("Test-MigrationFailureRecovery");
     expect(script).toContain("function Wait-CodeReaderDatabase");
+    expect(script).toContain("function Remove-ControlledDataPaths");
+    expect(script).toContain("foreach ($path in $paths)");
+    expect(script).toContain("Get-Item -LiteralPath $LiteralPath -ErrorAction Stop");
+    expect(script).toContain("catch [System.Management.Automation.ItemNotFoundException]");
+    expect(script).toContain("phase=migration-cleanup category=cleanup-error exit=1");
+    expect(script).not.toContain(
+      "Remove-Item -Recurse -Force -ErrorAction SilentlyContinue $CurrentDataCandidates, $LegacyDataCandidates"
+    );
     expect(script).toContain("$CurrentDatabaseCandidates");
     expect(script).toContain(
       "$KnownRoamingData = [Environment]::GetFolderPath([Environment+SpecialFolder]::ApplicationData)"
@@ -107,6 +115,38 @@ describe("Windows native product journey driver", () => {
         { expected: "not-found", actual: "not-found" },
         { expected: "unique", actual: "unique" },
         { expected: "ambiguous", actual: "ambiguous" }
+      ]);
+    },
+    20000
+  );
+
+  windowsIt(
+    "cleans zero and multiple controlled path groups one literal path at a time",
+    () => {
+      const result = spawnSync(
+        "powershell.exe",
+        [
+          "-NoProfile",
+          "-ExecutionPolicy",
+          "Bypass",
+          "-File",
+          "scripts/native-journey-windows.ps1",
+          "-CleanupPathSelfTest"
+        ],
+        { encoding: "utf8", timeout: 15000 }
+      );
+      expect(result.error).toBeUndefined();
+      expect(result.status).toBe(0);
+      expect(
+        result.stdout
+          .trim()
+          .split(/\r?\n/)
+          .map((line) => JSON.parse(line))
+      ).toEqual([
+        { expected: "empty", actual: "empty" },
+        { expected: "multiple", actual: "multiple" },
+        { expected: "access-failed", actual: "access-failed" },
+        { expected: "primary-preserved", actual: "primary-preserved" }
       ]);
     },
     20000
