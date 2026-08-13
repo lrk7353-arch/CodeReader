@@ -2,6 +2,7 @@
     [ValidateSet("x64", "arm64")][string]$Architecture,
     [string]$ReleaseTag,
     [string]$CommitSha,
+    [string]$HarnessCommitSha,
     [string]$Package,
     [string]$Project,
     [string]$Fixture010,
@@ -414,6 +415,7 @@ function Generate-Explanation($Root) {
 }
 
 if ($CommitSha -notmatch '^[0-9a-fA-F]{40}$') { throw "Invalid commit SHA." }
+if ($HarnessCommitSha -notmatch '^[0-9a-fA-F]{40}$') { throw "Invalid harness commit SHA." }
 if ($ReleaseTag -notmatch '^v1\.[0-9]+\.[0-9]+(?:-rc\.[0-9]+)?$') { throw "Invalid release tag." }
 $requiredPaths = @($Package, $Fixture010, $Fixture011, $Fixture011Current)
 $missingRequiredPaths = @($requiredPaths | Where-Object { -not (Test-Path -LiteralPath $_) })
@@ -562,7 +564,8 @@ try {
     $missing = @($RequiredChecks | Where-Object { -not $Observed[$_] })
     Assert-True ($missing.Count -eq 0) "Native journey is incomplete: $($missing -join ', ')"
     $evidence = [ordered]@{
-        schemaVersion = 1; releaseTag = $ReleaseTag; commitSha = $CommitSha.ToLowerInvariant()
+        schemaVersion = 2; releaseTag = $ReleaseTag; commitSha = $CommitSha.ToLowerInvariant()
+        harnessCommitSha = $HarnessCommitSha.ToLowerInvariant()
         platform = 'windows'; arch = $Architecture; observedAt = [DateTimeOffset]::UtcNow.ToString("yyyy-MM-dd'T'HH:mm:ss.fff'Z'")
         status = 'pass'; windowsAuthenticodeSigned = $false
         checks = @($RequiredChecks | ForEach-Object { [ordered]@{ name = $_; status = 'pass' } })

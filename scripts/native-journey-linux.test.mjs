@@ -68,10 +68,13 @@ function hasProtectedCandidateHandoff(workflow) {
     journey.includes('if ($LASTEXITCODE -ne 0) { throw "Chocolatey failed') &&
     journey.includes("Get-Command sqlite3 -ErrorAction Stop") &&
     journey.includes("& $sqlite.Source --version") &&
-    journey.includes("cd candidate-source") &&
     journey.includes("node scripts/native-journey-linux.mjs") &&
-    journey.includes('Push-Location "$workspace/candidate-source"') &&
     journey.includes("./scripts/native-journey-windows.ps1") &&
+    journey.includes("--harness-sha '${{ github.sha }}'") &&
+    journey.includes("-HarnessCommitSha '${{ github.sha }}'") &&
+    journey.includes('test "$(git rev-parse HEAD)" = "${{ github.sha }}"') &&
+    !journey.includes("cd candidate-source") &&
+    !journey.includes('Push-Location "$workspace/candidate-source"') &&
     journey.includes('$output = "$workspace/native-journey-') &&
     journey.includes("node scripts/native-journey-fixture.mjs") &&
     !journey.includes("candidate-source/scripts/native-journey-fixture.mjs") &&
@@ -79,12 +82,12 @@ function hasProtectedCandidateHandoff(workflow) {
     !journey.includes(
       "candidate-source/src-tauri/tests/fixtures/persistence/historical-schema-manifest.json"
     ) &&
-    journey.includes("--data candidate-source/src-tauri/tests/fixtures/persistence/v0_10.sql") &&
+    journey.includes('--data "$candidate_source/src-tauri/tests/fixtures/persistence/v0_10.sql"') &&
     journey.includes(
-      "--data candidate-source/src-tauri/tests/fixtures/persistence/v0_11_early.sql"
+      '--data "$candidate_source/src-tauri/tests/fixtures/persistence/v0_11_early.sql"'
     ) &&
     journey.includes(
-      "--data candidate-source/src-tauri/tests/fixtures/persistence/v0_11_current.sql"
+      '--data "$candidate_source/src-tauri/tests/fixtures/persistence/v0_11_current.sql"'
     ) &&
     journey.includes("--base journey-fixtures/v2-schema.sql") &&
     journey.includes("--migrations migrate_to_v3") &&
@@ -116,6 +119,7 @@ function hasProtectedCandidateHandoff(workflow) {
       "--input final-release-binding --manifest prepared-candidate/candidate-manifest.json \\"
     ) &&
     finalAttach.includes("release-evidence.mjs verify-journeys") &&
+    finalAttach.includes("--harness-sha '${{ github.sha }}'") &&
     finalAttach.indexOf("gh release download") <
       finalAttach.indexOf("release-evidence.mjs verify") &&
     finalAttach.indexOf("release-evidence.mjs verify") <
@@ -132,6 +136,7 @@ describe("Linux native journey evidence", () => {
     const evidence = buildJourneyFromPhases({
       tag: "v1.0.0-rc.3",
       sha: "a".repeat(40),
+      harnessSha: "b".repeat(40),
       arch: nativeArch,
       phases,
       observedAt: "2026-08-12T00:00:00.000Z"
@@ -148,6 +153,7 @@ describe("Linux native journey evidence", () => {
       buildJourneyFromPhases({
         tag: "v1.0.0-rc.3",
         sha: "b".repeat(40),
+        harnessSha: "c".repeat(40),
         arch: nonNativeArch,
         phases
       })
@@ -161,6 +167,7 @@ describe("Linux native journey evidence", () => {
       buildJourneyFromPhases({
         tag: "v1.0.0-rc.3",
         sha: "a".repeat(40),
+        harnessSha: "b".repeat(40),
         arch: nativeArch,
         phases: incomplete
       })
@@ -241,16 +248,17 @@ describe("Linux native journey evidence", () => {
       'if ($LASTEXITCODE -ne 0) { throw "Chocolatey failed',
       "Get-Command sqlite3 -ErrorAction Stop",
       "& $sqlite.Source --version",
-      "cd candidate-source",
       "node scripts/native-journey-linux.mjs",
-      'Push-Location "$workspace/candidate-source"',
       "./scripts/native-journey-windows.ps1",
+      "--harness-sha '${{ github.sha }}'",
+      "-HarnessCommitSha '${{ github.sha }}'",
+      'test "$(git rev-parse HEAD)" = "${{ github.sha }}"',
       '$output = "$workspace/native-journey-',
       "node scripts/native-journey-fixture.mjs",
       "src-tauri/tests/fixtures/persistence/historical-schema-manifest.json",
-      "--data candidate-source/src-tauri/tests/fixtures/persistence/v0_10.sql",
-      "--data candidate-source/src-tauri/tests/fixtures/persistence/v0_11_early.sql",
-      "--data candidate-source/src-tauri/tests/fixtures/persistence/v0_11_current.sql",
+      '--data "$candidate_source/src-tauri/tests/fixtures/persistence/v0_10.sql"',
+      '--data "$candidate_source/src-tauri/tests/fixtures/persistence/v0_11_early.sql"',
+      '--data "$candidate_source/src-tauri/tests/fixtures/persistence/v0_11_current.sql"',
       "--base journey-fixtures/v2-schema.sql",
       "--migrations migrate_to_v3",
       "native-smoke-${{ matrix.platform }}-${{ matrix.arch }}.json",

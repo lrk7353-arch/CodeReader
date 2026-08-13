@@ -61,12 +61,14 @@ function query(database, sql) {
 export function buildJourneyFromPhases({
   tag,
   sha,
+  harnessSha,
   arch,
   phases,
   observedAt = new Date().toISOString()
 }) {
   if (!/^v1\.[0-9]+\.[0-9]+(?:-rc\.[0-9]+)?$/.test(tag)) fail("Invalid tag.");
   if (!/^[0-9a-f]{40}$/i.test(sha)) fail("Invalid SHA.");
+  if (!/^[0-9a-f]{40}$/i.test(harnessSha)) fail("Invalid harness SHA.");
   if (!["x64", "arm64"].includes(arch) || process.arch !== arch) fail("Not a native runner.");
   for (const name of REQUIRED) {
     const phase = phases?.[name];
@@ -75,9 +77,10 @@ export function buildJourneyFromPhases({
     }
   }
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     releaseTag: tag,
     commitSha: sha.toLowerCase(),
+    harnessCommitSha: harnessSha.toLowerCase(),
     platform: "linux",
     arch,
     observedAt,
@@ -139,6 +142,7 @@ export function runLinuxJourney(argv = process.argv.slice(2)) {
     const evidence = buildJourneyFromPhases({
       tag: value.tag,
       sha: value.sha,
+      harnessSha: value["harness-sha"],
       arch: value.arch,
       phases
     });
@@ -199,9 +203,10 @@ export function runLinuxJourney(argv = process.argv.slice(2)) {
     "uninstall-data-policy": { status: "pending", probe: "reinstall not run" }
   };
   const evidence = {
-    schemaVersion: 1,
+    schemaVersion: 2,
     releaseTag: value.tag,
     commitSha: value.sha.toLowerCase(),
+    harnessCommitSha: (value["harness-sha"] ?? fail("Missing --harness-sha")).toLowerCase(),
     platform: "linux",
     arch: value.arch,
     observedAt: new Date().toISOString(),

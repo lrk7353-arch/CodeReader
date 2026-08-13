@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import { expectedReleaseAssetNames } from "./release-assets.mjs";
 
 export const EVIDENCE_SCHEMA_VERSION = 1;
+export const NATIVE_JOURNEY_SCHEMA_VERSION = 2;
 const MATRIX = Object.freeze([
   ["windows", "x64"],
   ["windows", "arm64"],
@@ -37,6 +38,7 @@ const NATIVE_JOURNEY_FIELDS = Object.freeze([
   "schemaVersion",
   "releaseTag",
   "commitSha",
+  "harnessCommitSha",
   "platform",
   "arch",
   "observedAt",
@@ -221,7 +223,14 @@ export function verifyNativeSmokeEvidence({ input, version, tag, commitSha, outp
   return verified;
 }
 
-export function buildNativeJourneyTemplate({ platform, arch, tag, commitSha, observedAt }) {
+export function buildNativeJourneyTemplate({
+  platform,
+  arch,
+  tag,
+  commitSha,
+  harnessCommitSha,
+  observedAt
+}) {
   if (
     !MATRIX.some(
       ([candidatePlatform, candidateArch]) =>
@@ -232,10 +241,12 @@ export function buildNativeJourneyTemplate({ platform, arch, tag, commitSha, obs
   }
   if (!/^v\d+\.\d+\.\d+(?:-rc\.\d+)?$/.test(tag)) fail("Invalid release tag.");
   if (!/^[0-9a-f]{40}$/i.test(commitSha)) fail("Invalid commit SHA.");
+  if (!/^[0-9a-f]{40}$/i.test(harnessCommitSha)) fail("Invalid harness commit SHA.");
   return {
-    schemaVersion: EVIDENCE_SCHEMA_VERSION,
+    schemaVersion: NATIVE_JOURNEY_SCHEMA_VERSION,
     releaseTag: tag,
     commitSha: commitSha.toLowerCase(),
+    harnessCommitSha: harnessCommitSha.toLowerCase(),
     platform,
     arch,
     observedAt: observedAt ?? new Date().toISOString(),
@@ -245,7 +256,8 @@ export function buildNativeJourneyTemplate({ platform, arch, tag, commitSha, obs
   };
 }
 
-export function verifyNativeJourneyEvidence({ input, tag, commitSha }) {
+export function verifyNativeJourneyEvidence({ input, tag, commitSha, harnessCommitSha }) {
+  if (!/^[0-9a-f]{40}$/i.test(harnessCommitSha)) fail("Invalid expected harness commit SHA.");
   const files = walkFiles(resolve(input));
   const journeyFiles = files
     .map((path) => basename(path))
@@ -268,10 +280,13 @@ export function verifyNativeJourneyEvidence({ input, tag, commitSha }) {
     const evidence = JSON.parse(readFileSync(matches[0], "utf8"));
     assertPortableEvidence(evidence);
     assertNativeJourneySchema(evidence, platform, arch, evidenceName);
-    if (evidence.schemaVersion !== EVIDENCE_SCHEMA_VERSION)
+    if (evidence.schemaVersion !== NATIVE_JOURNEY_SCHEMA_VERSION)
       fail(`${evidenceName} schema mismatch.`);
     if (evidence.releaseTag !== tag || evidence.commitSha !== commitSha.toLowerCase()) {
       fail(`${evidenceName} is not bound to ${tag} at ${commitSha}.`);
+    }
+    if (evidence.harnessCommitSha !== harnessCommitSha.toLowerCase()) {
+      fail(`${evidenceName} is not bound to harness ${harnessCommitSha}.`);
     }
     if (evidence.platform !== platform || evidence.arch !== arch || evidence.status !== "pass") {
       fail(`${evidenceName} does not contain a passing ${platform}/${arch} journey.`);
@@ -324,7 +339,8 @@ export function runCli(argv) {
       platform: values.platform ?? fail("Missing --platform"),
       arch: values.arch ?? fail("Missing --arch"),
       tag: values.tag ?? fail("Missing --tag"),
-      commitSha: values.sha ?? fail("Missing --sha")
+      commitSha: values.sha ?? fail("Missing --sha"),
+      harnessCommitSha: values["harness-sha"] ?? fail("Missing --harness-sha")
     });
     mkdirSync(resolve(output, ".."), { recursive: true });
     writeFileSync(resolve(output), `${JSON.stringify(template, null, 2)}\n`);
@@ -335,7 +351,8 @@ export function runCli(argv) {
     const verified = verifyNativeJourneyEvidence({
       input: values.input ?? fail("Missing --input"),
       tag: values.tag ?? fail("Missing --tag"),
-      commitSha: values.sha ?? fail("Missing --sha")
+      commitSha: values.sha ?? fail("Missing --sha"),
+      harnessCommitSha: values["harness-sha"] ?? fail("Missing --harness-sha")
     });
     process.stdout.write(`Verified ${verified.length} native product journey records.\n`);
     return;

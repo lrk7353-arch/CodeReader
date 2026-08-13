@@ -15,6 +15,7 @@ import {
 const VERSION = "1.0.0-rc.2";
 const TAG = `v${VERSION}`;
 const SHA = "a".repeat(40);
+const HARNESS_SHA = "b".repeat(40);
 
 function hash(value) {
   return createHash("sha256").update(value).digest("hex");
@@ -49,6 +50,7 @@ function fixture() {
           schemaVersion: 1,
           releaseTag: TAG,
           commitSha: SHA,
+          harnessCommitSha: HARNESS_SHA,
           platform,
           arch,
           status: "pass",
@@ -146,6 +148,7 @@ describe("native product journey evidence", () => {
           arch,
           tag: TAG,
           commitSha: SHA,
+          harnessCommitSha: HARNESS_SHA,
           observedAt: "2026-08-12T00:00:00.000Z"
         });
         evidence.status = "pass";
@@ -164,16 +167,26 @@ describe("native product journey evidence", () => {
 
   it("requires all four target-bound native product journeys", () => {
     expect(
-      verifyNativeJourneyEvidence({ input: journeyFixture(), tag: TAG, commitSha: SHA })
+      verifyNativeJourneyEvidence({
+        input: journeyFixture(),
+        tag: TAG,
+        commitSha: SHA,
+        harnessCommitSha: HARNESS_SHA
+      })
     ).toHaveLength(4);
   });
 
   it("rejects an unexpected journey record alongside the four targets", () => {
     const input = journeyFixture();
     writeFileSync(join(input, "native-journey-unknown-x64.json"), "{}");
-    expect(() => verifyNativeJourneyEvidence({ input, tag: TAG, commitSha: SHA })).toThrow(
-      /exactly the four expected/
-    );
+    expect(() =>
+      verifyNativeJourneyEvidence({
+        input,
+        tag: TAG,
+        commitSha: SHA,
+        harnessCommitSha: HARNESS_SHA
+      })
+    ).toThrow(/exactly the four expected/);
   });
 
   it("keeps a generated template pending and Windows explicitly unsigned", () => {
@@ -181,7 +194,8 @@ describe("native product journey evidence", () => {
       platform: "windows",
       arch: "arm64",
       tag: TAG,
-      commitSha: SHA
+      commitSha: SHA,
+      harnessCommitSha: HARNESS_SHA
     });
     expect(template).toMatchObject({
       status: "manual_required",
@@ -197,9 +211,14 @@ describe("native product journey evidence", () => {
     const evidence = JSON.parse(readFileSync(path, "utf8"));
     evidence.checks[0].status = "pending";
     writeFileSync(path, JSON.stringify(evidence));
-    expect(() => verifyNativeJourneyEvidence({ input, tag: TAG, commitSha: SHA })).toThrow(
-      /non-passing/
-    );
+    expect(() =>
+      verifyNativeJourneyEvidence({
+        input,
+        tag: TAG,
+        commitSha: SHA,
+        harnessCommitSha: HARNESS_SHA
+      })
+    ).toThrow(/non-passing/);
   });
 
   it("rejects a Windows signing claim without actual Authenticode verification", () => {
@@ -208,9 +227,14 @@ describe("native product journey evidence", () => {
     const evidence = JSON.parse(readFileSync(path, "utf8"));
     evidence.windowsAuthenticodeSigned = true;
     writeFileSync(path, JSON.stringify(evidence));
-    expect(() => verifyNativeJourneyEvidence({ input, tag: TAG, commitSha: SHA })).toThrow(
-      /without a passing Authenticode verification/
-    );
+    expect(() =>
+      verifyNativeJourneyEvidence({
+        input,
+        tag: TAG,
+        commitSha: SHA,
+        harnessCommitSha: HARNESS_SHA
+      })
+    ).toThrow(/without a passing Authenticode verification/);
   });
 
   it.each([
@@ -237,6 +261,37 @@ describe("native product journey evidence", () => {
     const evidence = JSON.parse(readFileSync(path, "utf8"));
     mutate(evidence);
     writeFileSync(path, JSON.stringify(evidence));
-    expect(() => verifyNativeJourneyEvidence({ input, tag: TAG, commitSha: SHA })).toThrow();
+    expect(() =>
+      verifyNativeJourneyEvidence({
+        input,
+        tag: TAG,
+        commitSha: SHA,
+        harnessCommitSha: HARNESS_SHA
+      })
+    ).toThrow();
+  });
+
+  it("rejects a different or missing harness identity", () => {
+    const input = journeyFixture();
+    expect(() =>
+      verifyNativeJourneyEvidence({
+        input,
+        tag: TAG,
+        commitSha: SHA,
+        harnessCommitSha: "c".repeat(40)
+      })
+    ).toThrow(/not bound to harness/);
+    const path = join(input, "native-journey-linux-x64.json");
+    const evidence = JSON.parse(readFileSync(path, "utf8"));
+    delete evidence.harnessCommitSha;
+    writeFileSync(path, JSON.stringify(evidence));
+    expect(() =>
+      verifyNativeJourneyEvidence({
+        input,
+        tag: TAG,
+        commitSha: SHA,
+        harnessCommitSha: HARNESS_SHA
+      })
+    ).toThrow(/unknown field|harness/);
   });
 });

@@ -106,6 +106,7 @@ jobs:
         run: |
           test "$(git -C candidate-source describe --tags --exact-match HEAD)" = "$RELEASE_TAG"
           echo "sha=$(git -C candidate-source rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          test "$(git rev-parse HEAD)" = "${{ github.sha }}"
       - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
         with:
           name: verified-candidate-release-assets
@@ -137,6 +138,7 @@ jobs:
       - name: Build sanitized historical migration fixtures
         shell: bash
         run: |
+          candidate_source="$(realpath candidate-source)"
           mkdir -p journey-fixtures
           git -C candidate-source fetch --no-tags origin \
             f7e7b454e4b17c0380d2efec962ef103863e9c83 \
@@ -169,28 +171,29 @@ jobs:
           grep -q 'CREATE TABLE IF NOT EXISTS prompt_versions' journey-fixtures/v2-schema.sql
           grep -q 'ALTER TABLE "prompt_versions" ADD COLUMN "system_prompt_template" TEXT' journey-fixtures/v3-schema.sql
           node scripts/native-journey-fixture.mjs --schema journey-fixtures/v1-schema.sql \
-            --data candidate-source/src-tauri/tests/fixtures/persistence/v0_10.sql \
+            --data "$candidate_source/src-tauri/tests/fixtures/persistence/v0_10.sql" \
             --output journey-fixtures/v0_10.sqlite --version 1
           node scripts/native-journey-fixture.mjs --schema journey-fixtures/v2-schema.sql \
-            --data candidate-source/src-tauri/tests/fixtures/persistence/v0_11_early.sql \
+            --data "$candidate_source/src-tauri/tests/fixtures/persistence/v0_11_early.sql" \
             --output journey-fixtures/v0_11.sqlite --version 2
           node scripts/native-journey-fixture.mjs --schema journey-fixtures/v3-schema.sql \
-            --data candidate-source/src-tauri/tests/fixtures/persistence/v0_11_current.sql \
+            --data "$candidate_source/src-tauri/tests/fixtures/persistence/v0_11_current.sql" \
             --output journey-fixtures/v0_11_current.sqlite --version 3
       - name: Run Linux native product journey
         if: matrix.platform == 'linux'
         run: |
           workspace="$GITHUB_WORKSPACE"
+          candidate_source="$(realpath "$workspace/candidate-source")"
           profile="$RUNNER_TEMP/codereader-native-journey"
           controlled_project="$RUNNER_TEMP/codereader-journey-project"
           wrong_project="$RUNNER_TEMP/codereader-wrong-project"
-          cp -R candidate-source/examples/fullstack "$controlled_project"
-          cp -R candidate-source/examples/small "$wrong_project"
+          cp -R "$candidate_source/examples/fullstack" "$controlled_project"
+          cp -R "$candidate_source/examples/small" "$wrong_project"
           for index in $(seq 1 300); do printf '\nNative journey paragraph %03d.\n' "$index" >> "$controlled_project/README.md"; done
           printf '\nJOURNEY-END-CONTENT\n' >> "$controlled_project/README.md"
-          cd candidate-source
           node scripts/native-journey-linux.mjs \
             --arch '${{ matrix.arch }}' --tag "$RELEASE_TAG" --sha '${{ steps.target.outputs.sha }}' \
+            --harness-sha '${{ github.sha }}' \
             --executable /usr/bin/codereader --project "$controlled_project" --app-data "$profile" \
             --wrong-project "$wrong_project" \
             --fixture-010 "$workspace/journey-fixtures/v0_10.sqlite" \
@@ -208,28 +211,26 @@ jobs:
             --finalize-uninstall "$profile" --executable /usr/bin/codereader \
             --project "$controlled_project" --wrong-project "$wrong_project" \
             --arch '${{ matrix.arch }}' --tag "$RELEASE_TAG" --sha '${{ steps.target.outputs.sha }}' \
+            --harness-sha '${{ github.sha }}' \
             --output "$workspace/native-journey-${{ matrix.platform }}-${{ matrix.arch }}.json"
       - name: Run Windows native product journey
         if: matrix.platform == 'windows'
         shell: pwsh
         run: |
           $workspace = $env:GITHUB_WORKSPACE
+          $candidateSource = (Resolve-Path "$workspace/candidate-source").Path
           $package = (Resolve-Path "$workspace/journey-package/*.msi").Path
           $fixture010 = (Resolve-Path "$workspace/journey-fixtures/v0_10.sqlite").Path
           $fixture011 = (Resolve-Path "$workspace/journey-fixtures/v0_11.sqlite").Path
           $fixture011Current = (Resolve-Path "$workspace/journey-fixtures/v0_11_current.sqlite").Path
-          $project = (Resolve-Path "$workspace/candidate-source/examples/fullstack").Path
+          $project = (Resolve-Path "$candidateSource/examples/fullstack").Path
           $output = "$workspace/native-journey-${{ matrix.platform }}-${{ matrix.arch }}.json"
-          Push-Location "$workspace/candidate-source"
-          try {
           ./scripts/native-journey-windows.ps1 `
             -Architecture '${{ matrix.arch }}' -ReleaseTag $env:RELEASE_TAG `
-            -CommitSha '${{ steps.target.outputs.sha }}' -Package $package -Project $project `
+            -CommitSha '${{ steps.target.outputs.sha }}' -HarnessCommitSha '${{ github.sha }}' `
+            -Package $package -Project $project `
             -Fixture010 $fixture010 -Fixture011 $fixture011 -Fixture011Current $fixture011Current `
             -Output $output
-          } finally {
-            Pop-Location
-          }
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: native-journey-${{ matrix.platform }}-${{ matrix.arch }}
@@ -287,7 +288,8 @@ jobs:
           test "$(git -C candidate-source describe --tags --exact-match HEAD)" = "$RELEASE_TAG"
           test "$(gh release view "$RELEASE_TAG" --json tagName --jq .tagName)" = "$RELEASE_TAG"
           test "$(gh release view "$RELEASE_TAG" --json isDraft --jq .isDraft)" = true
-          node scripts/release-evidence.mjs verify-journeys --input verified-native-journeys --tag "$RELEASE_TAG" --sha "$(git -C candidate-source rev-parse HEAD)"
+          test "$(git rev-parse HEAD)" = "${{ github.sha }}"
+          node scripts/release-evidence.mjs verify-journeys --input verified-native-journeys --tag "$RELEASE_TAG" --sha "$(git -C candidate-source rev-parse HEAD)" --harness-sha '${{ github.sha }}'
       - name: Attest native journey evidence
         uses: actions/attest@a1948c3f048ba23858d222213b7c278aabede763 # v4
         with:
@@ -309,5 +311,6 @@ jobs:
           node scripts/native-candidate-snapshot.mjs verify \
             --input final-release-binding --manifest prepared-candidate/candidate-manifest.json \
             --tag "$RELEASE_TAG" --sha "$(git -C candidate-source rev-parse HEAD)"
-          node scripts/release-evidence.mjs verify-journeys --input verified-native-journeys --tag "$RELEASE_TAG" --sha "$(git -C candidate-source rev-parse HEAD)"
+          test "$(git rev-parse HEAD)" = "${{ github.sha }}"
+          node scripts/release-evidence.mjs verify-journeys --input verified-native-journeys --tag "$RELEASE_TAG" --sha "$(git -C candidate-source rev-parse HEAD)" --harness-sha '${{ github.sha }}'
           gh release upload "$RELEASE_TAG" verified-native-journeys/native-journey-*.json --clobber
