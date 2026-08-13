@@ -58,11 +58,62 @@ function Invoke-Process([string]$FilePath, [string[]]$Arguments, [int[]]$Allowed
     if ($process.ExitCode -notin $Allowed) { throw "$FilePath failed with exit code $($process.ExitCode)." }
 }
 
-function Select-CodeReaderUninstallEntry($Entries, [switch]$AllowNotFound) {
+function Get-SafeProperty($Object, [string]$Name) {
+    if ($null -eq $Object -or $null -eq $Object.PSObject.Properties[$Name]) { return $null }
+    [string]$Object.$Name
+}
+
+function Get-MsiProperty([string]$MsiPath, [string]$Name) {
+    try {
+        $installer = New-Object -ComObject WindowsInstaller.Installer
+        $database = $installer.GetType().InvokeMember('OpenDatabase', 'InvokeMethod', $null, $installer, @($MsiPath, 0))
+        $view = $database.GetType().InvokeMember('OpenView', 'InvokeMethod', $null, $database, @("SELECT ``Value`` FROM ``Property`` WHERE ``Property``='$Name'"))
+        $view.GetType().InvokeMember('Execute', 'InvokeMethod', $null, $view, $null) | Out-Null
+        $record = $view.GetType().InvokeMember('Fetch', 'InvokeMethod', $null, $view, $null)
+        if ($null -eq $record) { throw 'missing-property' }
+        [string]$record.GetType().InvokeMember('StringData', 'GetProperty', $null, $record, 1)
+    } catch {
+        throw 'Native journey phase=installer-discovery category=package-identity-error exit=1.'
+    }
+}
+
+function Get-MsiInstalledLocation([string]$ProductCode) {
+    try {
+        $installer = New-Object -ComObject WindowsInstaller.Installer
+        [string]$installer.GetType().InvokeMember('ProductInfo', 'GetProperty', $null, $installer, @($ProductCode, 'InstallLocation'))
+    } catch {
+        return $null
+    }
+}
+
+function Assert-MsiProductIdentity([string]$ProductCode, [string]$ProductVersion) {
+    if ($ProductCode -notmatch '^\{[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}\}$' -or $ProductVersion -ne '1.0.0') {
+        throw 'Native journey phase=installer-discovery category=invalid-package exit=1.'
+    }
+}
+
+function Get-ExecutableCandidates($Entry, [AllowNull()][string]$InstalledLocation) {
+    $candidates = @()
+    $root = Get-SafeProperty $Entry 'InstallLocation'
+    if (-not [string]::IsNullOrWhiteSpace($root)) { $root = $root.Trim('"') }
+    if ([string]::IsNullOrWhiteSpace($root)) { $root = $InstalledLocation }
+    if (-not [string]::IsNullOrWhiteSpace($root)) {
+        $candidates += Join-Path $root 'CodeReader.exe'
+        $candidates += Join-Path $root 'codereader.exe'
+    }
+    $displayIcon = Get-SafeProperty $Entry 'DisplayIcon'
+    if (-not [string]::IsNullOrWhiteSpace($displayIcon)) { $candidates += $displayIcon.Split(',')[0].Trim('"') }
+    if ($candidates.Count -eq 0) { throw 'Native journey phase=installer-discovery category=invalid-entry exit=1.' }
+    $candidates
+}
+
+function Select-CodeReaderUninstallEntry($Entries, [string]$ProductCode, [string]$DisplayVersion, [switch]$AllowNotFound) {
     $matches = @($Entries | Where-Object {
         $null -ne $_ -and
-        $null -ne $_.PSObject.Properties['DisplayName'] -and
-        [string]$_.DisplayName -ceq 'CodeReader'
+        (Get-SafeProperty $_ 'DisplayName') -ceq 'CodeReader' -and
+        (Get-SafeProperty $_ 'PSChildName') -ieq $ProductCode -and
+        (Get-SafeProperty $_ 'DisplayVersion') -ceq $DisplayVersion -and
+        (Get-SafeProperty $_ 'Publisher') -ceq 'CodeReader Project'
     })
     if ($matches.Count -eq 0) {
         if ($AllowNotFound) { return $null }
@@ -88,16 +139,19 @@ function Invoke-InstallerCleanup($PrimaryFailure, [scriptblock]$Probe, [scriptbl
 if ($RegistryDiscoverySelfTest) {
     $missingProperty = [pscustomobject]@{ Publisher = 'test' }
     $unrelated = [pscustomobject]@{ DisplayName = 'Other' }
-    $codeReader = [pscustomobject]@{ DisplayName = 'CodeReader'; InstallLocation = 'controlled' }
+    $codeReader = [pscustomobject]@{ DisplayName = 'CodeReader'; PSChildName = '{CURRENT-PRODUCT}'; DisplayVersion = '1.0.0'; Publisher = 'CodeReader Project'; InstallLocation = 'controlled' }
+    $staleCodeReader = [pscustomobject]@{ DisplayName = 'CodeReader'; PSChildName = '{STALE-PRODUCT}'; DisplayVersion = '0.11.0'; Publisher = 'CodeReader Project' }
+    $secondCurrent = [pscustomobject]@{ DisplayName = 'CodeReader'; PSChildName = '{CURRENT-PRODUCT}'; DisplayVersion = '1.0.0'; Publisher = 'CodeReader Project'; DisplayIcon = 'controlled' }
     $scenarios = @(
-        [ordered]@{ expected = 'unique'; entries = @($missingProperty, $unrelated, $codeReader) },
+        [ordered]@{ expected = 'unique'; entries = @($missingProperty, $unrelated, $staleCodeReader, $codeReader) },
         [ordered]@{ expected = 'not-found'; entries = @($missingProperty, $unrelated) },
-        [ordered]@{ expected = 'ambiguous'; entries = @($missingProperty, $codeReader, ([pscustomobject]@{ DisplayName = 'CodeReader' })) }
+        [ordered]@{ expected = 'ambiguous'; entries = @($missingProperty, $codeReader, $secondCurrent) },
+        [ordered]@{ expected = 'not-found'; entries = @($staleCodeReader) }
     )
     foreach ($scenario in $scenarios) {
         $actual = 'unique'
         try {
-            Select-CodeReaderUninstallEntry $scenario.entries | Out-Null
+            Select-CodeReaderUninstallEntry $scenario.entries '{CURRENT-PRODUCT}' '1.0.0' | Out-Null
         } catch {
             if ($_.Exception.Message -match 'category=([a-z-]+)') { $actual = $Matches[1] } else { throw }
         }
@@ -123,10 +177,31 @@ if ($RegistryDiscoverySelfTest) {
         if ($actual -ne $scenario.expected) { throw 'Cleanup semantics self-test failed.' }
         [ordered]@{ expected = $scenario.expected; actual = $actual } | ConvertTo-Json -Compress
     }
+    $invalidCurrent = [pscustomobject]@{ DisplayName = 'CodeReader'; PSChildName = '{CURRENT-PRODUCT}'; DisplayVersion = '1.0.0'; Publisher = 'CodeReader Project' }
+    try {
+        Get-ExecutableCandidates $invalidCurrent $null | Out-Null
+        throw 'Invalid current package self-test did not fail.'
+    } catch {
+        if ($_.Exception.Message -notmatch 'category=invalid-entry') { throw }
+        [ordered]@{ expected = 'invalid-entry'; actual = 'invalid-entry' } | ConvertTo-Json -Compress
+    }
+    foreach ($identity in @(
+        [ordered]@{ code = '{12345678-1234-ABCD-9876-1234567890ab}'; expected = 'valid-package' },
+        [ordered]@{ code = '{1234567-81234-ABCD-9876-1234567890ab}'; expected = 'invalid-package' },
+        [ordered]@{ code = '{--------}'; expected = 'invalid-package' },
+        [ordered]@{ code = '{12345678-1234-ABCG-9876-1234567890ab}'; expected = 'invalid-package' }
+    )) {
+        $actual = 'valid-package'
+        try { Assert-MsiProductIdentity $identity.code '1.0.0' } catch {
+            if ($_.Exception.Message -match 'category=invalid-package') { $actual = 'invalid-package' } else { throw }
+        }
+        if ($actual -ne $identity.expected) { throw 'MSI product identity self-test failed.' }
+        [ordered]@{ expected = $identity.expected; actual = $actual } | ConvertTo-Json -Compress
+    }
     exit 0
 }
 
-function Get-UninstallEntry {
+function Get-UninstallEntry([string]$ProductCode, [string]$DisplayVersion) {
     try {
         $entries = @()
         foreach ($root in @('HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall', 'HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall')) {
@@ -139,14 +214,14 @@ function Get-UninstallEntry {
                 $entries += Get-ItemProperty -LiteralPath $child.PSPath -ErrorAction Stop
             }
         }
-        Select-CodeReaderUninstallEntry $entries
+        Select-CodeReaderUninstallEntry $entries $ProductCode $DisplayVersion
     } catch {
         if ($_.Exception.Message -match '^Native journey phase=installer-discovery category=(?:not-found|ambiguous) exit=1\.$') { throw }
         throw 'Native journey phase=installer-discovery category=registry-error exit=1.'
     }
 }
 
-function Get-UninstallEntryForCleanup {
+function Get-UninstallEntryForCleanup([string]$ProductCode, [string]$DisplayVersion) {
     try {
         $entries = @()
         foreach ($root in @('HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall', 'HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall')) {
@@ -159,23 +234,18 @@ function Get-UninstallEntryForCleanup {
                 $entries += Get-ItemProperty -LiteralPath $child.PSPath -ErrorAction Stop
             }
         }
-        Select-CodeReaderUninstallEntry $entries -AllowNotFound
+        Select-CodeReaderUninstallEntry $entries $ProductCode $DisplayVersion -AllowNotFound
     } catch {
         if ($_.Exception.Message -match '^Native journey phase=installer-discovery category=ambiguous exit=1\.$') { throw }
         throw 'Native journey phase=installer-discovery category=registry-error exit=1.'
     }
 }
 
-function Resolve-Executable {
+function Resolve-Executable([string]$ProductCode, [string]$DisplayVersion) {
     try {
-        $entry = Get-UninstallEntry
-        if ($null -eq $entry.PSObject.Properties['InstallLocation'] -or
-            $null -eq $entry.PSObject.Properties['DisplayIcon']) {
-            throw 'invalid-entry'
-        }
-        $root = ([string]$entry.InstallLocation).Trim('"')
-        $displayIcon = ([string]$entry.DisplayIcon).Split(',')[0].Trim('"')
-        $candidate = @((Join-Path $root 'CodeReader.exe'), (Join-Path $root 'codereader.exe'), $displayIcon) |
+        $entry = Get-UninstallEntry $ProductCode $DisplayVersion
+        $candidates = @(Get-ExecutableCandidates $entry (Get-MsiInstalledLocation $ProductCode))
+        $candidate = $candidates |
             Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
         if ($null -eq $candidate) { throw 'invalid-entry' }
         $candidate
@@ -538,6 +608,9 @@ $expected = if ($Architecture -eq "arm64") { "ARM64" } else { "AMD64" }
 Assert-True ($env:PROCESSOR_ARCHITECTURE -eq $expected) "Journey requires native $expected."
 Add-Type -AssemblyName UIAutomationClient
 Add-Type -AssemblyName System.Windows.Forms
+$MsiProductCode = Get-MsiProperty $Package 'ProductCode'
+$MsiProductVersion = Get-MsiProperty $Package 'ProductVersion'
+Assert-MsiProductIdentity $MsiProductCode $MsiProductVersion
 
 $profile = Join-Path $env:RUNNER_TEMP 'codereader-native-journey'
 $env:APPDATA = Join-Path $profile 'Roaming'
@@ -627,7 +700,7 @@ export function validateJourneyInput(value: string): string {
 $primaryFailure = $null
 try {
     Invoke-Process msiexec.exe @('/i', "`"$Package`"", '/qn', '/norestart') @(0, 3010)
-    $executable = Resolve-Executable
+    $executable = Resolve-Executable $MsiProductCode $MsiProductVersion
     Complete-Check 'legacy-0.10-upgrade' (Test-Migration $executable 1 $Fixture010)
     Complete-Check 'legacy-0.11-upgrade' (Test-Migration $executable 2 $Fixture011)
     Test-MigrationFailureRecovery $executable $Fixture011Current | Out-Null
@@ -664,7 +737,7 @@ try {
     Assert-True (-not (Test-Path -LiteralPath $executable)) "Executable remains after uninstall."
     Assert-True (Test-Path -LiteralPath $database) "Uninstall removed user data."
     Invoke-Process msiexec.exe @('/i', "`"$Package`"", '/qn', '/norestart') @(0, 3010)
-    $executable = Resolve-Executable
+    $executable = Resolve-Executable $MsiProductCode $MsiProductVersion
     $app = Start-App $executable
     try {
         Resume-WithNativePicker $app.Root $ControlledProject | Out-Null
@@ -691,7 +764,7 @@ try {
 } catch {
     $primaryFailure = $_
 } finally {
-    Invoke-InstallerCleanup $primaryFailure { Get-UninstallEntryForCleanup } {
+    Invoke-InstallerCleanup $primaryFailure { Get-UninstallEntryForCleanup $MsiProductCode $MsiProductVersion } {
         try {
             Invoke-Process msiexec.exe @('/x', "`"$Package`"", '/qn', '/norestart') @(0, 3010)
         } catch {
