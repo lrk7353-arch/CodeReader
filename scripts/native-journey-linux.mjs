@@ -37,6 +37,12 @@ function fail(message) {
   throw new Error(message);
 }
 
+function subprocessFailure(phase, result) {
+  const category = result.error ? "spawn-error" : result.signal ? "signal" : "nonzero-exit";
+  const exitCode = Number.isInteger(result.status) ? result.status : -1;
+  fail(`Native journey phase=${phase} category=${category} exit=${exitCode}.`);
+}
+
 function args(argv) {
   const values = {};
   for (let i = 0; i < argv.length; i += 2) {
@@ -111,9 +117,9 @@ export function runLinuxJourney(argv = process.argv.slice(2)) {
         resolve(value["wrong-project"] ?? fail("Missing --wrong-project")),
         resolve(value.project ?? fail("Missing --project"))
       ],
-      { env, stdio: "inherit", shell: false }
+      { env, stdio: "ignore", shell: false }
     );
-    if (reinstall.status !== 0) fail("Reinstall journey probe failed.");
+    if (reinstall.status !== 0) subprocessFailure("uninstall-data-policy", reinstall);
     const database = resolve(profile, "data/com.codereader.desktop/codereader.sqlite");
     const restored = query(
       database,
@@ -159,9 +165,9 @@ export function runLinuxJourney(argv = process.argv.slice(2)) {
   const motionSetting = spawnSync(
     "gsettings",
     ["set", "org.gnome.desktop.interface", "enable-animations", "false"],
-    { env, stdio: "inherit", shell: false }
+    { env, stdio: "ignore", shell: false }
   );
-  if (motionSetting.status !== 0) fail("Reduced-motion setup failed.");
+  if (motionSetting.status !== 0) subprocessFailure("reduced-motion-setup", motionSetting);
   env.CODEREADER_JOURNEY_FIXTURE_010 = resolve(
     value["fixture-010"] ?? fail("Missing --fixture-010")
   );
@@ -177,9 +183,9 @@ export function runLinuxJourney(argv = process.argv.slice(2)) {
   const session = spawnSync(
     "bash",
     ["scripts/native-journey-linux-session.sh", executable, project, driver, stub],
-    { env, stdio: "inherit", shell: false }
+    { env, stdio: "ignore", shell: false }
   );
-  if (session.status !== 0) fail("Linux native journey session failed.");
+  if (session.status !== 0) subprocessFailure("native-session", session);
 
   // Every phase is emitted by its own probe. Merely reaching the end of the
   // session cannot manufacture a passing record.

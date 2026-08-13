@@ -27,6 +27,8 @@ rc.6 的首次 Native Product Journey run `31659436776` 在任何平台安装前
 
 双检出修复后的 run `31662115050` 在四平台安装前构造 v0.11 current 迁移样本时停止：Linux 与 Windows ARM64 都命中该阶段；从 v3 历史提交抽取的“新建库完整基线”已包含 prompt 模板列，流程又执行同提交的 v3 增量 ALTER，SQLite 按严格规则报告 duplicate column。Windows ARM64 同时出现 Chocolatey 下载 SQLite 的 504，旧 step 未可靠传播原生命令失败，后续才因找不到 `sqlite3` 暴露问题。因此该 run 没有生成平台 journey 或可接受证据。修复后 v3 使用权威 v2 完整 schema 作为基线，并且只追加 v3 的 `migrate_to_v3` 一次；SQLite 的重复列错误仍保持为失败，不被忽略或降级。Windows 工具安装也必须检查 Chocolatey 退出码、`Get-Command sqlite3` 和实际版本探针，任一失败立即阻断。
 
+run `31664403176` 已进入原生旅程，但没有形成可接受的四平台证据。Windows 暴露 PowerShell 管道在单个缺失路径时返回标量、直接访问 `.Count` 不可靠的问题；修复后所有过滤结果强制包装为数组，并以 0、1、多个缺失项验证严格模式。现有仓库与本地环境没有该 run 的完整 GitHub job 日志，不能可靠判定 Linux 失败的内部阶段；下一次运行会只向控制台报告脱敏 phase、固定错误类别和子进程退出码，原始子进程输出不会进入公开日志或证据。该增强仅改善安全诊断，不把未知失败写成已修复或通过。
+
 `npm ci` 的完整开发依赖审计报告 4 个 high 项；`npm audit --omit=dev --audit-level=high` 随后确认 production dependency graph 为 0 项漏洞。该结论只说明 npm 运行时依赖，不替代 RustSec、CodeQL 或完整供应链检查。
 
 Linux x64 重型打包实际进入 Tauri release build：production 前端和 x86-64 release binary 均成功；二进制被 `file` 识别为 x86-64 ELF，SHA-256 为 `931ad9b510f5d9548c27253e6217562ab48966097978a48b22255dd0cb1d0356`。随后 bundle 工具下载 AppRun、linuxdeploy 及其插件时长时间无输出，按有界等待中止。没有生成 `artifacts/linux-x64` 或 bundle 目录，因此没有 AppImage、deb、rpm，不能执行或通过 Linux x64 package smoke。该网络阻塞未重试。

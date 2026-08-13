@@ -7,7 +7,8 @@
     [string]$Fixture010,
     [string]$Fixture011,
     [string]$Fixture011Current,
-    [string]$Output
+    [string]$Output,
+    [switch]$RequiredPathSelfTest
 )
 
 $ErrorActionPreference = "Stop"
@@ -23,6 +24,25 @@ foreach ($name in $RequiredChecks) { $Observed[$name] = $false }
 
 function Assert-True([bool]$Condition, [string]$Message) {
     if (-not $Condition) { throw $Message }
+}
+
+if ($RequiredPathSelfTest) {
+    $existing = [IO.Path]::GetTempFileName()
+    try {
+        foreach ($expectedMissing in @(0, 1, 2)) {
+            $probePaths = switch ($expectedMissing) {
+                0 { @($existing) }
+                1 { @($existing, "$existing.missing") }
+                2 { @("$existing.missing-one", "$existing.missing-two") }
+            }
+            $missing = @($probePaths | Where-Object { -not (Test-Path -LiteralPath $_) })
+            if ($missing.Count -ne $expectedMissing) { throw "Required path count self-test failed." }
+            [ordered]@{ expected = $expectedMissing; actual = $missing.Count } | ConvertTo-Json -Compress
+        }
+        exit 0
+    } finally {
+        Remove-Item -LiteralPath $existing -Force -ErrorAction SilentlyContinue
+    }
 }
 
 function Complete-Check([string]$Name, [bool]$ProbeResult) {
@@ -396,7 +416,8 @@ function Generate-Explanation($Root) {
 if ($CommitSha -notmatch '^[0-9a-fA-F]{40}$') { throw "Invalid commit SHA." }
 if ($ReleaseTag -notmatch '^v1\.[0-9]+\.[0-9]+(?:-rc\.[0-9]+)?$') { throw "Invalid release tag." }
 $requiredPaths = @($Package, $Fixture010, $Fixture011, $Fixture011Current)
-Assert-True (($requiredPaths | Where-Object { -not (Test-Path -LiteralPath $_) }).Count -eq 0) "Package and all three sanitized SQLite fixtures are required."
+$missingRequiredPaths = @($requiredPaths | Where-Object { -not (Test-Path -LiteralPath $_) })
+Assert-True ($missingRequiredPaths.Count -eq 0) "Package and all three sanitized SQLite fixtures are required."
 $expected = if ($Architecture -eq "arm64") { "ARM64" } else { "AMD64" }
 Assert-True ($env:PROCESSOR_ARCHITECTURE -eq $expected) "Journey requires native $expected."
 Add-Type -AssemblyName UIAutomationClient

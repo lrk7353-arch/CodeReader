@@ -210,6 +210,11 @@ describe("Linux native journey evidence", () => {
     );
     expect(spawnCommands).toEqual(['"sqlite3"', '"dbus-run-session"', '"gsettings"', '"bash"']);
     expect(runner).not.toContain("shell: true");
+    expect(runner).toContain('subprocessFailure("native-session", session)');
+    expect(runner).toContain("phase=${phase} category=${category} exit=${exitCode}");
+    expect(runner).toContain('{ env, stdio: "ignore", shell: false }');
+    expect(runner).not.toContain('stdio: "inherit"');
+    expect(runner).not.toContain("result.stderr");
     expect(runner).toContain('"dbus-run-session"');
     expect(runner).toContain("subprocess.run(");
     expect(runner).toContain('["python3", driver, "--verify-restore", wrong_project, project]');
