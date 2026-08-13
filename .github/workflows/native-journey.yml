@@ -93,7 +93,13 @@ jobs:
       - name: Install SQLite fixture tool on Windows
         if: matrix.platform == 'windows'
         shell: pwsh
-        run: choco install sqlite --yes --no-progress
+        run: |
+          $ErrorActionPreference = "Stop"
+          choco install sqlite --yes --no-progress
+          if ($LASTEXITCODE -ne 0) { throw "Chocolatey failed to install sqlite3 (exit $LASTEXITCODE)." }
+          $sqlite = Get-Command sqlite3 -ErrorAction Stop
+          & $sqlite.Source --version
+          if ($LASTEXITCODE -ne 0) { throw "The installed sqlite3 version probe failed (exit $LASTEXITCODE)." }
       - name: Resolve immutable candidate
         id: target
         shell: bash
@@ -139,9 +145,10 @@ jobs:
           git -C candidate-source show f7e7b454e4b17c0380d2efec962ef103863e9c83:src-tauri/src/persistence/schema.rs > journey-fixtures/schema-v1.rs
           git -C candidate-source show 9b3a690664f1a040feb501e16d3ce831fdd2d6e6:src-tauri/src/persistence/schema.rs > journey-fixtures/schema-v2.rs
           git -C candidate-source show 6000e348308a9933cd39da096eed2c2594383bb6:src-tauri/src/persistence/schema.rs > journey-fixtures/schema-v3.rs
-          node candidate-source/scripts/native-journey-fixture.mjs --source journey-fixtures/schema-v1.rs --output journey-fixtures/v1-schema.sql --migrations migrate_to_v1
-          node candidate-source/scripts/native-journey-fixture.mjs --source journey-fixtures/schema-v2.rs --output journey-fixtures/v2-schema.sql --migrations migrate_to_v1,migrate_to_v2
-          node candidate-source/scripts/native-journey-fixture.mjs --source journey-fixtures/schema-v3.rs --output journey-fixtures/v3-schema.sql --migrations migrate_to_v1,migrate_to_v2,migrate_to_v3
+          node scripts/native-journey-fixture.mjs --source journey-fixtures/schema-v1.rs --output journey-fixtures/v1-schema.sql --migrations migrate_to_v1
+          node scripts/native-journey-fixture.mjs --source journey-fixtures/schema-v2.rs --output journey-fixtures/v2-schema.sql --migrations migrate_to_v1,migrate_to_v2
+          node scripts/native-journey-fixture.mjs --source journey-fixtures/schema-v3.rs \
+            --base journey-fixtures/v2-schema.sql --output journey-fixtures/v3-schema.sql --migrations migrate_to_v3
           test "$(git hash-object journey-fixtures/schema-v1.rs)" = "$(git -C candidate-source rev-parse f7e7b454e4b17c0380d2efec962ef103863e9c83:src-tauri/src/persistence/schema.rs)"
           test "$(git hash-object journey-fixtures/schema-v2.rs)" = "$(git -C candidate-source rev-parse 9b3a690664f1a040feb501e16d3ce831fdd2d6e6:src-tauri/src/persistence/schema.rs)"
           test "$(git hash-object journey-fixtures/schema-v3.rs)" = "$(git -C candidate-source rev-parse 6000e348308a9933cd39da096eed2c2594383bb6:src-tauri/src/persistence/schema.rs)"
@@ -149,7 +156,7 @@ jobs:
           test "$(wc -l < journey-fixtures/extracted-schema-SHA256SUMS)" = 3
           node - <<'NODE'
           const fs = require('fs'), crypto = require('crypto');
-          const manifest = JSON.parse(fs.readFileSync('candidate-source/src-tauri/tests/fixtures/persistence/historical-schema-manifest.json'));
+          const manifest = JSON.parse(fs.readFileSync('src-tauri/tests/fixtures/persistence/historical-schema-manifest.json'));
           for (const version of ['v1', 'v2', 'v3']) {
             const sql = fs.readFileSync(`journey-fixtures/${version}-schema.sql`);
             const hash = crypto.createHash('sha256').update(sql).digest('hex');
@@ -161,13 +168,13 @@ jobs:
           grep -q 'CREATE TABLE IF NOT EXISTS projects' journey-fixtures/v1-schema.sql
           grep -q 'CREATE TABLE IF NOT EXISTS prompt_versions' journey-fixtures/v2-schema.sql
           grep -q 'ALTER TABLE "prompt_versions" ADD COLUMN "system_prompt_template" TEXT' journey-fixtures/v3-schema.sql
-          node candidate-source/scripts/native-journey-fixture.mjs --schema journey-fixtures/v1-schema.sql \
+          node scripts/native-journey-fixture.mjs --schema journey-fixtures/v1-schema.sql \
             --data candidate-source/src-tauri/tests/fixtures/persistence/v0_10.sql \
             --output journey-fixtures/v0_10.sqlite --version 1
-          node candidate-source/scripts/native-journey-fixture.mjs --schema journey-fixtures/v2-schema.sql \
+          node scripts/native-journey-fixture.mjs --schema journey-fixtures/v2-schema.sql \
             --data candidate-source/src-tauri/tests/fixtures/persistence/v0_11_early.sql \
             --output journey-fixtures/v0_11.sqlite --version 2
-          node candidate-source/scripts/native-journey-fixture.mjs --schema journey-fixtures/v3-schema.sql \
+          node scripts/native-journey-fixture.mjs --schema journey-fixtures/v3-schema.sql \
             --data candidate-source/src-tauri/tests/fixtures/persistence/v0_11_current.sql \
             --output journey-fixtures/v0_11_current.sqlite --version 3
       - name: Run Linux native product journey
