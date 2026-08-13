@@ -67,8 +67,8 @@ For the current solo-maintainer repository, `main` requires a pull request and e
 Create an annotated, signed tag when a signing identity is available:
 
 ```bash
-git tag -a v1.0.0-rc.3 -m "CodeReader 1.0.0-rc.3"
-git push origin v1.0.0-rc.3
+git tag -a v1.0.0-rc.4 -m "CodeReader 1.0.0-rc.4"
+git push origin v1.0.0-rc.4
 ```
 
 Pushing a `v1.*` tag starts `.github/workflows/release.yml`. A manual run may be used only with an existing tag.
@@ -104,8 +104,8 @@ This automation is deliberately narrower than full product acceptance. An RPM co
 Package smoke and the complete product journey are separate gates. After creating the immutable candidate tag, run the full journey on native Windows and Linux x64/ARM64 hardware. Generate one template per target and replace `pending` only with directly observed results:
 
 ```bash
-node scripts/release-evidence.mjs journey-template --platform linux --arch x64 --tag v1.0.0-rc.3 --sha <40-character-commit> --output docs/release/evidence/v1.0.0-rc.3/native-journey-linux-x64.json
-node scripts/release-evidence.mjs verify-journeys --input docs/release/evidence/v1.0.0-rc.3 --tag v1.0.0-rc.3 --sha <40-character-commit>
+node scripts/release-evidence.mjs journey-template --platform linux --arch x64 --tag v1.0.0-rc.4 --sha <40-character-commit> --output docs/release/evidence/v1.0.0-rc.4/native-journey-linux-x64.json
+node scripts/release-evidence.mjs verify-journeys --input docs/release/evidence/v1.0.0-rc.4 --tag v1.0.0-rc.4 --sha <40-character-commit>
 ```
 
 Repeat generation for `linux/arm64`, `windows/x64`, and `windows/arm64`. The journey covers the native picker, project open, explanation, restart/reauthorization/restore, both supported legacy upgrades, uninstall data policy, keyboard/focus, reduced motion, long content, and 200% zoom/contrast. Do not put source, prompts, model responses, credentials, logs, personal paths, or free-form notes into these records.

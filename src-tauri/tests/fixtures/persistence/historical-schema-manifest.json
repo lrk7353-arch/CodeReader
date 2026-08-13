@@ -1,0 +1,20 @@
+{
+  "v1": {
+    "sourceCommit": "f7e7b454e4b17c0380d2efec962ef103863e9c83",
+    "migrations": "migrate_to_v1",
+    "extractedSha256": "a6d519490a34e11f3109810f6d3349be64e04b75e8a794c2aff45c2ae22f817e",
+    "requiredTables": ["projects", "files", "explanation_nodes", "user_reading_states", "model_provider_settings"]
+  },
+  "v2": {
+    "sourceCommit": "9b3a690664f1a040feb501e16d3ce831fdd2d6e6",
+    "migrations": "migrate_to_v1,migrate_to_v2",
+    "extractedSha256": "b2a080795c7fd2438577b4bdb2ff348cfb41def2cbe75832c452ecfe1d82163c",
+    "requiredTables": ["projects", "files", "explanation_nodes", "user_reading_states", "model_provider_settings", "prompt_versions"]
+  },
+  "v3": {
+    "sourceCommit": "6000e348308a9933cd39da096eed2c2594383bb6",
+    "migrations": "migrate_to_v1,migrate_to_v2,migrate_to_v3",
+    "extractedSha256": "e8579fb35ef17b22ece200f490d2fc7cd9c3fd6ceae3d9c232289da2a969793f",
+    "requiredTables": ["projects", "files", "explanation_nodes", "user_reading_states", "model_provider_settings", "prompt_versions"]
+  }
+}

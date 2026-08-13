@@ -1,0 +1,219 @@
+name: Native Product Journey
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing draft v1.x release tag
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+env:
+  RELEASE_TAG: ${{ inputs.tag }}
+
+jobs:
+  journey:
+    name: Journey ${{ matrix.platform }} ${{ matrix.arch }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { platform: linux, arch: x64, runner: ubuntu-22.04, asset: deb }
+          - { platform: linux, arch: arm64, runner: ubuntu-22.04-arm, asset: deb }
+          - { platform: windows, arch: x64, runner: windows-2022, asset: msi }
+          - { platform: windows, arch: arm64, runner: windows-11-arm, asset: msi }
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
+    steps:
+      - name: Validate release tag before interpolation
+        shell: bash
+        run: |
+          [[ "$RELEASE_TAG" =~ ^v1\.[0-9]+\.[0-9]+(-rc\.[0-9]+)?$ ]]
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        with:
+          ref: refs/tags/${{ env.RELEASE_TAG }}
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+        with:
+          node-version: 22
+      - name: Install SQLite fixture tool on Windows
+        if: matrix.platform == 'windows'
+        shell: pwsh
+        run: choco install sqlite --yes --no-progress
+      - name: Resolve immutable candidate
+        id: target
+        shell: bash
+        run: |
+          test "$(git describe --tags --exact-match HEAD)" = "$RELEASE_TAG"
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+      - name: Validate draft and download target package
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          test "$(gh release view "$RELEASE_TAG" --json tagName --jq .tagName)" = "$RELEASE_TAG"
+          test "$(gh release view "$RELEASE_TAG" --json isDraft --jq .isDraft)" = true
+          mkdir -p journey-assets
+          gh release download "$RELEASE_TAG" --dir journey-assets \
+            --pattern "CodeReader_*_${{ matrix.platform }}_${{ matrix.arch }}.${{ matrix.asset }}"
+          test "$(find journey-assets -maxdepth 1 -type f -name 'CodeReader_*' | wc -l)" = 1
+          gh release download "$RELEASE_TAG" --dir journey-assets --pattern SHA256SUMS
+          gh release download "$RELEASE_TAG" --dir journey-assets \
+            --pattern "native-smoke-${{ matrix.platform }}-${{ matrix.arch }}.json"
+          package="$(find journey-assets -maxdepth 1 -type f -name 'CodeReader_*')"
+          package_name="$(basename "$package")"
+          package_hash="$(sha256sum "$package" | cut -d' ' -f1)"
+          test "$(awk -v name="$package_name" '$2 == name {print $1}' journey-assets/SHA256SUMS)" = "$package_hash"
+          node -e 'const fs=require("fs"),e=JSON.parse(fs.readFileSync(process.argv[1])),n=process.argv[2],h=process.argv[3];if(e.releaseTag!==process.env.RELEASE_TAG||e.commitSha!==process.argv[4]||e.packages.filter(p=>p.name===n&&p.sha256===h).length!==1)process.exit(1)' \
+            "journey-assets/native-smoke-${{ matrix.platform }}-${{ matrix.arch }}.json" \
+            "$package_name" "$package_hash" '${{ steps.target.outputs.sha }}'
+      - name: Install Linux journey dependencies and package
+        if: matrix.platform == 'linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y at-spi2-core dbus-x11 python3-pyatspi python3-pil sqlite3 xvfb xdotool imagemagick libwebkit2gtk-4.1-0
+          sudo apt-get install -y ./journey-assets/*.deb
+      - name: Build sanitized historical migration fixtures
+        shell: bash
+        run: |
+          mkdir -p journey-fixtures
+          git fetch --no-tags origin \
+            f7e7b454e4b17c0380d2efec962ef103863e9c83 \
+            9b3a690664f1a040feb501e16d3ce831fdd2d6e6 \
+            6000e348308a9933cd39da096eed2c2594383bb6
+          git show f7e7b454e4b17c0380d2efec962ef103863e9c83:src-tauri/src/persistence/schema.rs > journey-fixtures/schema-v1.rs
+          git show 9b3a690664f1a040feb501e16d3ce831fdd2d6e6:src-tauri/src/persistence/schema.rs > journey-fixtures/schema-v2.rs
+          git show 6000e348308a9933cd39da096eed2c2594383bb6:src-tauri/src/persistence/schema.rs > journey-fixtures/schema-v3.rs
+          node scripts/native-journey-fixture.mjs --source journey-fixtures/schema-v1.rs --output journey-fixtures/v1-schema.sql --migrations migrate_to_v1
+          node scripts/native-journey-fixture.mjs --source journey-fixtures/schema-v2.rs --output journey-fixtures/v2-schema.sql --migrations migrate_to_v1,migrate_to_v2
+          node scripts/native-journey-fixture.mjs --source journey-fixtures/schema-v3.rs --output journey-fixtures/v3-schema.sql --migrations migrate_to_v1,migrate_to_v2,migrate_to_v3
+          test "$(git hash-object journey-fixtures/schema-v1.rs)" = "$(git rev-parse f7e7b454e4b17c0380d2efec962ef103863e9c83:src-tauri/src/persistence/schema.rs)"
+          test "$(git hash-object journey-fixtures/schema-v2.rs)" = "$(git rev-parse 9b3a690664f1a040feb501e16d3ce831fdd2d6e6:src-tauri/src/persistence/schema.rs)"
+          test "$(git hash-object journey-fixtures/schema-v3.rs)" = "$(git rev-parse 6000e348308a9933cd39da096eed2c2594383bb6:src-tauri/src/persistence/schema.rs)"
+          sha256sum journey-fixtures/v1-schema.sql journey-fixtures/v2-schema.sql journey-fixtures/v3-schema.sql > journey-fixtures/extracted-schema-SHA256SUMS
+          test "$(wc -l < journey-fixtures/extracted-schema-SHA256SUMS)" = 3
+          node - <<'NODE'
+          const fs = require('fs'), crypto = require('crypto');
+          const manifest = JSON.parse(fs.readFileSync('src-tauri/tests/fixtures/persistence/historical-schema-manifest.json'));
+          for (const version of ['v1', 'v2', 'v3']) {
+            const sql = fs.readFileSync(`journey-fixtures/${version}-schema.sql`);
+            const hash = crypto.createHash('sha256').update(sql).digest('hex');
+            if (hash !== manifest[version].extractedSha256) throw new Error(`${version} extracted schema hash mismatch`);
+            const text = sql.toString();
+            for (const table of manifest[version].requiredTables) if (!text.includes(table)) throw new Error(`${version} missing ${table}`);
+          }
+          NODE
+          grep -q 'CREATE TABLE IF NOT EXISTS projects' journey-fixtures/v1-schema.sql
+          grep -q 'CREATE TABLE IF NOT EXISTS prompt_versions' journey-fixtures/v2-schema.sql
+          grep -q 'ALTER TABLE "prompt_versions" ADD COLUMN "system_prompt_template" TEXT' journey-fixtures/v3-schema.sql
+          node scripts/native-journey-fixture.mjs --schema journey-fixtures/v1-schema.sql \
+            --data src-tauri/tests/fixtures/persistence/v0_10.sql \
+            --output journey-fixtures/v0_10.sqlite --version 1
+          node scripts/native-journey-fixture.mjs --schema journey-fixtures/v2-schema.sql \
+            --data src-tauri/tests/fixtures/persistence/v0_11_early.sql \
+            --output journey-fixtures/v0_11.sqlite --version 2
+          node scripts/native-journey-fixture.mjs --schema journey-fixtures/v3-schema.sql \
+            --data src-tauri/tests/fixtures/persistence/v0_11_current.sql \
+            --output journey-fixtures/v0_11_current.sqlite --version 3
+      - name: Run Linux native product journey
+        if: matrix.platform == 'linux'
+        run: |
+          profile="$RUNNER_TEMP/codereader-native-journey"
+          controlled_project="$RUNNER_TEMP/codereader-journey-project"
+          wrong_project="$RUNNER_TEMP/codereader-wrong-project"
+          cp -R examples/fullstack "$controlled_project"
+          cp -R examples/small "$wrong_project"
+          for index in $(seq 1 300); do printf '\nNative journey paragraph %03d.\n' "$index" >> "$controlled_project/README.md"; done
+          printf '\nJOURNEY-END-CONTENT\n' >> "$controlled_project/README.md"
+          node scripts/native-journey-linux.mjs \
+            --arch '${{ matrix.arch }}' --tag "$RELEASE_TAG" --sha '${{ steps.target.outputs.sha }}' \
+            --executable /usr/bin/codereader --project "$controlled_project" --app-data "$profile" \
+            --wrong-project "$wrong_project" \
+            --fixture-010 journey-fixtures/v0_10.sqlite --fixture-011 journey-fixtures/v0_11.sqlite \
+            --fixture-011-current journey-fixtures/v0_11_current.sqlite \
+            --output "native-journey-${{ matrix.platform }}-${{ matrix.arch }}.json"
+          test -f "$profile/uninstall-probe-ready"
+          sudo apt-get remove -y codereader
+          test ! -e /usr/bin/codereader
+          test -f "$profile/data/com.codereader.desktop/codereader.sqlite"
+          sudo apt-get install -y ./journey-assets/*.deb
+          test -x /usr/bin/codereader
+          touch "$profile/uninstall-probe-pass"
+          node scripts/native-journey-linux.mjs \
+            --finalize-uninstall "$profile" --executable /usr/bin/codereader \
+            --project "$controlled_project" --wrong-project "$wrong_project" \
+            --arch '${{ matrix.arch }}' --tag "$RELEASE_TAG" --sha '${{ steps.target.outputs.sha }}' \
+            --output "native-journey-${{ matrix.platform }}-${{ matrix.arch }}.json"
+      - name: Run Windows native product journey
+        if: matrix.platform == 'windows'
+        shell: pwsh
+        run: |
+          ./scripts/native-journey-windows.ps1 `
+            -Architecture '${{ matrix.arch }}' -ReleaseTag $env:RELEASE_TAG `
+            -CommitSha '${{ steps.target.outputs.sha }}' -Package (Resolve-Path 'journey-assets/*.msi') `
+            -Project (Resolve-Path 'examples/fullstack') `
+            -Fixture010 (Resolve-Path 'journey-fixtures/v0_10.sqlite') `
+            -Fixture011 (Resolve-Path 'journey-fixtures/v0_11.sqlite') `
+            -Fixture011Current (Resolve-Path 'journey-fixtures/v0_11_current.sqlite') `
+            -Output "native-journey-${{ matrix.platform }}-${{ matrix.arch }}.json"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: native-journey-${{ matrix.platform }}-${{ matrix.arch }}
+          path: native-journey-${{ matrix.platform }}-${{ matrix.arch }}.json
+          if-no-files-found: error
+          retention-days: 30
+
+  attest-and-attach:
+    needs: journey
+    runs-on: ubuntu-22.04
+    environment: production-release
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        with:
+          ref: refs/tags/${{ env.RELEASE_TAG }}
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+        with:
+          node-version: 22
+      - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
+        with:
+          pattern: native-journey-*
+          path: verified-native-journeys
+          merge-multiple: true
+      - name: Redownload and reverify the release package evidence
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir release-binding
+          gh release download "$RELEASE_TAG" --dir release-binding --pattern 'CodeReader_*'
+          gh release download "$RELEASE_TAG" --dir release-binding --pattern SHA256SUMS
+          gh release download "$RELEASE_TAG" --dir release-binding --pattern 'native-smoke-*.json'
+          (cd release-binding && sha256sum -c SHA256SUMS)
+          node scripts/release-evidence.mjs verify --input release-binding --tag "$RELEASE_TAG" --sha "$(git rev-parse HEAD)"
+      - name: Strictly verify all four journeys
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          [[ "$RELEASE_TAG" =~ ^v1\.[0-9]+\.[0-9]+(-rc\.[0-9]+)?$ ]]
+          test "$(git describe --tags --exact-match HEAD)" = "$RELEASE_TAG"
+          test "$(gh release view "$RELEASE_TAG" --json tagName --jq .tagName)" = "$RELEASE_TAG"
+          test "$(gh release view "$RELEASE_TAG" --json isDraft --jq .isDraft)" = true
+          node scripts/release-evidence.mjs verify-journeys --input verified-native-journeys --tag "$RELEASE_TAG" --sha "$(git rev-parse HEAD)"
+      - name: Attest native journey evidence
+        uses: actions/attest@a1948c3f048ba23858d222213b7c278aabede763 # v4
+        with:
+          subject-path: verified-native-journeys/native-journey-*.json
+      - name: Attach evidence to the matching draft
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          test "$(git describe --tags --exact-match HEAD)" = "$RELEASE_TAG"
+          test "$(gh release view "$RELEASE_TAG" --json tagName --jq .tagName)" = "$RELEASE_TAG"
+          test "$(gh release view "$RELEASE_TAG" --json isDraft --jq .isDraft)" = true
+          node scripts/release-evidence.mjs verify-journeys --input verified-native-journeys --tag "$RELEASE_TAG" --sha "$(git rev-parse HEAD)"
+          gh release upload "$RELEASE_TAG" verified-native-journeys/native-journey-*.json --clobber

@@ -22,6 +22,15 @@ describe("production workflows", () => {
     }
   });
 
+  it("checks out complete history wherever quality tests read pinned historical fixtures", () => {
+    const checkoutCount = [...quality.matchAll(/uses: actions\/checkout@/g)].length;
+    const fullHistoryCount = [...quality.matchAll(/fetch-depth: 0/g)].length;
+    expect(checkoutCount).toBeGreaterThan(0);
+    expect(fullHistoryCount).toBe(checkoutCount);
+    expect(quality).toContain("run: npm test");
+    expect(quality).toContain("run: npm run verify:linux");
+  });
+
   it("builds ten package formats and pauses before a draft release", () => {
     expect(release).toContain("bundles: nsis,msi");
     expect(release).toContain("bundles: appimage,deb,rpm");

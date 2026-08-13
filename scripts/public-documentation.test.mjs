@@ -83,8 +83,8 @@ describe("public documentation", () => {
 
     expect(changelog).toContain("1.0.0-rc.3");
     expect(changelog).toContain("1.0.0-rc.2");
-    expect(readme).toContain("Current channel: `1.0.0-rc.3`");
-    expect(chineseReadme).toContain("1.0.0-rc.3 候选版");
+    expect(readme).toContain("Current channel: `1.0.0-rc.4`");
+    expect(chineseReadme).toContain("1.0.0-rc.4 候选版");
     expect(changelog).toContain("0.11.0-beta.4");
     expect(changelog).toContain("0.10.0");
     expect(changelog).toContain("0.1.0");
@@ -133,12 +133,26 @@ describe("public documentation", () => {
 
     expect(readme).toContain("project map and reading path");
     expect(readme).toContain("validation targets, not published SLAs");
+    expect(readme).toContain("maintainer has passed the R4 usability journey");
+    expect(readme).toContain(
+      "Only the rc.4 four-platform OS-level native journey and final release evidence remain incomplete"
+    );
     expect(chineseReadme).toContain("从项目地图和推荐阅读路径出发");
     expect(chineseReadme).toContain("不是公开 SLA");
+    expect(chineseReadme).toContain("完成 R4 人工可用性验收并整体通过");
+    expect(chineseReadme).toContain("只有四个原生 runner 实际通过后才能形成完成证据");
+    expect(chineseReadme).toContain("<code>_setup.exe</code>");
+    expect(chineseReadme).not.toContain("<code>\\_setup.exe</code>");
     expect(changelog).toContain("产品复位候选");
+    expect(changelog).toContain(
+      "small、frontend、fullstack 三类项目的 R4 维护者人工可用性验收已通过"
+    );
+    expect(changelog).toContain("当前仅 rc.4 四平台 OS 级 native journey 与最终发布证据未完成");
+    expect(changelog).not.toContain("真实维护者可用性验收仍未完成");
     expect(history).not.toContain("未发布的产品复位候选");
     expect(history).toContain("R4 的三类真实项目人工使用验收已经完成并通过");
-    expect(history).toContain("当前未完成范围仅是 R5");
+    expect(history).toContain("取得这些证据及维护者发布批准前，R5 仍未 `PASS`");
+    expect(history).not.toContain("当前发布候选；仍须完成 R5 原生矩阵");
     expect(publicSpec).toContain("只是内部验证目标，不是 SLA");
     expect(evidence).toContain("维护者已完成人工使用并整体通过");
     expect(evidence).toContain("Sol `high` 独立监督");
@@ -171,7 +185,10 @@ describe("public documentation", () => {
     expect(evidence).toContain("Windows ARM64");
     expect(evidence).toContain("windowsAuthenticodeSigned: false");
     expect(deferred).toContain("已转入 R5 原生旅程门禁");
-    expect(deferred).toContain("当前状态：R5 阻塞项");
+    expect(deferred).toContain("当前状态：R5 原生执行待完成");
+    expect(evidence).toContain("R4 的 small、frontend、fullstack 三项目维护者人工可用性已通过");
+    expect(evidence).toContain("当前仅 rc.4 的四平台 OS 级 native journey 与最终发布证据未完成");
+    expect(deferred).not.toContain("仍有待补充原生人工证据");
 
     for (const [owner, markdown] of [
       [resolve(root, "docs/release"), runbook],

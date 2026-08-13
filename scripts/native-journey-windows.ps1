@@ -1,0 +1,554 @@
+﻿param(
+    [ValidateSet("x64", "arm64")][string]$Architecture,
+    [string]$ReleaseTag,
+    [string]$CommitSha,
+    [string]$Package,
+    [string]$Project,
+    [string]$Fixture010,
+    [string]$Fixture011,
+    [string]$Fixture011Current,
+    [string]$Output
+)
+
+$ErrorActionPreference = "Stop"
+Set-StrictMode -Version Latest
+
+$RequiredChecks = @(
+    "native-picker-open-project", "explanation-generation", "restart-reauthorize-restore",
+    "legacy-0.10-upgrade", "legacy-0.11-upgrade", "uninstall-data-policy",
+    "keyboard-focus-roundtrip", "reduced-motion", "long-content", "zoom-200-contrast"
+)
+$Observed = @{}
+foreach ($name in $RequiredChecks) { $Observed[$name] = $false }
+
+function Assert-True([bool]$Condition, [string]$Message) {
+    if (-not $Condition) { throw $Message }
+}
+
+function Complete-Check([string]$Name, [bool]$ProbeResult) {
+    Assert-True ($Name -in $RequiredChecks) "Unknown native journey check: $Name"
+    Assert-True $ProbeResult "Native journey probe did not complete: $Name"
+    $Observed[$Name] = $true
+}
+
+function Invoke-Process([string]$FilePath, [string[]]$Arguments, [int[]]$Allowed = @(0)) {
+    $process = Start-Process -FilePath $FilePath -ArgumentList $Arguments -Wait -PassThru
+    if ($process.ExitCode -notin $Allowed) { throw "$FilePath failed with exit code $($process.ExitCode)." }
+}
+
+function Get-UninstallEntry {
+    Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*', 'HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*' -ErrorAction SilentlyContinue |
+        Where-Object DisplayName -eq 'CodeReader' | Select-Object -First 1
+}
+
+function Resolve-Executable {
+    $entry = Get-UninstallEntry
+    Assert-True ($null -ne $entry) "Installed CodeReader was not registered."
+    $root = ([string]$entry.InstallLocation).Trim('"')
+    $displayIcon = ([string]$entry.DisplayIcon).Split(',')[0].Trim('"')
+    $candidate = @((Join-Path $root 'CodeReader.exe'), (Join-Path $root 'codereader.exe'), $displayIcon) |
+        Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
+    Assert-True ($null -ne $candidate) "Installed CodeReader executable is missing."
+    $candidate
+}
+
+function Find-Element($Root, [string]$Name, $ControlType = $null, [int]$Timeout = 30) {
+    $deadline = [DateTimeOffset]::UtcNow.AddSeconds($Timeout)
+    do {
+        $conditions = New-Object System.Collections.Generic.List[System.Windows.Automation.Condition]
+        $conditions.Add((New-Object System.Windows.Automation.PropertyCondition(
+            [System.Windows.Automation.AutomationElement]::NameProperty, $Name)))
+        if ($null -ne $ControlType) {
+            $conditions.Add((New-Object System.Windows.Automation.PropertyCondition(
+                [System.Windows.Automation.AutomationElement]::ControlTypeProperty, $ControlType)))
+        }
+        $condition = New-Object System.Windows.Automation.AndCondition($conditions.ToArray())
+        $element = $Root.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $condition)
+        if ($null -ne $element) { return $element }
+        Start-Sleep -Milliseconds 250
+    } while ([DateTimeOffset]::UtcNow -lt $deadline)
+    throw "UIAutomation element not found: $Name"
+}
+
+function Find-ElementByPrefix($Root, [string]$Prefix, $ControlType, [int]$Timeout = 30) {
+    $deadline = [DateTimeOffset]::UtcNow.AddSeconds($Timeout)
+    do {
+        $condition = New-Object System.Windows.Automation.PropertyCondition(
+            [System.Windows.Automation.AutomationElement]::ControlTypeProperty, $ControlType)
+        $elements = $Root.FindAll([System.Windows.Automation.TreeScope]::Descendants, $condition)
+        $element = $elements | Where-Object { $_.Current.Name.StartsWith($Prefix) } | Select-Object -First 1
+        if ($null -ne $element) { return $element }
+        Start-Sleep -Milliseconds 250
+    } while ([DateTimeOffset]::UtcNow -lt $deadline)
+    throw "UIAutomation element prefix not found: $Prefix"
+}
+
+function Invoke-Element($Element) {
+    $pattern = $Element.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern)
+    Assert-True ($null -ne $pattern) "Element has no InvokePattern: $($Element.Current.Name)"
+    $pattern.Invoke()
+}
+
+function Select-Element($Element) {
+    $candidate = $null
+    if ($Element.TryGetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern, [ref]$candidate)) {
+        Invoke-Element $Element
+        return
+    }
+    $pattern = $Element.GetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern)
+    Assert-True ($null -ne $pattern) "Element is neither invokable nor selectable: $($Element.Current.Name)"
+    $pattern.Select()
+}
+
+function Assert-FocusedAndSelected($Element, [string]$Context) {
+    $selection = $Element.GetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern)
+    Assert-True ($Element.Current.HasKeyboardFocus -and $selection.Current.IsSelected) "$Context requires both UIA keyboard focus and selected state."
+    return $true
+}
+
+function Set-ElementValue($Element, [string]$Value) {
+    $pattern = $Element.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)
+    Assert-True (-not $pattern.Current.IsReadOnly) "Editable control is read-only."
+    $pattern.SetValue($Value)
+}
+
+function Start-App([string]$Executable) {
+    $process = Start-Process -FilePath $Executable -PassThru
+    $deadline = [DateTimeOffset]::UtcNow.AddSeconds(30)
+    do {
+        Start-Sleep -Milliseconds 300
+        $process.Refresh()
+        if ($process.HasExited) { throw "CodeReader exited before opening its main window." }
+    } while ($process.MainWindowHandle -eq 0 -and [DateTimeOffset]::UtcNow -lt $deadline)
+    Assert-True ($process.MainWindowHandle -ne 0) "Main window unavailable to UIAutomation."
+    [pscustomobject]@{
+        Process = $process
+        Root = [System.Windows.Automation.AutomationElement]::FromHandle($process.MainWindowHandle)
+    }
+}
+
+function Stop-App($App) {
+    if ($null -ne $App -and -not $App.Process.HasExited) {
+        $App.Process.CloseMainWindow() | Out-Null
+        if (-not $App.Process.WaitForExit(5000)) { Stop-Process -Id $App.Process.Id -Force }
+    }
+}
+
+function Invoke-PythonSql([string]$Database, [string]$Sql) {
+    $encoded = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($Sql))
+    $code = 'import base64,sqlite3,sys; db=sqlite3.connect(sys.argv[1]); rows=db.executescript(base64.b64decode(sys.argv[2]).decode()) if False else db.execute(base64.b64decode(sys.argv[2]).decode()).fetchall(); print(rows[0][0] if rows and len(rows[0])==1 else rows); db.close()'
+    $result = & python -c $code $Database $encoded
+    if ($LASTEXITCODE -ne 0) { throw "SQLite query failed." }
+    [string]$result
+}
+
+function Invoke-WebViewProbe([string]$Expression) {
+    $encoded = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($Expression))
+    $result = & node $WebViewProbe $encoded
+    if ($LASTEXITCODE -ne 0) { throw "WebView computed-style probe failed." }
+    return $result | ConvertFrom-Json
+}
+
+function Assert-PersistedProjectIdentity([string]$Database, [string]$ExpectedRoot) {
+    $escaped = [IO.Path]::GetFullPath($ExpectedRoot).Replace("'", "''")
+    $projectId = Invoke-PythonSql $Database "SELECT id FROM projects WHERE root_path='$escaped';"
+    Assert-True (-not [string]::IsNullOrWhiteSpace($projectId)) "Expected canonical project root is absent from persistence."
+    $escapedId = $projectId.Replace("'", "''")
+    Assert-True ((Invoke-PythonSql $Database "SELECT count(*) FROM reader_resume_state WHERE slot='current' AND project_id='$escapedId';") -eq '1') "Resume state is not bound to the canonical project identity."
+    Assert-True ((Invoke-PythonSql $Database "SELECT count(*) FROM explanation_nodes WHERE project_id='$escapedId' AND status='valid';") -ge '1') "No valid explanation remains bound to the canonical project identity."
+    return $projectId
+}
+
+function Copy-HistoricalDatabase([string]$Database, [string]$Fixture) {
+    Assert-True (Test-Path -LiteralPath $Fixture) "Sanitized historical SQLite fixture is missing: $Fixture"
+    New-Item -ItemType Directory -Force -Path ([IO.Path]::GetDirectoryName($Database)) | Out-Null
+    Copy-Item -LiteralPath $Fixture -Destination $Database -Force
+}
+
+function Test-Migration([string]$Executable, [int]$Version, [string]$Fixture) {
+    Remove-Item -Recurse -Force -ErrorAction SilentlyContinue $CurrentData, $LegacyData
+    New-Item -ItemType Directory -Force -Path $LegacyData | Out-Null
+    $legacy = Join-Path $LegacyData 'codereader.sqlite'
+    Copy-HistoricalDatabase $legacy $Fixture
+    Assert-True ((Invoke-PythonSql $legacy 'PRAGMA user_version;') -eq [string]$Version) "Historical fixture has the wrong schema version."
+    $app = Start-App $Executable
+    try {
+        $current = Join-Path $CurrentData 'codereader.sqlite'
+        $deadline = [DateTimeOffset]::UtcNow.AddSeconds(30)
+        while (-not (Test-Path -LiteralPath $current) -and [DateTimeOffset]::UtcNow -lt $deadline) { Start-Sleep -Milliseconds 250 }
+        Assert-True (Test-Path -LiteralPath $current) "Migrated database was not created."
+        Assert-True ((Invoke-PythonSql $current 'PRAGMA user_version;') -eq '6') "Database did not migrate to v6."
+        Assert-True ((Invoke-PythonSql $current "SELECT count(*) FROM projects WHERE id='project:fixture';") -eq '1') "Fixture project was lost."
+        Assert-True ((Invoke-PythonSql $current "SELECT count(*) FROM explanation_nodes WHERE id='exp:fixture';") -eq '1') "Fixture explanation was lost."
+        Assert-True ((Invoke-PythonSql $current "SELECT count(*) FROM user_reading_states WHERE id='reading:fixture';") -eq '1') "Fixture reading state was lost."
+        Assert-True ((Invoke-PythonSql $current "SELECT count(*) FROM model_provider_settings WHERE id='default';") -eq '1') "Fixture model settings were lost."
+        if ($Version -ge 2) {
+            Assert-True ((Invoke-PythonSql $current "SELECT count(*) FROM prompt_versions WHERE version='legacy-canary';") -eq '1') "Fixture prompt version was lost."
+        }
+        Assert-True ((Invoke-PythonSql $current 'PRAGMA integrity_check;') -eq 'ok') "Migrated database failed integrity check."
+        $backup = Get-ChildItem -LiteralPath $LegacyData -Filter 'codereader.sqlite.backup-*' | Select-Object -First 1
+        Assert-True ($null -ne $backup) "Migration backup is missing."
+        Assert-True ((Invoke-PythonSql $backup.FullName 'PRAGMA integrity_check;') -eq 'ok') "Migration backup is not readable."
+        Assert-True ((Invoke-PythonSql $backup.FullName 'PRAGMA user_version;') -eq [string]$Version) "Migration backup does not preserve the source version."
+        Assert-True ((Invoke-PythonSql $backup.FullName "SELECT count(*) FROM explanation_nodes WHERE id='exp:fixture';") -eq '1') "Migration backup lost source content."
+        return $true
+    } finally { Stop-App $app }
+}
+
+function Test-MigrationFailureRecovery([string]$Executable, [string]$Fixture) {
+    Remove-Item -Recurse -Force -ErrorAction SilentlyContinue $CurrentData, $LegacyData
+    New-Item -ItemType Directory -Force -Path $CurrentData | Out-Null
+    $database = Join-Path $CurrentData 'codereader.sqlite'
+    Copy-HistoricalDatabase $database $Fixture
+    $code = 'import sqlite3,sys; d=sqlite3.connect(sys.argv[1]); d.execute("CREATE TABLE user_annotations(id TEXT PRIMARY KEY)"); d.commit(); d.close()'
+    & python -c $code $database
+    if ($LASTEXITCODE -ne 0) { throw "Could not prepare the migration failure fixture." }
+    $app = Start-App $Executable
+    try { Start-Sleep -Seconds 3 } finally { Stop-App $app }
+    Assert-True ((Invoke-PythonSql $database 'PRAGMA user_version;') -eq '3') "Failed migration did not restore the original v3 database."
+    Assert-True ((Invoke-PythonSql $database "SELECT count(*) FROM projects WHERE id='project:fixture';") -eq '1') "Failed migration lost original data."
+    $backup = Get-ChildItem -LiteralPath $CurrentData -Filter 'codereader.sqlite.backup-*' | Select-Object -First 1
+    Assert-True ($null -ne $backup) "Failed migration backup is missing."
+    Assert-True ((Invoke-PythonSql $backup.FullName 'PRAGMA integrity_check;') -eq 'ok') "Failed migration backup is corrupt."
+    $recovery = Join-Path $CurrentData 'recovered-from-backup.sqlite'
+    Copy-Item -LiteralPath $backup.FullName -Destination $recovery -Force
+    $code = 'import sqlite3,sys; d=sqlite3.connect(sys.argv[1]); d.execute("DROP TABLE user_annotations"); d.commit(); d.close()'
+    & python -c $code $recovery
+    if ($LASTEXITCODE -ne 0) { throw "Could not apply the documented recovery correction to the backup copy." }
+    Copy-Item -LiteralPath $recovery -Destination $database -Force
+    $app = Start-App $Executable
+    try {
+        $deadline = [DateTimeOffset]::UtcNow.AddSeconds(30)
+        do {
+            Start-Sleep -Milliseconds 250
+            $version = Invoke-PythonSql $database 'PRAGMA user_version;'
+        } while ($version -ne '6' -and [DateTimeOffset]::UtcNow -lt $deadline)
+        Assert-True ($version -eq '6') "Recovered backup did not migrate after restart."
+        Assert-True ((Invoke-PythonSql $database "SELECT count(*) FROM projects WHERE id='project:fixture';") -eq '1') "Recovered backup lost fixture data after restart."
+        Assert-True ((Invoke-PythonSql $database "SELECT count(*) FROM explanation_nodes WHERE id='exp:fixture';") -eq '1') "Recovered backup lost its explanation after restart."
+        Assert-True ((Invoke-PythonSql $database "SELECT count(*) FROM user_reading_states WHERE id='reading:fixture';") -eq '1') "Recovered backup lost its reading state after restart."
+        Assert-True ((Invoke-PythonSql $database "SELECT count(*) FROM model_provider_settings WHERE id='default';") -eq '1') "Recovered backup lost its model settings after restart."
+        Assert-True ((Invoke-PythonSql $database "SELECT count(*) FROM prompt_versions WHERE version='current-canary';") -eq '1') "Recovered backup lost its prompt version after restart."
+        Assert-True ((Invoke-PythonSql $database 'PRAGMA integrity_check;') -eq 'ok') "Recovered database failed integrity check after restart."
+        Assert-True ((Invoke-PythonSql $backup.FullName 'PRAGMA user_version;') -eq '3') "Recovery backup no longer preserves its original schema version."
+        Assert-True ((Invoke-PythonSql $backup.FullName 'PRAGMA integrity_check;') -eq 'ok') "Recovery backup is unreadable after recovery restart."
+    } finally { Stop-App $app }
+    return $true
+}
+
+function Set-ReducedMotion {
+    if (-not ('NativeJourneySystemParameters' -as [type])) {
+        Add-Type @'
+using System.Runtime.InteropServices;
+public static class NativeJourneySystemParameters {
+ [DllImport("user32.dll", SetLastError=true)] public static extern bool SystemParametersInfo(uint action,uint param,ref bool value,uint flags);
+}
+'@
+    }
+    $disabled = $false
+    Assert-True ([NativeJourneySystemParameters]::SystemParametersInfo(0x1043, 0, [ref]$disabled, 0x03)) "Could not disable client animations."
+    $enabled = $true
+    Assert-True ([NativeJourneySystemParameters]::SystemParametersInfo(0x1042, 0, [ref]$enabled, 0)) "Could not query client animations."
+    Assert-True (-not $enabled) "Reduced-motion setting was not applied."
+    return $true
+}
+
+function Configure-LocalModel($Root, [int]$Port) {
+    Invoke-Element (Find-Element $Root '更多' ([System.Windows.Automation.ControlType]::Button))
+    Invoke-Element (Find-Element $Root '模型设置' ([System.Windows.Automation.ControlType]::MenuItem))
+    $dialog = Find-Element $Root '模型设置' ([System.Windows.Automation.ControlType]::Window)
+    $edits = $dialog.FindAll([System.Windows.Automation.TreeScope]::Descendants,
+        (New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::ControlTypeProperty, [System.Windows.Automation.ControlType]::Edit)))
+    Assert-True ($edits.Count -ge 3) "Model settings fields unavailable to UIAutomation."
+    Set-ElementValue $edits[0] "http://127.0.0.1:$Port/v1/chat/completions"
+    Set-ElementValue $edits[1] 'journey-stub'
+    Set-ElementValue $edits[2] 'journey-local-key'
+    Invoke-Element (Find-Element $dialog '测试连接' ([System.Windows.Automation.ControlType]::Button))
+    Find-Element $dialog '连接成功：journey-stub' $null 20 | Out-Null
+    Invoke-Element (Find-Element $dialog '保存配置' ([System.Windows.Automation.ControlType]::Button))
+}
+
+function Authorize-NativePicker([string]$Path) {
+    Start-Sleep -Seconds 1
+    [System.Windows.Forms.SendKeys]::SendWait('%d')
+    [System.Windows.Forms.SendKeys]::SendWait($Path)
+    [System.Windows.Forms.SendKeys]::SendWait('{ENTER}')
+    Start-Sleep -Milliseconds 750
+    [System.Windows.Forms.SendKeys]::SendWait('{ENTER}')
+}
+
+function Open-ProjectWithNativePicker($Root, [string]$Path) {
+    Invoke-Element (Find-Element $Root '打开项目' ([System.Windows.Automation.ControlType]::Button))
+    Authorize-NativePicker $Path
+    Find-Element $Root 'README.md' $null 30 | Out-Null
+    return $true
+}
+
+function Resume-WithNativePicker($Root, [string]$Path) {
+    $continue = Find-ElementByPrefix $Root '继续' ([System.Windows.Automation.ControlType]::Button)
+    Invoke-Element $continue
+    Authorize-NativePicker $Path
+    Find-Element $Root 'README.md' $null 30 | Out-Null
+    return $true
+}
+
+function Reject-WrongResumeAuthorization($Root, [string]$WrongPath) {
+    $continue = Find-ElementByPrefix $Root '继续' ([System.Windows.Automation.ControlType]::Button)
+    Invoke-Element $continue
+    Authorize-NativePicker $WrongPath
+    Find-Element $Root '所选项目与最近记录不匹配' $null 30 | Out-Null
+    $savedExplanation = $Root.FindFirst(
+        [System.Windows.Automation.TreeScope]::Descendants,
+        (New-Object System.Windows.Automation.PropertyCondition(
+            [System.Windows.Automation.AutomationElement]::NameProperty,
+            'The selected function validates input and returns a stable result.')))
+    Assert-True ($null -eq $savedExplanation) "Mismatched project authorization restored an explanation from the saved project."
+    return $true
+}
+
+function Test-LongContent($Root) {
+    Select-Element (Find-Element $Root 'README.md')
+    Find-Element $Root 'NATIVE_JOURNEY_LONG_CONTENT_START' $null 20 | Out-Null
+    [System.Windows.Forms.SendKeys]::SendWait('^{END}')
+    $end = Find-Element $Root 'NATIVE_JOURNEY_LONG_CONTENT_END' $null 20
+    Assert-True (-not $end.Current.IsOffscreen) "Long-content endpoint exists but is not visibly on screen."
+    $endRect = $end.Current.BoundingRectangle
+    $rootRect = $Root.Current.BoundingRectangle
+    Assert-True ($endRect.Top -ge $rootRect.Top -and $endRect.Bottom -le $rootRect.Bottom) "Long-content endpoint is outside the native window."
+    return $true
+}
+
+function Measure-ComputedContrast {
+    return Invoke-WebViewProbe @'
+(() => {
+  const tab = [...document.querySelectorAll('[role="tab"]')].find((node) => node.textContent.trim() === '真实代码');
+  if (!tab) throw new Error('target tab missing');
+  const parse = (value) => value.match(/[\d.]+/g).slice(0, 3).map(Number);
+  const luminance = (value) => parse(value).map((part) => { const channel = part / 255; return channel <= .04045 ? channel / 12.92 : ((channel + .055) / 1.055) ** 2.4; }).reduce((sum, channel, index) => sum + channel * [.2126, .7152, .0722][index], 0);
+  let owner = tab;
+  let background = getComputedStyle(owner).backgroundColor;
+  while (owner.parentElement && /rgba?\([^)]*,\s*0(?:\.0+)?\)$/.test(background)) { owner = owner.parentElement; background = getComputedStyle(owner).backgroundColor; }
+  const foreground = getComputedStyle(tab).color;
+  const values = [luminance(foreground), luminance(background)].sort((a, b) => a - b);
+  return { foreground, background, ratio: (values[1] + .05) / (values[0] + .05) };
+})()
+'@
+}
+
+function Test-ReducedMotionApplication($Root) {
+    $codeTab = Find-Element $Root '真实代码' ([System.Windows.Automation.ControlType]::TabItem)
+    $whyTab = Find-Element $Root '为什么重要' ([System.Windows.Automation.ControlType]::TabItem)
+    Select-Element $whyTab
+    $motion = Invoke-WebViewProbe @'
+(() => {
+  const target = [...document.querySelectorAll('[role="tab"]')].find((node) => node.textContent.trim() === '为什么重要');
+  if (!target) throw new Error('target tab missing');
+  const milliseconds = (value) => Math.max(...value.split(',').map((item) => item.trim().endsWith('ms') ? parseFloat(item) : parseFloat(item) * 1000));
+  const style = getComputedStyle(target);
+  return { reduced: matchMedia('(prefers-reduced-motion: reduce)').matches, transitionMs: milliseconds(style.transitionDuration), animationMs: milliseconds(style.animationDuration) };
+})()
+'@
+    Assert-True ($motion.reduced -and $motion.transitionMs -le 0.01 -and $motion.animationMs -le 0.01) "Application computed styles did not honor reduced motion."
+    Assert-FocusedAndSelected $whyTab 'Reduced-motion target' | Out-Null
+    Select-Element $codeTab
+    return $true
+}
+
+function Test-KeyboardAndZoom($App) {
+    $codeTab = Find-Element $App.Root '真实代码' ([System.Windows.Automation.ControlType]::TabItem)
+    $codeTab.SetFocus()
+    Assert-FocusedAndSelected $codeTab 'Keyboard roundtrip origin' | Out-Null
+    [System.Windows.Forms.SendKeys]::SendWait('{RIGHT}')
+    Start-Sleep -Milliseconds 250
+    $whyTab = Find-Element $App.Root '为什么重要' ([System.Windows.Automation.ControlType]::TabItem)
+    Assert-FocusedAndSelected $whyTab 'Keyboard roundtrip right target' | Out-Null
+    [System.Windows.Forms.SendKeys]::SendWait('{LEFT}')
+    Start-Sleep -Milliseconds 250
+    Assert-FocusedAndSelected $codeTab 'Keyboard roundtrip restored origin' | Out-Null
+    Complete-Check 'keyboard-focus-roundtrip' $true
+    [System.Windows.Forms.SendKeys]::SendWait('^0')
+    Start-Sleep -Milliseconds 500
+    $baselineZoom = [double](Invoke-WebViewProbe 'window.devicePixelRatio')
+    for ($i = 0; $i -lt 5; $i++) { [System.Windows.Forms.SendKeys]::SendWait('^{ADD}') }
+    Start-Sleep -Seconds 1
+    $zoomedCodeTab = Find-Element $App.Root '真实代码' ([System.Windows.Automation.ControlType]::TabItem)
+    $zoomedRatio = [double](Invoke-WebViewProbe 'window.devicePixelRatio') / $baselineZoom
+    Assert-True ($zoomedRatio -ge 1.95 -and $zoomedRatio -le 2.05) "WebView did not report 200% zoom (ratio $zoomedRatio)."
+    foreach ($name in @('下一步', '真实代码', '为什么重要')) {
+        $tab = Find-Element $App.Root $name ([System.Windows.Automation.ControlType]::TabItem)
+        $rect = $tab.Current.BoundingRectangle
+        Assert-True (-not $rect.IsEmpty -and $rect.Right -le $App.Root.Current.BoundingRectangle.Right) "Zoom hid $name outside the window."
+    }
+    $contrast = Measure-ComputedContrast
+    Assert-True ($contrast.ratio -ge 4.5) "Computed target-tab contrast is below 4.5:1 ($($contrast.ratio))."
+    return $true
+}
+
+function Generate-Explanation($Root) {
+    Select-Element (Find-Element $Root 'entry.ts')
+    Invoke-Element (Find-Element $Root '生成解释' ([System.Windows.Automation.ControlType]::Button))
+    $dialog = Find-Element $Root '生成确认'
+    Invoke-Element (Find-Element $dialog '确认发送' ([System.Windows.Automation.ControlType]::Button))
+    Find-Element $Root 'The selected function validates input and returns a stable result.' $null 30 | Out-Null
+    return $true
+}
+
+if ($CommitSha -notmatch '^[0-9a-fA-F]{40}$') { throw "Invalid commit SHA." }
+if ($ReleaseTag -notmatch '^v1\.[0-9]+\.[0-9]+(?:-rc\.[0-9]+)?$') { throw "Invalid release tag." }
+$requiredPaths = @($Package, $Fixture010, $Fixture011, $Fixture011Current)
+Assert-True (($requiredPaths | Where-Object { -not (Test-Path -LiteralPath $_) }).Count -eq 0) "Package and all three sanitized SQLite fixtures are required."
+$expected = if ($Architecture -eq "arm64") { "ARM64" } else { "AMD64" }
+Assert-True ($env:PROCESSOR_ARCHITECTURE -eq $expected) "Journey requires native $expected."
+Add-Type -AssemblyName UIAutomationClient
+Add-Type -AssemblyName System.Windows.Forms
+
+$profile = Join-Path $env:RUNNER_TEMP 'codereader-native-journey'
+$env:APPDATA = Join-Path $profile 'Roaming'
+$env:LOCALAPPDATA = Join-Path $profile 'Local'
+$CurrentData = Join-Path $env:APPDATA 'com.codereader.desktop'
+$LegacyData = Join-Path $env:APPDATA 'com.codereader.app'
+New-Item -ItemType Directory -Force -Path $env:APPDATA, $env:LOCALAPPDATA | Out-Null
+$WebViewProbe = Join-Path $profile 'webview-probe.mjs'
+@'
+const expression = Buffer.from(process.argv[2], "base64").toString("utf8");
+let targets;
+for (let attempt = 0; attempt < 120; attempt++) {
+  try {
+    targets = await fetch("http://127.0.0.1:9222/json").then((response) => response.json());
+    if (targets.some((target) => target.type === "page" && target.webSocketDebuggerUrl)) break;
+  } catch {}
+  await new Promise((resolve) => setTimeout(resolve, 250));
+}
+const target = targets?.find((item) => item.type === "page" && item.webSocketDebuggerUrl);
+if (!target) throw new Error("CodeReader WebView DevTools target unavailable");
+const socket = new WebSocket(target.webSocketDebuggerUrl);
+await new Promise((resolve, reject) => { socket.onopen = resolve; socket.onerror = reject; });
+const response = await new Promise((resolve, reject) => {
+  socket.onmessage = (event) => { const message = JSON.parse(event.data); if (message.id === 1) resolve(message); };
+  socket.onerror = reject;
+  socket.send(JSON.stringify({ id: 1, method: "Runtime.evaluate", params: { expression, returnByValue: true, awaitPromise: true } }));
+});
+socket.close();
+if (response.result?.exceptionDetails) throw new Error(response.result.exceptionDetails.text);
+process.stdout.write(JSON.stringify(response.result.result.value));
+'@ | Set-Content -LiteralPath $WebViewProbe -Encoding UTF8
+$env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS = '--remote-debugging-port=9222 --remote-allow-origins=http://127.0.0.1:9222'
+$ControlledProject = Join-Path $profile 'controlled-project'
+$WrongProject = Join-Path $profile 'wrong-project'
+New-Item -ItemType Directory -Force -Path $ControlledProject | Out-Null
+New-Item -ItemType Directory -Force -Path $WrongProject | Out-Null
+'# Deliberately mismatched resume project' | Set-Content -LiteralPath (Join-Path $WrongProject 'README.md') -Encoding UTF8
+@'
+# Controlled native journey project
+
+This readme intentionally contains long paragraphs so the installed desktop application must keep
+the project outline, document content, and explanation panel reachable at two hundred percent zoom.
+The sample is generated outside the repository and never changes the maintained R4 example projects.
+
+NATIVE_JOURNEY_LONG_CONTENT_START
+
+The following repeated sections exercise native scrolling without placing private paths or source code
+in exported evidence. They are generated inside the runner profile and removed with that profile.
+
+## Section 1
+Accessibility, recovery, compatibility, and model-offline behavior remain product requirements.
+
+## Section 2
+Accessibility, recovery, compatibility, and model-offline behavior remain product requirements.
+
+## Section 3
+Accessibility, recovery, compatibility, and model-offline behavior remain product requirements.
+
+## Section 4
+Accessibility, recovery, compatibility, and model-offline behavior remain product requirements.
+
+## Section 5
+Accessibility, recovery, compatibility, and model-offline behavior remain product requirements.
+
+## Section 6
+Accessibility, recovery, compatibility, and model-offline behavior remain product requirements.
+
+## Section 7
+Accessibility, recovery, compatibility, and model-offline behavior remain product requirements.
+
+## Section 8
+Accessibility, recovery, compatibility, and model-offline behavior remain product requirements.
+
+NATIVE_JOURNEY_LONG_CONTENT_END
+
+## Entry
+
+Open `entry.ts`, select the exported function, and request the deterministic local explanation.
+'@ | Set-Content -LiteralPath (Join-Path $ControlledProject 'README.md') -Encoding UTF8
+@'
+export function validateJourneyInput(value: string): string {
+  if (!value.trim()) throw new Error("value is required");
+  return value.trim();
+}
+'@ | Set-Content -LiteralPath (Join-Path $ControlledProject 'entry.ts') -Encoding UTF8
+
+Invoke-Process msiexec.exe @('/i', "`"$Package`"", '/qn', '/norestart') @(0, 3010)
+$executable = Resolve-Executable
+try {
+    Complete-Check 'legacy-0.10-upgrade' (Test-Migration $executable 1 $Fixture010)
+    Complete-Check 'legacy-0.11-upgrade' (Test-Migration $executable 2 $Fixture011)
+    Test-MigrationFailureRecovery $executable $Fixture011Current | Out-Null
+    Remove-Item -Recurse -Force -ErrorAction SilentlyContinue $CurrentData, $LegacyData
+    Set-ReducedMotion | Out-Null
+    $stub = Start-Process -FilePath node -ArgumentList @('scripts/native-journey-model-stub.mjs', '18765') -PassThru -WindowStyle Hidden
+    try {
+        $app = Start-App $executable
+        try {
+            Complete-Check 'native-picker-open-project' (Open-ProjectWithNativePicker $app.Root $ControlledProject)
+            Complete-Check 'long-content' (Test-LongContent $app.Root)
+            Configure-LocalModel $app.Root 18765
+            Complete-Check 'zoom-200-contrast' (Test-KeyboardAndZoom $app)
+            Complete-Check 'reduced-motion' (Test-ReducedMotionApplication $app.Root)
+            Complete-Check 'explanation-generation' (Generate-Explanation $app.Root)
+        } finally { Stop-App $app }
+        $database = Join-Path $CurrentData 'codereader.sqlite'
+        $canonicalProjectId = Assert-PersistedProjectIdentity $database $ControlledProject
+        $app = Start-App $executable
+        try {
+            Reject-WrongResumeAuthorization $app.Root $WrongProject | Out-Null
+            Assert-True ((Assert-PersistedProjectIdentity $database $ControlledProject) -eq $canonicalProjectId) "Wrong authorization changed the persisted project identity."
+            Resume-WithNativePicker $app.Root $ControlledProject | Out-Null
+            Find-Element $app.Root 'README.md' $null 30 | Out-Null
+            Find-Element $app.Root 'The selected function validates input and returns a stable result.' $null 30 | Out-Null
+            Assert-True ((Assert-PersistedProjectIdentity $database $ControlledProject) -eq $canonicalProjectId) "Correct reauthorization did not restore the same project identity."
+            Complete-Check 'restart-reauthorize-restore' $true
+        } finally { Stop-App $app }
+    } finally { if (-not $stub.HasExited) { Stop-Process -Id $stub.Id -Force } }
+
+    $database = Join-Path $CurrentData 'codereader.sqlite'
+    Assert-True (Test-Path -LiteralPath $database) "Journey database missing before uninstall."
+    Invoke-Process msiexec.exe @('/x', "`"$Package`"", '/qn', '/norestart') @(0, 3010)
+    Assert-True (-not (Test-Path -LiteralPath $executable)) "Executable remains after uninstall."
+    Assert-True (Test-Path -LiteralPath $database) "Uninstall removed user data."
+    Invoke-Process msiexec.exe @('/i', "`"$Package`"", '/qn', '/norestart') @(0, 3010)
+    $executable = Resolve-Executable
+    $app = Start-App $executable
+    try {
+        Resume-WithNativePicker $app.Root $ControlledProject | Out-Null
+        Find-Element $app.Root 'README.md' $null 30 | Out-Null
+        Find-Element $app.Root 'The selected function validates input and returns a stable result.' $null 30 | Out-Null
+        Assert-True ((Invoke-PythonSql $database 'SELECT count(*) FROM reader_resume_state WHERE slot=''current'';') -eq '1') "Reinstall did not preserve resume state."
+        Assert-True ((Invoke-PythonSql $database 'SELECT count(*) FROM explanation_nodes WHERE status=''valid'';') -ge '1') "Reinstall did not preserve generated explanations."
+        Assert-True ((Assert-PersistedProjectIdentity $database $ControlledProject) -eq $canonicalProjectId) "Reinstall changed the canonical project identity or its resume/explanation bindings."
+    } finally { Stop-App $app }
+    Complete-Check 'uninstall-data-policy' $true
+
+    $missing = @($RequiredChecks | Where-Object { -not $Observed[$_] })
+    Assert-True ($missing.Count -eq 0) "Native journey is incomplete: $($missing -join ', ')"
+    $evidence = [ordered]@{
+        schemaVersion = 1; releaseTag = $ReleaseTag; commitSha = $CommitSha.ToLowerInvariant()
+        platform = 'windows'; arch = $Architecture; observedAt = [DateTimeOffset]::UtcNow.ToString("yyyy-MM-dd'T'HH:mm:ss.fff'Z'")
+        status = 'pass'; windowsAuthenticodeSigned = $false
+        checks = @($RequiredChecks | ForEach-Object { [ordered]@{ name = $_; status = 'pass' } })
+    }
+    $outputPath = [IO.Path]::GetFullPath($Output)
+    New-Item -ItemType Directory -Force -Path ([IO.Path]::GetDirectoryName($outputPath)) | Out-Null
+    $evidence | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $outputPath -Encoding UTF8
+} finally {
+    if (Get-UninstallEntry) { Invoke-Process msiexec.exe @('/x', "`"$Package`"", '/qn', '/norestart') @(0, 3010) }
+}
