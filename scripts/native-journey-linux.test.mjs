@@ -37,10 +37,19 @@ function hasProtectedCandidateHandoff(workflow) {
   const writeJobs = jobNames.filter((name) =>
     workflowJob(workflow, name).includes("contents: write")
   );
+  const dualCheckout = (job) =>
+    job.includes("ref: ${{ github.sha }}") &&
+    job.includes("ref: refs/tags/${{ env.RELEASE_TAG }}") &&
+    job.includes("path: candidate-source");
   return (
+    dualCheckout(prepare) &&
+    dualCheckout(journey) &&
+    dualCheckout(attach) &&
+    !workflow.includes("git tag") &&
+    !workflow.includes("git push --force") &&
     prepare.includes("environment: production-release") &&
     prepare.includes("contents: write") &&
-    prepare.includes("git describe --tags --exact-match HEAD") &&
+    prepare.includes("git -C candidate-source describe --tags --exact-match HEAD") &&
     prepare.includes('gh release view "$RELEASE_TAG"') &&
     prepare.includes("--json tagName") &&
     prepare.includes("--json isDraft") &&
@@ -54,6 +63,12 @@ function hasProtectedCandidateHandoff(workflow) {
     journey.includes("needs: prepare-candidate") &&
     journey.includes("name: verified-candidate-release-assets") &&
     journey.includes("release-evidence.mjs verify") &&
+    journey.includes("git -C candidate-source rev-parse HEAD") &&
+    journey.includes("cd candidate-source") &&
+    journey.includes("node scripts/native-journey-linux.mjs") &&
+    journey.includes('Push-Location "$workspace/candidate-source"') &&
+    journey.includes("./scripts/native-journey-windows.ps1") &&
+    journey.includes('$output = "$workspace/native-journey-') &&
     journey.includes("native-smoke-${{ matrix.platform }}-${{ matrix.arch }}.json") &&
     journey.includes('SHA256SUMS)" = "$package_hash"') &&
     journey.includes('test -n "$package"') &&
@@ -70,6 +85,7 @@ function hasProtectedCandidateHandoff(workflow) {
     attach.includes("name: verified-candidate-release-assets") &&
     attach.includes("release-evidence.mjs verify --input release-binding") &&
     attach.includes("native-candidate-snapshot.mjs verify") &&
+    attach.includes("git -C candidate-source rev-parse HEAD") &&
     attach.includes("prepared-candidate/candidate-manifest.json") &&
     attach.includes(
       'test "$(gh release view "$RELEASE_TAG" --json isDraft --jq .isDraft)" = true'
@@ -185,7 +201,10 @@ describe("Linux native journey evidence", () => {
     for (const required of [
       "environment: production-release",
       "contents: write",
-      "git describe --tags --exact-match HEAD",
+      "ref: ${{ github.sha }}",
+      "ref: refs/tags/${{ env.RELEASE_TAG }}",
+      "path: candidate-source",
+      "git -C candidate-source describe --tags --exact-match HEAD",
       "--json tagName",
       "--json isDraft",
       "-name 'CodeReader_*' | wc -l)\" = 10",
@@ -195,6 +214,11 @@ describe("Linux native journey evidence", () => {
       "needs: prepare-candidate",
       "name: verified-candidate-release-assets",
       "native-candidate-snapshot.mjs create",
+      "cd candidate-source",
+      "node scripts/native-journey-linux.mjs",
+      'Push-Location "$workspace/candidate-source"',
+      "./scripts/native-journey-windows.ps1",
+      '$output = "$workspace/native-journey-',
       "native-smoke-${{ matrix.platform }}-${{ matrix.arch }}.json",
       'SHA256SUMS)" = "$package_hash"',
       'test -n "$package"',
@@ -202,7 +226,7 @@ describe("Linux native journey evidence", () => {
       "--input final-release-binding --manifest prepared-candidate/candidate-manifest.json \\"
     ]) {
       expect(
-        hasProtectedCandidateHandoff(nativeWorkflow.replace(required, "removed")),
+        hasProtectedCandidateHandoff(nativeWorkflow.replaceAll(required, "removed")),
         `removing ${required} must break the protected handoff`
       ).toBe(false);
     }
