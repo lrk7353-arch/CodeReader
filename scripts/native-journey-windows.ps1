@@ -11,6 +11,7 @@
     [string]$Output,
     [switch]$RequiredPathSelfTest,
     [switch]$DatabasePathSelfTest,
+    [switch]$CleanupPathSelfTest,
     [switch]$RegistryDiscoverySelfTest
 )
 
@@ -348,6 +349,53 @@ function Wait-CodeReaderDatabase([string[]]$Candidates, [int]$TimeoutSeconds = 3
     throw 'Native journey phase=migration category=database-not-created exit=1.'
 }
 
+function Remove-ControlledDataPaths([object[]]$PathGroups, [scriptblock]$Resolver = $null) {
+    if ($null -eq $Resolver) { $Resolver = { param($LiteralPath) Get-Item -LiteralPath $LiteralPath -ErrorAction Stop } }
+    $paths = @($PathGroups | ForEach-Object { @($_) })
+    foreach ($path in $paths) {
+        try {
+            $item = & $Resolver $path
+            Remove-Item -Recurse -Force -LiteralPath $item.FullName -ErrorAction Stop
+        } catch [System.Management.Automation.ItemNotFoundException] {
+            continue
+        } catch {
+            throw 'Native journey phase=migration-cleanup category=cleanup-error exit=1.'
+        }
+    }
+}
+
+if ($CleanupPathSelfTest) {
+    $root = Join-Path ([IO.Path]::GetTempPath()) ([Guid]::NewGuid().ToString('N'))
+    try {
+        New-Item -ItemType Directory -Force -Path $root | Out-Null
+        Remove-ControlledDataPaths @(@(), @())
+        [ordered]@{ expected = 'empty'; actual = 'empty' } | ConvertTo-Json -Compress
+        $first = Join-Path $root 'first'
+        $second = Join-Path $root 'second'
+        New-Item -ItemType Directory -Force -Path $first, $second | Out-Null
+        Remove-ControlledDataPaths @(@($first), @($second))
+        Assert-True (-not (Test-Path -LiteralPath $first) -and -not (Test-Path -LiteralPath $second)) 'Controlled cleanup multi-group contract failed.'
+        [ordered]@{ expected = 'multiple'; actual = 'multiple' } | ConvertTo-Json -Compress
+        try {
+            Remove-ControlledDataPaths @(@($first)) { throw [System.UnauthorizedAccessException]::new('private-path') }
+        } catch {
+            Assert-True ($_.Exception.Message -eq 'Native journey phase=migration-cleanup category=cleanup-error exit=1.') 'Controlled cleanup access-error contract failed.'
+            Assert-True ($_.Exception.Message -notmatch 'private') 'Controlled cleanup leaked resolver details.'
+            [ordered]@{ expected = 'access-failed'; actual = 'access-failed' } | ConvertTo-Json -Compress
+        }
+        $primary = [System.Management.Automation.ErrorRecord]::new([Exception]::new('Native journey phase=product category=failed exit=9.'), 'primary', [System.Management.Automation.ErrorCategory]::OperationStopped, $null)
+        try {
+            Invoke-InstallerCleanup $primary { Remove-ControlledDataPaths @(@($first)) { throw [System.UnauthorizedAccessException]::new('private-path') } } { throw 'unexpected' } 3>$null
+        } catch {
+            Assert-True ($_.Exception.Message -eq 'Native journey phase=product category=failed exit=9.') 'Controlled cleanup replaced the primary failure.'
+            [ordered]@{ expected = 'primary-preserved'; actual = 'primary-preserved' } | ConvertTo-Json -Compress
+        }
+        exit 0
+    } finally {
+        Remove-Item -Recurse -Force -LiteralPath $root -ErrorAction SilentlyContinue
+    }
+}
+
 if ($DatabasePathSelfTest) {
     $root = Join-Path ([IO.Path]::GetTempPath()) ([Guid]::NewGuid().ToString('N'))
     $one = Join-Path $root 'one.sqlite'
@@ -411,7 +459,7 @@ function Copy-HistoricalDatabase([string]$Database, [string]$Fixture) {
 }
 
 function Test-Migration([string]$Executable, [int]$Version, [string]$Fixture) {
-    Remove-Item -Recurse -Force -ErrorAction SilentlyContinue $CurrentDataCandidates, $LegacyDataCandidates
+    Remove-ControlledDataPaths @($CurrentDataCandidates, $LegacyDataCandidates)
     foreach ($legacyRoot in $LegacyDataCandidates) {
         New-Item -ItemType Directory -Force -Path $legacyRoot | Out-Null
         Copy-HistoricalDatabase (Join-Path $legacyRoot 'codereader.sqlite') $Fixture
@@ -442,7 +490,7 @@ function Test-Migration([string]$Executable, [int]$Version, [string]$Fixture) {
 }
 
 function Test-MigrationFailureRecovery([string]$Executable, [string]$Fixture) {
-    Remove-Item -Recurse -Force -ErrorAction SilentlyContinue $CurrentDataCandidates, $LegacyDataCandidates
+    Remove-ControlledDataPaths @($CurrentDataCandidates, $LegacyDataCandidates)
     New-Item -ItemType Directory -Force -Path $CurrentData | Out-Null
     $database = Join-Path $CurrentData 'codereader.sqlite'
     Copy-HistoricalDatabase $database $Fixture
