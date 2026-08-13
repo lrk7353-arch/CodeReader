@@ -52,7 +52,7 @@ describe("App", () => {
     const markup = renderToStaticMarkup(<App />);
 
     expect(markup).toContain("CodeReader");
-    expect(markup).toContain("1.0.0-rc.4");
+    expect(markup).toContain("1.0.0-rc.5");
     expect(markup).toContain("体验可验证示例");
     expect(markup).toContain("继续阅读");
     expect(markup).toContain("打开项目");

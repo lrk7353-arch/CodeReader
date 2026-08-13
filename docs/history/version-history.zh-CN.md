@@ -17,7 +17,8 @@
 | 1.0.0-rc.1 | 首次生产候选构建尝试 | 安装包 smoke 未通过，未发布任何资产；标签保留用于审计，不可复用。 |
 | 1.0.0-rc.2 | 原生授权文件访问、全文件树/安全预览、迁移恢复、跨架构发布链 | 已被后续候选替代；保留标签与记录用于审计。 |
 | 1.0.0-rc.3 | 项目优先入口、正交认知状态、分层解释、个人记录、复查队列 | 已形成 draft 并完成 package smoke；保留为历史事实，不向后复用证据。 |
-| 1.0.0-rc.4 | 四平台可重复原生产品旅程 harness 候选 | 当前候选；R4 三项目人工可用性已通过，仅四平台 OS 级旅程与最终发布证据未完成。 |
+| 1.0.0-rc.4 | 四平台可重复原生产品旅程 harness 候选 | 发布运行在 validate 阶段失败，未生成安装包；保留 tag 和运行用于审计。 |
+| 1.0.0-rc.5 | 发布检出修复候选 | 当前候选；从零执行四平台构建、原生旅程与最终发布证据。 |
 
 ## 0.10.x 到 0.11.x：阅读工作流建立
 
@@ -57,6 +58,12 @@ R4 的三类真实项目人工使用验收已经完成并通过。当前未完�
 rc.4 将经独立监督的 Windows/Linux 原生旅程驱动纳入新候选。Linux 与 Windows harness 的静态候选均已通过 Sol `high` 监督，但四个平台尚未基于 rc.4 tag 实际执行，不能写成四平台旅程已通过。R4 small、frontend、fullstack 三项目的维护者人工可用性已经通过；当前仅 rc.4 的四平台 OS 级 native journey 与最终发布证据未完成。
 
 `rc.3` draft 已完成的十包和四份 package smoke 只属于 rc.3，不复用于 rc.4。rc.4 必须从同一新 commit/tag 重新生成十包、四份 package smoke、四份 native journey、`SHA256SUMS`、SPDX SBOM 与 artifact attestations；取得这些证据及维护者发布批准前，R5 仍未 `PASS`。
+
+rc.4 的 Production Release run `31654257774` 在 validate 阶段因浅检出缺少固定历史 schema 对象而失败。该运行未启动四平台构建，未生成安装包、package smoke、native journey 或最终发布证据；rc.4 tag 与失败运行保留用于审计，但任何结果均不得复用于后续候选。
+
+## 1.0.0-rc.5：发布检出修复候选
+
+rc.5 修正发布验证所需的历史对象检出边界，并以新的不可变 commit/tag 从零执行。R4 的维护者人工可用性验收仍已通过；当前仅 rc.5 的四平台 OS 级 native journey 与最终发布证据未完成。rc.5 必须重新生成十包、四份 package smoke、四份 native journey、`SHA256SUMS`、SPDX SBOM 与 artifact attestations，不能继承 rc.4 的失败运行。
 
 ## 升级与数据兼容性
 
